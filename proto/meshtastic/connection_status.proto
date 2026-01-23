@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package meshtastic;
+
+option java_package = "com.geeksville.mesh";
+option java_outer_classname = "ConnectionStatusProtos";
+
+message DeviceConnectionStatus {
+    WiFiConnectionStatus wifi = 1;
+    EthConnectionStatus ethernet = 2;
+    BluetoothConnectionStatus bluetooth = 3;
+    SerialConnectionStatus serial = 4;
+}
+
+message WiFiConnectionStatus {
+    ConnectionStatus status = 1;
+    string ssid = 2;
+    int32 rssi = 3;
+    fixed32 ip = 4;
+}
+
+message EthConnectionStatus {
+    ConnectionStatus status = 1;
+    fixed32 ip = 2;
+}
+
+message BluetoothConnectionStatus {
+    uint32 pin = 1;
+    int32 rssi = 2;
+    bool is_connected = 3;
+}
+
+message SerialConnectionStatus {
+    uint32 baud = 1;
+    bool is_connected = 2;
+}
+
+message ConnectionStatus {
+    bool is_connected = 1;
+    int32 ip_address = 2;
+    bool is_mqtt_connected = 3;
+    bool is_syslog_connected = 4;
+}

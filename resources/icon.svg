@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#2d5a27"/>
+
+  <!-- Mesh network nodes -->
+  <!-- Center node -->
+  <circle cx="64" cy="64" r="12" fill="#67b26f"/>
+  <circle cx="64" cy="64" r="8" fill="#fff"/>
+
+  <!-- Outer nodes -->
+  <circle cx="32" cy="40" r="8" fill="#67b26f"/>
+  <circle cx="32" cy="40" r="5" fill="#fff"/>
+
+  <circle cx="96" cy="40" r="8" fill="#67b26f"/>
+  <circle cx="96" cy="40" r="5" fill="#fff"/>
+
+  <circle cx="32" cy="88" r="8" fill="#67b26f"/>
+  <circle cx="32" cy="88" r="5" fill="#fff"/>
+
+  <circle cx="96" cy="88" r="8" fill="#67b26f"/>
+  <circle cx="96" cy="88" r="5" fill="#fff"/>
+
+  <circle cx="64" cy="24" r="6" fill="#67b26f"/>
+  <circle cx="64" cy="24" r="3" fill="#fff"/>
+
+  <circle cx="64" cy="104" r="6" fill="#67b26f"/>
+  <circle cx="64" cy="104" r="3" fill="#fff"/>
+
+  <!-- Mesh connections -->
+  <g stroke="#67b26f" stroke-width="2" opacity="0.8">
+    <line x1="64" y1="64" x2="32" y2="40"/>
+    <line x1="64" y1="64" x2="96" y2="40"/>
+    <line x1="64" y1="64" x2="32" y2="88"/>
+    <line x1="64" y1="64" x2="96" y2="88"/>
+    <line x1="64" y1="64" x2="64" y2="24"/>
+    <line x1="64" y1="64" x2="64" y2="104"/>
+    <line x1="32" y1="40" x2="96" y2="40"/>
+    <line x1="32" y1="88" x2="96" y2="88"/>
+    <line x1="32" y1="40" x2="32" y2="88"/>
+    <line x1="96" y1="40" x2="96" y2="88"/>
+  </g>
+
+  <!-- Radio waves from center -->
+  <g fill="none" stroke="#fff" stroke-width="2" opacity="0.6">
+    <path d="M 50 50 A 20 20 0 0 1 50 78"/>
+    <path d="M 78 50 A 20 20 0 0 0 78 78"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="1.5" opacity="0.4">
+    <path d="M 44 44 A 28 28 0 0 1 44 84"/>
+    <path d="M 84 44 A 28 28 0 0 0 84 84"/>
+  </g>
+</svg>

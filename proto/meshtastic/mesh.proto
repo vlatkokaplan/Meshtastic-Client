@@ -1,0 +1,244 @@
+syntax = "proto3";
+
+package meshtastic;
+
+option java_package = "com.geeksville.mesh";
+option java_outer_classname = "MeshProtos";
+
+import "meshtastic/portnums.proto";
+import "meshtastic/telemetry.proto";
+import "meshtastic/config.proto";
+import "meshtastic/module_config.proto";
+import "meshtastic/channel.proto";
+
+enum HardwareModel {
+    UNSET = 0;
+    TLORA_V2 = 1;
+    TLORA_V1 = 2;
+    TLORA_V2_1_1P6 = 3;
+    TBEAM = 4;
+    HELTEC_V2_0 = 5;
+    TBEAM_V0P7 = 6;
+    T_ECHO = 7;
+    TLORA_V1_1P3 = 8;
+    RAK4631 = 9;
+    HELTEC_V2_1 = 10;
+    HELTEC_V1 = 11;
+    LILYGO_TBEAM_S3_CORE = 12;
+    RAK11200 = 13;
+    NANO_G1 = 14;
+    TLORA_V2_1_1P8 = 15;
+    TLORA_T3_S3 = 16;
+    NANO_G1_EXPLORER = 17;
+    NANO_G2_ULTRA = 18;
+    LORA_TYPE = 19;
+    WIPHONE = 20;
+    WIO_WM1110 = 21;
+    RAK2560 = 22;
+    HELTEC_HRU_3601 = 23;
+    STATION_G1 = 25;
+    RAK11310 = 26;
+    SENSELORA_RP2040 = 29;
+    SENSELORA_S3 = 30;
+    CANARYONE = 32;
+    RP2040_LORA = 33;
+    STATION_G2 = 34;
+    LORA_RELAY_V1 = 35;
+    NRF52840DK = 36;
+    PPR = 37;
+    GENIEBLOCKS = 38;
+    NRF52_UNKNOWN = 39;
+    PORTDUINO = 40;
+    ANDROID_SIM = 41;
+    DIY_V1 = 42;
+    NRF52840_PCA10059 = 43;
+    DR_DEV = 44;
+    M5STACK = 45;
+    HELTEC_V3 = 46;
+    HELTEC_WSL_V3 = 47;
+    BETAFPV_2400_TX = 48;
+    BETAFPV_900_NANO_TX = 49;
+    RPI_PICO = 50;
+    HELTEC_WIRELESS_TRACKER = 51;
+    HELTEC_WIRELESS_PAPER = 52;
+    T_DECK = 53;
+    T_WATCH_S3 = 54;
+    PICOMPUTER_S3 = 55;
+    HELTEC_HT62 = 56;
+    EBYTE_ESP32_S3 = 57;
+    ESP32_S3_PICO = 58;
+    CHATTER_2 = 59;
+    HELTEC_WIRELESS_PAPER_V1_0 = 60;
+    HELTEC_WIRELESS_TRACKER_V1_0 = 61;
+    PRIVATE_HW = 255;
+}
+
+message Position {
+    sfixed32 latitude_i = 1;
+    sfixed32 longitude_i = 2;
+    int32 altitude = 3;
+    fixed32 time = 4;
+    uint32 location_source = 5;
+    uint32 altitude_source = 6;
+    fixed32 timestamp = 7;
+    int32 timestamp_millis_adjust = 8;
+    sint32 altitude_hae = 9;
+    sint32 altitude_geoidal_separation = 10;
+    uint32 PDOP = 11;
+    uint32 HDOP = 12;
+    uint32 VDOP = 13;
+    uint32 gps_accuracy = 14;
+    uint32 ground_speed = 15;
+    uint32 ground_track = 16;
+    uint32 fix_quality = 17;
+    uint32 fix_type = 18;
+    uint32 sats_in_view = 19;
+    uint32 sensor_id = 20;
+    uint32 next_update = 21;
+    uint32 seq_number = 22;
+    uint32 precision_bits = 23;
+}
+
+message User {
+    string id = 1;
+    string long_name = 2;
+    string short_name = 3;
+    bytes macaddr = 4;
+    HardwareModel hw_model = 5;
+    bool is_licensed = 6;
+    uint32 role = 7;
+}
+
+message RouteDiscovery {
+    repeated fixed32 route = 1;
+}
+
+enum Routing_Error {
+    NONE = 0;
+    NO_ROUTE = 1;
+    GOT_NAK = 2;
+    TIMEOUT = 3;
+    NO_INTERFACE = 4;
+    MAX_RETRANSMIT = 5;
+    NO_CHANNEL = 6;
+    TOO_LARGE = 7;
+    NO_RESPONSE = 8;
+    DUTY_CYCLE_LIMIT = 9;
+    BAD_REQUEST = 32;
+    NOT_AUTHORIZED = 33;
+}
+
+message Routing {
+    oneof variant {
+        RouteDiscovery route_request = 1;
+        RouteDiscovery route_reply = 2;
+        Routing_Error error_reason = 3;
+    }
+}
+
+message Data {
+    PortNum portnum = 1;
+    bytes payload = 2;
+    bool want_response = 3;
+    fixed32 dest = 4;
+    fixed32 source = 5;
+    fixed32 request_id = 6;
+    fixed32 reply_id = 7;
+    uint32 emoji = 8;
+}
+
+message MeshPacket {
+    fixed32 from = 1;
+    fixed32 to = 2;
+    uint32 channel = 3;
+
+    oneof payload_variant {
+        Data decoded = 4;
+        bytes encrypted = 5;
+    }
+
+    fixed32 id = 6;
+    fixed32 rx_time = 7;
+    float rx_snr = 8;
+    uint32 hop_limit = 9;
+    bool want_ack = 10;
+    uint32 priority = 11;
+    int32 rx_rssi = 12;
+    uint32 delayed = 13;
+    bool via_mqtt = 14;
+    uint32 hop_start = 15;
+}
+
+message NodeInfo {
+    uint32 num = 1;
+    User user = 2;
+    Position position = 3;
+    float snr = 4;
+    fixed32 last_heard = 5;
+    DeviceMetrics device_metrics = 6;
+    uint32 channel = 7;
+    bool via_mqtt = 8;
+    uint32 hops_away = 9;
+    bool is_favorite = 10;
+}
+
+message MyNodeInfo {
+    uint32 my_node_num = 1;
+    bool has_gps = 2;
+    uint32 max_channels = 3;
+    string firmware_version = 4;
+    uint32 error_code = 5;
+    uint32 error_address = 6;
+    uint32 error_count = 7;
+    uint32 reboot_count = 8;
+    uint32 bitrate = 9;
+    uint32 message_timeout_msec = 10;
+    uint32 min_app_version = 11;
+    uint32 max_channels_real = 12;
+}
+
+message DeviceMetadata {
+    string firmware_version = 1;
+    uint32 device_state_version = 2;
+    bool can_shutdown = 3;
+    bool has_wifi = 4;
+    bool has_bluetooth = 5;
+    bool has_ethernet = 6;
+    uint32 role = 7;
+    uint32 position_flags = 8;
+    HardwareModel hw_model = 9;
+    bool has_remote_hardware = 10;
+}
+
+message QueueStatus {
+    int32 res = 1;
+    uint32 free = 2;
+    uint32 maxlen = 3;
+    uint32 mesh_packet_id = 4;
+}
+
+message FromRadio {
+    uint32 id = 1;
+
+    oneof payload_variant {
+        MeshPacket packet = 2;
+        MyNodeInfo my_info = 3;
+        NodeInfo node_info = 4;
+        Channel channel = 5;
+        Config config = 6;
+        ModuleConfig moduleConfig = 7;
+        QueueStatus queueStatus = 11;
+        DeviceMetadata metadata = 13;
+    }
+}
+
+message ToRadio {
+    oneof payload_variant {
+        MeshPacket packet = 1;
+        uint32 want_config_id = 3;
+        bool disconnect = 4;
+        bytes xmodemPacket = 5;
+        string mqttClientProxyMessage = 6;
+        int64 heartbeat = 7;
+    }
+}

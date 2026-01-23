@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package meshtastic;
+
+option java_package = "com.geeksville.mesh";
+option java_outer_classname = "PaxcountProtos";
+
+message Paxcount {
+    uint32 wifi = 1;
+    uint32 ble = 2;
+    uint32 uptime = 3;
+}

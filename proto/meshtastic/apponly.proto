@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package meshtastic;
+
+import "meshtastic/channel.proto";
+import "meshtastic/config.proto";
+
+option java_package = "com.geeksville.mesh";
+option java_outer_classname = "AppOnlyProtos";
+
+message ChannelSet {
+    repeated ChannelSettings settings = 1;
+    Config.LoRaConfig lora_config = 2;
+}

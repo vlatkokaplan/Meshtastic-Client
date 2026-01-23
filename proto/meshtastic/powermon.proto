@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package meshtastic;
+
+option java_package = "com.geeksville.mesh";
+option java_outer_classname = "PowerMon";
+
+enum PowerMon_State {
+    None = 0;
+    CPU_DeepSleep = 1;
+    CPU_LightSleep = 2;
+    Lora_RXActive = 4;
+    Lora_TXActive = 8;
+    Lora_RXIdle = 16;
+    BT_On = 32;
+    LED_On = 64;
+    Screen_On = 128;
+    Screen_Drawing = 256;
+    Wifi_On = 512;
+    GPS_Active = 1024;
+}
+
+message PowerStressMessage {
+    enum Opcode {
+        UNSET = 0;
+        PRINT_INFO = 1;
+        FORCE_QUIET = 2;
+        END_QUIET = 3;
+        SCREEN_ON = 16;
+        SCREEN_OFF = 17;
+        CPU_DEEPSLEEP = 32;
+        CPU_LIGHTSLEEP = 33;
+        CPU_FULLON = 34;
+        LED_ON = 48;
+        LED_OFF = 49;
+        LORA_OFF = 64;
+        LORA_TX = 65;
+        LORA_RX = 66;
+        BT_OFF = 80;
+        BT_ON = 81;
+        WIFI_OFF = 96;
+        WIFI_ON = 97;
+        GPS_OFF = 112;
+        GPS_ON = 113;
+    }
+
+    Opcode cmd = 1;
+    float num_seconds = 2;
+}

@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package meshtastic;
+
+option java_package = "com.geeksville.mesh";
+option java_outer_classname = "ATAKProtos";
+
+message TAKPacket {
+    bool is_compressed = 1;
+    Contact contact = 2;
+    Group group = 3;
+    Status status = 4;
+    PLI pli = 5;
+    GeoChat chat = 6;
+}
+
+message GeoChat {
+    string message = 1;
+    string to = 2;
+    string to_callsign = 3;
+}
+
+message Group {
+    MemberRole role = 1;
+    Team team = 2;
+}
+
+enum MemberRole {
+    Unspecifed = 0;
+    TeamMember = 1;
+    TeamLead = 2;
+    HQ = 3;
+    Sniper = 4;
+    Medic = 5;
+    ForwardObserver = 6;
+    RTO = 7;
+    K9 = 8;
+}
+
+enum Team {
+    Unspecifed_Color = 0;
+    White = 1;
+    Yellow = 2;
+    Orange = 3;
+    Magenta = 4;
+    Red = 5;
+    Maroon = 6;
+    Purple = 7;
+    DarkBlue = 8;
+    Blue = 9;
+    Cyan = 10;
+    Teal = 11;
+    Green = 12;
+    DarkGreen = 13;
+    Brown = 14;
+}
+
+message Status {
+    uint32 battery = 1;
+}
+
+message Contact {
+    string callsign = 1;
+    string device_callsign = 2;
+}
+
+message PLI {
+    sfixed32 latitude_i = 1;
+    sfixed32 longitude_i = 2;
+    int32 altitude = 3;
+    uint32 speed = 4;
+    uint32 course = 5;
+}

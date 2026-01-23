@@ -1,0 +1,151 @@
+syntax = "proto3";
+
+package meshtastic;
+
+option java_package = "com.geeksville.mesh";
+option java_outer_classname = "ModuleConfigProtos";
+
+message ModuleConfig {
+    message MQTTConfig {
+        bool enabled = 1;
+        string address = 2;
+        string username = 3;
+        string password = 4;
+        bool encryption_enabled = 5;
+        bool json_enabled = 6;
+        bool tls_enabled = 7;
+        string root = 8;
+        bool proxy_to_client_enabled = 9;
+        bool map_report_enabled = 10;
+    }
+
+    message SerialConfig {
+        bool enabled = 1;
+        bool echo = 2;
+        uint32 rxd = 3;
+        uint32 txd = 4;
+        uint32 baud = 5;
+        uint32 timeout = 6;
+        uint32 mode = 7;
+        bool override_console_serial_port = 8;
+    }
+
+    message ExternalNotificationConfig {
+        bool enabled = 1;
+        uint32 output_ms = 2;
+        uint32 output = 3;
+        uint32 output_vibra = 8;
+        uint32 output_buzzer = 9;
+        bool active = 4;
+        bool alert_message = 5;
+        bool alert_message_vibra = 10;
+        bool alert_message_buzzer = 11;
+        bool alert_bell = 6;
+        bool alert_bell_vibra = 12;
+        bool alert_bell_buzzer = 13;
+        bool use_pwm = 7;
+        uint32 nag_timeout = 14;
+        bool use_i2s_as_buzzer = 15;
+    }
+
+    message StoreForwardConfig {
+        bool enabled = 1;
+        bool heartbeat = 2;
+        uint32 records = 3;
+        uint32 history_return_max = 4;
+        uint32 history_return_window = 5;
+    }
+
+    message RangeTestConfig {
+        bool enabled = 1;
+        uint32 sender = 2;
+        bool save = 3;
+    }
+
+    message TelemetryConfig {
+        uint32 device_update_interval = 1;
+        uint32 environment_update_interval = 2;
+        uint32 environment_measurement_enabled = 3;
+        bool environment_screen_enabled = 4;
+        uint32 environment_display_fahrenheit = 5;
+        uint32 air_quality_interval = 6;
+        bool air_quality_enabled = 7;
+        bool power_measurement_enabled = 8;
+        uint32 power_update_interval = 9;
+        bool power_screen_enabled = 10;
+    }
+
+    message CannedMessageConfig {
+        bool rotary1_enabled = 1;
+        uint32 inputbroker_pin_a = 2;
+        uint32 inputbroker_pin_b = 3;
+        uint32 inputbroker_pin_press = 4;
+        uint32 inputbroker_event_cw = 5;
+        uint32 inputbroker_event_ccw = 6;
+        uint32 inputbroker_event_press = 7;
+        bool updown1_enabled = 8;
+        bool enabled = 9;
+        string allow_input_source = 10;
+        bool send_bell = 11;
+    }
+
+    message AudioConfig {
+        bool codec2_enabled = 1;
+        uint32 ptt_pin = 2;
+        uint32 bitrate = 3;
+        uint32 i2s_ws = 4;
+        uint32 i2s_sd = 5;
+        uint32 i2s_din = 6;
+        uint32 i2s_sck = 7;
+    }
+
+    message RemoteHardwareConfig {
+        bool enabled = 1;
+        bool allow_undefined_pin_access = 2;
+    }
+
+    message NeighborInfoConfig {
+        bool enabled = 1;
+        uint32 update_interval = 2;
+    }
+
+    message DetectionSensorConfig {
+        bool enabled = 1;
+        uint32 minimum_broadcast_secs = 2;
+        uint32 state_broadcast_secs = 3;
+        bool send_bell = 4;
+        string name = 5;
+        uint32 monitor_pin = 6;
+        bool detection_triggered_high = 7;
+        bool use_pullup = 8;
+    }
+
+    message AmbientLightingConfig {
+        bool led_state = 1;
+        uint32 current = 2;
+        uint32 red = 3;
+        uint32 green = 4;
+        uint32 blue = 5;
+    }
+
+    message PaxcounterConfig {
+        bool enabled = 1;
+        uint32 paxcounter_update_interval = 2;
+    }
+
+    oneof payload_variant {
+        MQTTConfig mqtt = 1;
+        SerialConfig serial = 2;
+        ExternalNotificationConfig external_notification = 3;
+        StoreForwardConfig store_forward = 4;
+        RangeTestConfig range_test = 5;
+        TelemetryConfig telemetry = 6;
+        CannedMessageConfig canned_message = 7;
+        AudioConfig audio = 8;
+        RemoteHardwareConfig remote_hardware = 9;
+        NeighborInfoConfig neighbor_info = 10;
+        DetectionSensorConfig detection_sensor = 11;
+        AmbientLightingConfig ambient_lighting = 12;
+        PaxcounterConfig paxcounter = 13;
+    }
+}

@@ -463,3 +463,127 @@ QString MeshtasticProtocol::packetTypeToString(PacketType type)
     default: return "Unknown";
     }
 }
+
+QByteArray MeshtasticProtocol::createTraceroutePacket(uint32_t destNode, uint32_t myNode)
+{
+    meshtastic::ToRadio toRadio;
+    auto *packet = toRadio.mutable_packet();
+
+    packet->set_to(destNode);
+    packet->set_from(myNode);
+    packet->set_want_ack(true);
+    packet->set_id(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF);
+
+    auto *decoded = packet->mutable_decoded();
+    decoded->set_portnum(meshtastic::PortNum::TRACEROUTE_APP);
+
+    // Empty RouteDiscovery as payload
+    meshtastic::RouteDiscovery route;
+    decoded->set_payload(route.SerializeAsString());
+    decoded->set_want_response(true);
+
+    std::string serialized;
+    toRadio.SerializeToString(&serialized);
+
+    QByteArray frame;
+    frame.append(static_cast<char>(SYNC_BYTE_1));
+    frame.append(static_cast<char>(SYNC_BYTE_2));
+    frame.append(static_cast<char>((serialized.size() >> 8) & 0xFF));
+    frame.append(static_cast<char>(serialized.size() & 0xFF));
+    frame.append(QByteArray::fromStdString(serialized));
+
+    return frame;
+}
+
+QByteArray MeshtasticProtocol::createPositionRequestPacket(uint32_t destNode, uint32_t myNode)
+{
+    meshtastic::ToRadio toRadio;
+    auto *packet = toRadio.mutable_packet();
+
+    packet->set_to(destNode);
+    packet->set_from(myNode);
+    packet->set_want_ack(true);
+    packet->set_id(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF);
+
+    auto *decoded = packet->mutable_decoded();
+    decoded->set_portnum(meshtastic::PortNum::POSITION_APP);
+    decoded->set_want_response(true);
+
+    // Empty position as request
+    meshtastic::Position pos;
+    decoded->set_payload(pos.SerializeAsString());
+
+    std::string serialized;
+    toRadio.SerializeToString(&serialized);
+
+    QByteArray frame;
+    frame.append(static_cast<char>(SYNC_BYTE_1));
+    frame.append(static_cast<char>(SYNC_BYTE_2));
+    frame.append(static_cast<char>((serialized.size() >> 8) & 0xFF));
+    frame.append(static_cast<char>(serialized.size() & 0xFF));
+    frame.append(QByteArray::fromStdString(serialized));
+
+    return frame;
+}
+
+QByteArray MeshtasticProtocol::createTelemetryRequestPacket(uint32_t destNode, uint32_t myNode)
+{
+    meshtastic::ToRadio toRadio;
+    auto *packet = toRadio.mutable_packet();
+
+    packet->set_to(destNode);
+    packet->set_from(myNode);
+    packet->set_want_ack(true);
+    packet->set_id(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF);
+
+    auto *decoded = packet->mutable_decoded();
+    decoded->set_portnum(meshtastic::PortNum::TELEMETRY_APP);
+    decoded->set_want_response(true);
+
+    // Empty telemetry as request
+    meshtastic::Telemetry telem;
+    decoded->set_payload(telem.SerializeAsString());
+
+    std::string serialized;
+    toRadio.SerializeToString(&serialized);
+
+    QByteArray frame;
+    frame.append(static_cast<char>(SYNC_BYTE_1));
+    frame.append(static_cast<char>(SYNC_BYTE_2));
+    frame.append(static_cast<char>((serialized.size() >> 8) & 0xFF));
+    frame.append(static_cast<char>(serialized.size() & 0xFF));
+    frame.append(QByteArray::fromStdString(serialized));
+
+    return frame;
+}
+
+QByteArray MeshtasticProtocol::createNodeInfoRequestPacket(uint32_t destNode, uint32_t myNode)
+{
+    meshtastic::ToRadio toRadio;
+    auto *packet = toRadio.mutable_packet();
+
+    packet->set_to(destNode);
+    packet->set_from(myNode);
+    packet->set_want_ack(true);
+    packet->set_id(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF);
+
+    auto *decoded = packet->mutable_decoded();
+    decoded->set_portnum(meshtastic::PortNum::NODEINFO_APP);
+    decoded->set_want_response(true);
+
+    // Empty user as request
+    meshtastic::User user;
+    decoded->set_payload(user.SerializeAsString());
+
+    std::string serialized;
+    toRadio.SerializeToString(&serialized);
+
+    QByteArray frame;
+    frame.append(static_cast<char>(SYNC_BYTE_1));
+    frame.append(static_cast<char>(SYNC_BYTE_2));
+    frame.append(static_cast<char>((serialized.size() >> 8) & 0xFF));
+    frame.append(static_cast<char>(serialized.size() & 0xFF));
+    frame.append(QByteArray::fromStdString(serialized));
+
+    return frame;
+}

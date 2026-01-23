@@ -9,6 +9,7 @@
 #include <QComboBox>
 #include <QLabel>
 #include <QSplitter>
+#include <QDateTime>
 
 class NodeManager;
 class Database;
@@ -66,6 +67,7 @@ private:
 
     void setupUI();
     void updateMessageDisplay();
+    void updateStatusLabel();
     QString formatMessage(const ChatMessage &msg);
     QString getNodeName(uint32_t nodeNum);
     bool isDuplicate(const ChatMessage &msg);

@@ -15,6 +15,7 @@ class SerialConnection;
 class NodeManager;
 class PacketListWidget;
 class Database;
+class MessagesWidget;
 
 class MapWidget;
 
@@ -36,7 +37,12 @@ private slots:
     void onPacketReceived(const MeshtasticProtocol::DecodedPacket &packet);
     void onSerialError(const QString &error);
     void onNodeSelected(QListWidgetItem *item);
+    void onNodeContextMenu(const QPoint &pos);
     void requestConfig();
+    void requestTraceroute(uint32_t nodeNum);
+    void requestNodeInfo(uint32_t nodeNum);
+    void requestTelemetry(uint32_t nodeNum);
+    void requestPosition(uint32_t nodeNum);
 
 private:
     // Core components
@@ -54,12 +60,14 @@ private:
     QLabel *m_statusLabel;
     PacketListWidget *m_packetList;
     QListWidget *m_nodeList;
+    MessagesWidget *m_messagesWidget;
 
     MapWidget *m_mapWidget;
 
     void setupUI();
     void setupToolbar();
     void setupMapTab();
+    void setupMessagesTab();
     void setupPacketTab();
     void updateNodeList();
     void updateStatusLabel();

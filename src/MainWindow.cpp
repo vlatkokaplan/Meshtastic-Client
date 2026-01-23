@@ -4,6 +4,7 @@
 #include "NodeManager.h"
 #include "PacketListWidget.h"
 #include "Database.h"
+#include "MessagesWidget.h"
 
 #include "MapWidget.h"
 
@@ -16,6 +17,7 @@
 #include <QDebug>
 #include <QStandardPaths>
 #include <QDir>
+#include <QMenu>
 #include <algorithm>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -27,6 +29,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_database = nullptr;  // Database opened after connection with device-specific path
 
     m_mapWidget = nullptr;
+    m_messagesWidget = nullptr;
 
     setupUI();
 
@@ -71,6 +74,7 @@ void MainWindow::setupUI()
     setCentralWidget(m_tabWidget);
 
     setupMapTab();
+    setupMessagesTab();
     setupPacketTab();
 
     // Status bar
@@ -136,8 +140,12 @@ void MainWindow::setupMapTab()
 
     m_nodeList = new QListWidget;
     m_nodeList->setMinimumWidth(200);
+    m_nodeList->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_nodeList->setMouseTracking(true);
     connect(m_nodeList, &QListWidget::itemClicked,
             this, &MainWindow::onNodeSelected);
+    connect(m_nodeList, &QListWidget::customContextMenuRequested,
+            this, &MainWindow::onNodeContextMenu);
     sidebarLayout->addWidget(m_nodeList);
 
     splitter->addWidget(sidebar);
@@ -145,6 +153,12 @@ void MainWindow::setupMapTab()
 
     layout->addWidget(splitter);
     m_tabWidget->addTab(mapTab, "Map");
+}
+
+void MainWindow::setupMessagesTab()
+{
+    m_messagesWidget = new MessagesWidget(m_nodeManager);
+    m_tabWidget->addTab(m_messagesWidget, "Messages");
 }
 
 void MainWindow::setupPacketTab()
@@ -307,6 +321,58 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             m_nodeManager->updateNodeTelemetry(packet.from, packet.fields);
             break;
 
+        case MeshtasticProtocol::PortNum::TextMessage:
+            if (m_messagesWidget && packet.fields.contains("text")) {
+                ChatMessage msg;
+                msg.fromNode = packet.from;
+                msg.toNode = packet.to;
+                msg.text = packet.fields["text"].toString();
+                msg.channelIndex = packet.fields.value("channel", 0).toInt();
+                msg.timestamp = QDateTime::currentDateTime();
+                msg.packetId = packet.fields.value("id", 0).toUInt();
+                m_messagesWidget->addMessage(msg);
+            }
+            break;
+
+        case MeshtasticProtocol::PortNum::Traceroute:
+            if (packet.fields.contains("route")) {
+                QVariantList route = packet.fields["route"].toList();
+                QStringList routeNames;
+
+                // Add source node
+                NodeInfo fromNode = m_nodeManager->getNode(packet.from);
+                QString fromName = fromNode.longName.isEmpty() ?
+                    MeshtasticProtocol::nodeIdToString(packet.from) : fromNode.longName;
+                routeNames << fromName;
+
+                // Add intermediate hops
+                for (const QVariant &nodeVar : route) {
+                    QString nodeId = nodeVar.toString();
+                    // Try to find node name
+                    bool ok;
+                    uint32_t nodeNum = nodeId.mid(1).toUInt(&ok, 16);
+                    if (ok) {
+                        NodeInfo hopNode = m_nodeManager->getNode(nodeNum);
+                        if (!hopNode.longName.isEmpty()) {
+                            routeNames << hopNode.longName;
+                        } else {
+                            routeNames << nodeId;
+                        }
+                    } else {
+                        routeNames << nodeId;
+                    }
+                }
+
+                QString routeStr = routeNames.join(" -> ");
+                QString message = QString("Traceroute: %1 (%2 hops)")
+                    .arg(routeStr)
+                    .arg(route.size());
+
+                QMessageBox::information(this, "Traceroute Result", message);
+                statusBar()->showMessage(message, 10000);
+            }
+            break;
+
         default:
             break;
         }
@@ -405,6 +471,32 @@ void MainWindow::updateNodeList()
         QListWidgetItem *item = new QListWidgetItem(label);
         item->setData(Qt::UserRole, node.nodeNum);
 
+        // Build tooltip with detailed info
+        QStringList tooltipLines;
+        if (!node.longName.isEmpty()) tooltipLines << QString("Name: %1").arg(node.longName);
+        if (!node.shortName.isEmpty()) tooltipLines << QString("Short: %1").arg(node.shortName);
+        tooltipLines << QString("ID: %1").arg(node.nodeId);
+        if (!node.hwModel.isEmpty()) tooltipLines << QString("Hardware: %1").arg(node.hwModel);
+
+        if (node.hasPosition) {
+            tooltipLines << QString("Position: %1, %2").arg(node.latitude, 0, 'f', 5).arg(node.longitude, 0, 'f', 5);
+            if (node.altitude != 0) tooltipLines << QString("Altitude: %1m").arg(node.altitude);
+        }
+
+        if (node.batteryLevel > 0) tooltipLines << QString("Battery: %1%").arg(node.batteryLevel);
+        if (node.voltage > 0) tooltipLines << QString("Voltage: %1V").arg(node.voltage, 0, 'f', 2);
+        if (node.snr != 0) tooltipLines << QString("SNR: %1 dB").arg(node.snr, 0, 'f', 1);
+        if (node.rssi != 0) tooltipLines << QString("RSSI: %1 dBm").arg(node.rssi);
+        if (node.hopsAway >= 0) tooltipLines << QString("Hops: %1").arg(node.hopsAway);
+        if (node.channelUtilization > 0) tooltipLines << QString("Channel util: %1%").arg(node.channelUtilization, 0, 'f', 1);
+        if (node.airUtilTx > 0) tooltipLines << QString("Air util TX: %1%").arg(node.airUtilTx, 0, 'f', 1);
+
+        if (node.lastHeard.isValid()) {
+            tooltipLines << QString("Last heard: %1").arg(node.lastHeard.toString("yyyy-MM-dd hh:mm:ss"));
+        }
+
+        item->setToolTip(tooltipLines.join("\n"));
+
         // Color code by recency
         if (node.lastHeard.isValid()) {
             qint64 secsAgo = node.lastHeard.secsTo(QDateTime::currentDateTime());
@@ -453,6 +545,12 @@ void MainWindow::openDatabaseForNode(uint32_t nodeNum)
     if (m_database->open(dbPath)) {
         m_nodeManager->setDatabase(m_database);
         m_nodeManager->loadFromDatabase();
+
+        if (m_messagesWidget) {
+            m_messagesWidget->setDatabase(m_database);
+            m_messagesWidget->loadFromDatabase();
+        }
+
         statusBar()->showMessage(QString("Database loaded: %1 nodes").arg(m_database->nodeCount()), 3000);
     } else {
         statusBar()->showMessage("Failed to open database", 5000);
@@ -471,4 +569,125 @@ void MainWindow::closeDatabase()
 
     m_nodeManager->setDatabase(nullptr);
     m_nodeManager->clear();
+
+    if (m_messagesWidget) {
+        m_messagesWidget->setDatabase(nullptr);
+        m_messagesWidget->clear();
+    }
+}
+
+void MainWindow::onNodeContextMenu(const QPoint &pos)
+{
+    QListWidgetItem *item = m_nodeList->itemAt(pos);
+    if (!item) return;
+
+    uint32_t nodeNum = item->data(Qt::UserRole).toUInt();
+    NodeInfo node = m_nodeManager->getNode(nodeNum);
+
+    QMenu menu(this);
+
+    // Node info header
+    QString nodeName = node.longName.isEmpty() ? node.shortName : node.longName;
+    if (nodeName.isEmpty()) nodeName = node.nodeId;
+    QAction *headerAction = menu.addAction(nodeName);
+    headerAction->setEnabled(false);
+    QFont boldFont = headerAction->font();
+    boldFont.setBold(true);
+    headerAction->setFont(boldFont);
+
+    menu.addSeparator();
+
+    QAction *tracerouteAction = menu.addAction("Traceroute");
+    tracerouteAction->setIcon(QIcon::fromTheme("network-wired"));
+
+    QAction *nodeInfoAction = menu.addAction("Request Node Info");
+    nodeInfoAction->setIcon(QIcon::fromTheme("user-identity"));
+
+    QAction *telemetryAction = menu.addAction("Request Telemetry");
+    telemetryAction->setIcon(QIcon::fromTheme("utilities-system-monitor"));
+
+    QAction *positionAction = menu.addAction("Request Position");
+    positionAction->setIcon(QIcon::fromTheme("find-location"));
+
+    menu.addSeparator();
+
+    QAction *centerMapAction = menu.addAction("Center on Map");
+    centerMapAction->setIcon(QIcon::fromTheme("zoom-fit-best"));
+    centerMapAction->setEnabled(node.hasPosition);
+
+    // Execute menu
+    QAction *selectedAction = menu.exec(m_nodeList->mapToGlobal(pos));
+
+    if (selectedAction == tracerouteAction) {
+        requestTraceroute(nodeNum);
+    } else if (selectedAction == nodeInfoAction) {
+        requestNodeInfo(nodeNum);
+    } else if (selectedAction == telemetryAction) {
+        requestTelemetry(nodeNum);
+    } else if (selectedAction == positionAction) {
+        requestPosition(nodeNum);
+    } else if (selectedAction == centerMapAction && node.hasPosition) {
+        m_mapWidget->centerOnLocation(node.latitude, node.longitude);
+        m_mapWidget->setZoomLevel(15);
+        m_mapWidget->selectNode(nodeNum);
+        m_tabWidget->setCurrentIndex(0);  // Switch to map tab
+    }
+}
+
+void MainWindow::requestTraceroute(uint32_t nodeNum)
+{
+    if (!m_serial->isConnected()) {
+        statusBar()->showMessage("Not connected", 3000);
+        return;
+    }
+
+    uint32_t myNode = m_nodeManager->myNodeNum();
+    QByteArray packet = m_protocol->createTraceroutePacket(nodeNum, myNode);
+    m_serial->sendData(packet);
+
+    NodeInfo node = m_nodeManager->getNode(nodeNum);
+    QString name = node.longName.isEmpty() ? node.nodeId : node.longName;
+    statusBar()->showMessage(QString("Traceroute request sent to %1...").arg(name), 5000);
+}
+
+void MainWindow::requestNodeInfo(uint32_t nodeNum)
+{
+    if (!m_serial->isConnected()) {
+        statusBar()->showMessage("Not connected", 3000);
+        return;
+    }
+
+    uint32_t myNode = m_nodeManager->myNodeNum();
+    QByteArray packet = m_protocol->createNodeInfoRequestPacket(nodeNum, myNode);
+    m_serial->sendData(packet);
+
+    statusBar()->showMessage("Node info request sent...", 3000);
+}
+
+void MainWindow::requestTelemetry(uint32_t nodeNum)
+{
+    if (!m_serial->isConnected()) {
+        statusBar()->showMessage("Not connected", 3000);
+        return;
+    }
+
+    uint32_t myNode = m_nodeManager->myNodeNum();
+    QByteArray packet = m_protocol->createTelemetryRequestPacket(nodeNum, myNode);
+    m_serial->sendData(packet);
+
+    statusBar()->showMessage("Telemetry request sent...", 3000);
+}
+
+void MainWindow::requestPosition(uint32_t nodeNum)
+{
+    if (!m_serial->isConnected()) {
+        statusBar()->showMessage("Not connected", 3000);
+        return;
+    }
+
+    uint32_t myNode = m_nodeManager->myNodeNum();
+    QByteArray packet = m_protocol->createPositionRequestPacket(nodeNum, myNode);
+    m_serial->sendData(packet);
+
+    statusBar()->showMessage("Position request sent...", 3000);
 }

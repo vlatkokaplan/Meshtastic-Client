@@ -77,6 +77,7 @@ set(SOURCES
     src/NodeManager.cpp
     src/MapWidget.cpp
     src/Database.cpp
+    src/MessagesWidget.cpp
 )
 
 set(HEADERS
@@ -87,6 +88,7 @@ set(HEADERS
     src/NodeManager.h
     src/MapWidget.h
     src/Database.h
+    src/MessagesWidget.h
 )
 
 # Resources

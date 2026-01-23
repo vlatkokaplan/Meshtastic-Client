@@ -90,6 +90,10 @@ public:
 
     // Create a ToRadio packet for sending
     QByteArray createWantConfigPacket(uint32_t configId);
+    QByteArray createTraceroutePacket(uint32_t destNode, uint32_t myNode);
+    QByteArray createPositionRequestPacket(uint32_t destNode, uint32_t myNode);
+    QByteArray createTelemetryRequestPacket(uint32_t destNode, uint32_t myNode);
+    QByteArray createNodeInfoRequestPacket(uint32_t destNode, uint32_t myNode);
 
     // Decode helpers
     static QString nodeIdToString(uint32_t nodeId);

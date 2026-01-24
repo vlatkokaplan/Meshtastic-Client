@@ -34,6 +34,7 @@ set(PROTO_FILES
     ${PROTO_PATH}/meshtastic/config.proto
     ${PROTO_PATH}/meshtastic/module_config.proto
     ${PROTO_PATH}/meshtastic/mesh.proto
+    ${PROTO_PATH}/meshtastic/admin.proto
 )
 
 # Generate protobuf sources with proper import path
@@ -78,6 +79,14 @@ set(SOURCES
     src/MapWidget.cpp
     src/Database.cpp
     src/MessagesWidget.cpp
+    src/AppSettings.cpp
+    src/ConfigWidget.cpp
+    src/AppSettingsTab.cpp
+    src/DeviceConfig.cpp
+    src/RadioConfigTab.cpp
+    src/DeviceConfigTab.cpp
+    src/PositionConfigTab.cpp
+    src/ChannelsConfigTab.cpp
 )
 
 set(HEADERS
@@ -89,6 +98,14 @@ set(HEADERS
     src/MapWidget.h
     src/Database.h
     src/MessagesWidget.h
+    src/AppSettings.h
+    src/ConfigWidget.h
+    src/AppSettingsTab.h
+    src/DeviceConfig.h
+    src/RadioConfigTab.h
+    src/DeviceConfigTab.h
+    src/PositionConfigTab.h
+    src/ChannelsConfigTab.h
 )
 
 # Resources

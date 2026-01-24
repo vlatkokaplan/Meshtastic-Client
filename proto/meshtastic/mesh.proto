@@ -111,6 +111,9 @@ message User {
 
 message RouteDiscovery {
     repeated fixed32 route = 1;
+    repeated int32 snr_towards = 2;
+    repeated fixed32 route_back = 3;
+    repeated int32 snr_back = 4;
 }
 
 enum Routing_Error {

@@ -2,79 +2,35 @@ syntax = "proto3";
 
 package meshtastic;
 
-import "meshtastic/config.proto";
-import "meshtastic/module_config.proto";
-import "meshtastic/channel.proto";
-import "meshtastic/mesh.proto";
-
 option java_package = "com.geeksville.mesh";
 option java_outer_classname = "AdminProtos";
 
+import "meshtastic/config.proto";
+import "meshtastic/module_config.proto";
+import "meshtastic/channel.proto";
+
 message AdminMessage {
-    enum ConfigType {
-        DEVICE_CONFIG = 0;
-        POSITION_CONFIG = 1;
-        POWER_CONFIG = 2;
-        NETWORK_CONFIG = 3;
-        DISPLAY_CONFIG = 4;
-        LORA_CONFIG = 5;
-        BLUETOOTH_CONFIG = 6;
-    }
-
-    enum ModuleConfigType {
-        MQTT_CONFIG = 0;
-        SERIAL_CONFIG = 1;
-        EXTNOTIF_CONFIG = 2;
-        STOREFORWARD_CONFIG = 3;
-        RANGETEST_CONFIG = 4;
-        TELEMETRY_CONFIG = 5;
-        CANNEDMSG_CONFIG = 6;
-        AUDIO_CONFIG = 7;
-        REMOTEHARDWARE_CONFIG = 8;
-        NEIGHBORINFO_CONFIG = 9;
-        DETECTIONSENSOR_CONFIG = 10;
-        AMBIENTLIGHTING_CONFIG = 11;
-        PAXCOUNTER_CONFIG = 12;
-    }
-
     oneof payload_variant {
+        // Get commands
         uint32 get_channel_request = 1;
         Channel get_channel_response = 2;
         uint32 get_owner_request = 3;
-        User get_owner_response = 4;
-        ConfigType get_config_request = 5;
+        // User get_owner_response = 4;
+        uint32 get_config_request = 5;
         Config get_config_response = 6;
-        ModuleConfigType get_module_config_request = 7;
+        uint32 get_module_config_request = 7;
         ModuleConfig get_module_config_response = 8;
-        uint32 get_canned_message_module_messages_request = 10;
-        string get_canned_message_module_messages_response = 11;
-        uint32 get_device_metadata_request = 12;
-        DeviceMetadata get_device_metadata_response = 13;
-        uint32 get_ringtone_request = 14;
-        string get_ringtone_response = 15;
-        uint32 get_device_connection_status_request = 16;
 
+        // Set commands
         Channel set_channel = 32;
-        User set_owner = 33;
+        // User set_owner = 33;
         Config set_config = 34;
         ModuleConfig set_module_config = 35;
-        string set_canned_message_module_messages = 36;
-        string set_ringtone_message = 37;
-        bool remove_by_nodenum = 38;
-        bool set_favorite_node = 39;
-        bool remove_favorite_node = 40;
-        Position set_fixed_position = 41;
-        bool remove_fixed_position = 42;
 
-        bool begin_edit_settings = 64;
-        bool commit_edit_settings = 65;
-        bool reboot_ota_seconds = 95;
-        bool exit_simulator = 96;
-        int32 reboot_seconds = 97;
-        int32 shutdown_seconds = 98;
-        bool factory_reset = 99;
-        bool nodedb_reset = 100;
+        // Actions
+        int32 reboot_seconds = 95;
+        int32 shutdown_seconds = 96;
+        int32 factory_reset = 97;
+        int32 nodedb_reset = 98;
     }
-
-    string session_passkey = 101;
 }

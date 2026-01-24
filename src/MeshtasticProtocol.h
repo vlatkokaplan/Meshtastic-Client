@@ -94,9 +94,17 @@ public:
     QByteArray createPositionRequestPacket(uint32_t destNode, uint32_t myNode);
     QByteArray createTelemetryRequestPacket(uint32_t destNode, uint32_t myNode);
     QByteArray createNodeInfoRequestPacket(uint32_t destNode, uint32_t myNode);
+    QByteArray createTextMessagePacket(const QString &text, uint32_t destNode, uint32_t myNode, int channel = 0, uint32_t replyId = 0);
+
+    // Create admin packets for config updates
+    QByteArray createLoRaConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config);
+    QByteArray createDeviceConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config);
+    QByteArray createPositionConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config);
+    QByteArray createChannelConfigPacket(uint32_t destNode, uint32_t myNode, int channelIndex, const QVariantMap &config);
 
     // Decode helpers
     static QString nodeIdToString(uint32_t nodeId);
+    static uint32_t nodeIdFromString(const QString &nodeId);
     static QString portNumToString(PortNum portNum);
     static QString packetTypeToString(PacketType type);
 

@@ -6,7 +6,7 @@
 #include <QDebug>
 #include <QUuid>
 
-static const int SCHEMA_VERSION = 1;
+static const int SCHEMA_VERSION = 2;
 
 Database::Database(QObject *parent)
     : QObject(parent)
@@ -147,9 +147,20 @@ bool Database::createTables()
 
 bool Database::migrateSchema(int fromVersion, int toVersion)
 {
-    Q_UNUSED(fromVersion);
-    Q_UNUSED(toVersion);
-    // Future migrations go here
+    QSqlQuery query(m_db);
+
+    for (int v = fromVersion + 1; v <= toVersion; v++) {
+        switch (v) {
+        case 2:
+            // Add is_external_power column
+            if (!query.exec("ALTER TABLE nodes ADD COLUMN is_external_power INTEGER DEFAULT 0")) {
+                qWarning() << "Migration to v2 failed:" << query.lastError().text();
+                return false;
+            }
+            qDebug() << "Database migrated to schema version 2";
+            break;
+        }
+    }
     return true;
 }
 
@@ -181,12 +192,12 @@ bool Database::saveNode(const NodeInfo &node)
             node_num, node_id, long_name, short_name, hw_model,
             latitude, longitude, altitude, has_position,
             battery_level, voltage, channel_utilization, air_util_tx,
-            snr, rssi, hops_away, last_heard, first_seen, updated_at
+            snr, rssi, hops_away, is_external_power, last_heard, first_seen, updated_at
         ) VALUES (
             :node_num, :node_id, :long_name, :short_name, :hw_model,
             :latitude, :longitude, :altitude, :has_position,
             :battery_level, :voltage, :channel_utilization, :air_util_tx,
-            :snr, :rssi, :hops_away, :last_heard,
+            :snr, :rssi, :hops_away, :is_external_power, :last_heard,
             COALESCE((SELECT first_seen FROM nodes WHERE node_num = :node_num2), :now),
             :updated_at
         )
@@ -212,6 +223,7 @@ bool Database::saveNode(const NodeInfo &node)
     query.bindValue(":snr", node.snr);
     query.bindValue(":rssi", node.rssi);
     query.bindValue(":hops_away", node.hopsAway);
+    query.bindValue(":is_external_power", node.isExternalPower ? 1 : 0);
     query.bindValue(":last_heard", lastHeard);
     query.bindValue(":now", now);
     query.bindValue(":updated_at", now);
@@ -260,6 +272,7 @@ NodeInfo Database::loadNode(uint32_t nodeNum)
         node.snr = query.value("snr").toFloat();
         node.rssi = query.value("rssi").toInt();
         node.hopsAway = query.value("hops_away").toInt();
+        node.isExternalPower = query.value("is_external_power").toBool();
         qint64 lastHeard = query.value("last_heard").toLongLong();
         if (lastHeard > 0) {
             node.lastHeard = QDateTime::fromSecsSinceEpoch(lastHeard);
@@ -297,6 +310,7 @@ QList<NodeInfo> Database::loadAllNodes()
         node.snr = query.value("snr").toFloat();
         node.rssi = query.value("rssi").toInt();
         node.hopsAway = query.value("hops_away").toInt();
+        node.isExternalPower = query.value("is_external_power").toBool();
         qint64 lastHeard = query.value("last_heard").toLongLong();
         if (lastHeard > 0) {
             node.lastHeard = QDateTime::fromSecsSinceEpoch(lastHeard);
@@ -437,4 +451,20 @@ int Database::unreadMessageCount()
         return query.value(0).toInt();
     }
     return 0;
+}
+
+bool Database::deleteMessagesWithNode(uint32_t nodeNum)
+{
+    QSqlQuery query(m_db);
+    query.prepare("DELETE FROM messages WHERE from_node = ? OR to_node = ?");
+    query.addBindValue(nodeNum);
+    query.addBindValue(nodeNum);
+
+    if (!query.exec()) {
+        qWarning() << "Failed to delete messages:" << query.lastError().text();
+        return false;
+    }
+
+    qDebug() << "Deleted messages with node" << nodeNum;
+    return true;
 }

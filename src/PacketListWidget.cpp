@@ -1,5 +1,6 @@
 #include "PacketListWidget.h"
 #include "NodeManager.h"
+#include "AppSettings.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -247,8 +248,9 @@ QString PacketTableModel::formatContent(const MeshtasticProtocol::DecodedPacket 
 }
 
 // PacketFilterModel implementation
-PacketFilterModel::PacketFilterModel(QObject *parent)
+PacketFilterModel::PacketFilterModel(NodeManager *nodeManager, QObject *parent)
     : QSortFilterProxyModel(parent)
+    , m_nodeManager(nodeManager)
 {
 }
 
@@ -264,6 +266,12 @@ void PacketFilterModel::setPortNumFilter(const QString &portNum)
     invalidateFilter();
 }
 
+void PacketFilterModel::setHideLocalDevicePackets(bool hide)
+{
+    m_hideLocalDevicePackets = hide;
+    invalidateFilter();
+}
+
 bool PacketFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const
 {
     Q_UNUSED(sourceParent);
@@ -272,6 +280,18 @@ bool PacketFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &sourc
     if (!model) return true;
 
     const auto &packet = model->packetAt(sourceRow);
+
+    // Hide local device packets filter
+    if (m_hideLocalDevicePackets) {
+        // Only show actual mesh packets (PacketReceived), not config/status from local device
+        if (packet.type != MeshtasticProtocol::PacketType::PacketReceived) {
+            return false;
+        }
+        // Also hide packets FROM our own node (device reporting its own telemetry/position via serial)
+        if (m_nodeManager && packet.from == m_nodeManager->myNodeNum()) {
+            return false;
+        }
+    }
 
     if (!m_typeFilter.isEmpty() && m_typeFilter != "All") {
         if (packet.typeName != m_typeFilter) {
@@ -320,8 +340,17 @@ void PacketListWidget::setupUI()
 
     // Table view
     m_model = new PacketTableModel(m_nodeManager, this);
-    m_filterModel = new PacketFilterModel(this);
+    m_filterModel = new PacketFilterModel(m_nodeManager, this);
     m_filterModel->setSourceModel(m_model);
+
+    // Apply initial setting and connect for changes
+    m_filterModel->setHideLocalDevicePackets(AppSettings::instance()->hideLocalDevicePackets());
+    connect(AppSettings::instance(), &AppSettings::settingChanged,
+            this, [this](const QString &key, const QVariant &value) {
+                if (key == "packets/hide_local_device") {
+                    m_filterModel->setHideLocalDevicePackets(value.toBool());
+                }
+            });
 
     m_tableView = new QTableView;
     m_tableView->setModel(m_filterModel);

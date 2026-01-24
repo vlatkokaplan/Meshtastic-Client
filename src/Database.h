@@ -45,6 +45,7 @@ public:
     QList<Message> loadMessagesForNode(uint32_t nodeNum, int limit = 100);
     bool markMessageRead(qint64 messageId);
     int unreadMessageCount();
+    bool deleteMessagesWithNode(uint32_t nodeNum);
 
 private:
     QSqlDatabase m_db;

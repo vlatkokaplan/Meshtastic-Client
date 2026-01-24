@@ -52,17 +52,20 @@ class PacketFilterModel : public QSortFilterProxyModel
     Q_OBJECT
 
 public:
-    explicit PacketFilterModel(QObject *parent = nullptr);
+    explicit PacketFilterModel(NodeManager *nodeManager, QObject *parent = nullptr);
 
     void setTypeFilter(const QString &type);
     void setPortNumFilter(const QString &portNum);
+    void setHideLocalDevicePackets(bool hide);
 
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override;
 
 private:
+    NodeManager *m_nodeManager;
     QString m_typeFilter;
     QString m_portNumFilter;
+    bool m_hideLocalDevicePackets = false;
 };
 
 class PacketListWidget : public QWidget

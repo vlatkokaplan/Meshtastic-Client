@@ -5,10 +5,12 @@
 #include <QMap>
 #include <QVariantMap>
 #include <QDateTime>
+#include <QTimer>
 
 class Database;
 
-struct NodeInfo {
+struct NodeInfo
+{
     uint32_t nodeNum = 0;
     QString nodeId;
     QString longName;
@@ -30,7 +32,10 @@ struct NodeInfo {
     QDateTime lastHeard;
     int hopsAway = -1;
 
-    QVariantMap toVariantMap() const {
+    bool isExternalPower = false; // True if node is externally powered
+
+    QVariantMap toVariantMap() const
+    {
         QVariantMap map;
         map["nodeNum"] = nodeNum;
         map["nodeId"] = nodeId;
@@ -47,6 +52,7 @@ struct NodeInfo {
         map["rssi"] = rssi;
         map["lastHeard"] = lastHeard;
         map["hopsAway"] = hopsAway;
+        map["isExternalPower"] = isExternalPower;
         return map;
     }
 };
@@ -94,8 +100,11 @@ private:
     QMap<uint32_t, NodeInfo> m_nodes;
     uint32_t m_myNodeNum = 0;
     Database *m_database = nullptr;
+    QTimer *m_updateTimer = nullptr;
+    bool m_pendingUpdate = false;
 
     void ensureNode(uint32_t nodeNum);
+    void scheduleUpdate();
     void persistNode(uint32_t nodeNum);
     QString hwModelToString(int model);
 };

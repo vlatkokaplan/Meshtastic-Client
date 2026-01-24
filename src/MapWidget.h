@@ -36,6 +36,7 @@ public:
     void fitToNodes();
     void blinkNode(uint32_t nodeNum, int durationMs = 5000);
     void selectNode(uint32_t nodeNum);
+    void setTileServer(const QString &url);
 
 signals:
     void nodeClicked(uint32_t nodeNum);

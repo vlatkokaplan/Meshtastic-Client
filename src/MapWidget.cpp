@@ -1,5 +1,6 @@
 #include "MapWidget.h"
 #include "NodeManager.h"
+#include "AppSettings.h"
 #include <QVBoxLayout>
 #include <QFile>
 #include <QDir>
@@ -141,6 +142,13 @@ void MapWidget::onMapReady()
 {
     qDebug() << "Map is ready";
     m_mapReady = true;
+
+    // Apply saved tile server
+    QString savedTileServer = AppSettings::instance()->mapTileServer();
+    if (!savedTileServer.isEmpty() && savedTileServer != "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png") {
+        setTileServer(savedTileServer);
+    }
+
     refreshNodes();
 
     if (m_pendingLat != 0 || m_pendingLon != 0) {
@@ -182,8 +190,11 @@ void MapWidget::onBridgeNodeClicked(uint32_t nodeNum)
 
 void MapWidget::onNodeUpdated(uint32_t nodeNum)
 {
-    // Blink the node on the map when it's heard
-    blinkNode(nodeNum, 5000);
+    // Blink the node on the map when it's heard (if enabled)
+    if (AppSettings::instance()->mapNodeBlinkEnabled()) {
+        int durationMs = AppSettings::instance()->mapNodeBlinkDuration() * 1000;
+        blinkNode(nodeNum, durationMs);
+    }
 }
 
 void MapWidget::blinkNode(uint32_t nodeNum, int durationMs)
@@ -201,5 +212,17 @@ void MapWidget::selectNode(uint32_t nodeNum)
     if (!m_mapReady) return;
 
     QString script = QString("window.mapAPI.selectNode(%1);").arg(nodeNum);
+    runJavaScript(script);
+}
+
+void MapWidget::setTileServer(const QString &url)
+{
+    if (!m_mapReady) return;
+
+    // Escape the URL for JavaScript
+    QString escapedUrl = url;
+    escapedUrl.replace("'", "\\'");
+
+    QString script = QString("window.mapAPI.setTileServer('%1');").arg(escapedUrl);
     runJavaScript(script);
 }

@@ -1,4 +1,5 @@
 #include "DeviceConfig.h"
+#include <QDebug>
 
 DeviceConfig::DeviceConfig(QObject *parent)
     : QObject(parent)
@@ -51,6 +52,8 @@ void DeviceConfig::setChannel(int index, const ChannelConfig &config)
 
 void DeviceConfig::updateFromLoRaPacket(const QVariantMap &fields)
 {
+    qDebug() << "DeviceConfig::updateFromLoRaPacket called with fields:" << fields.keys();
+
     if (fields.contains("usePreset")) m_lora.usePreset = fields["usePreset"].toBool();
     if (fields.contains("modemPreset")) m_lora.modemPreset = fields["modemPreset"].toInt();
     if (fields.contains("region")) m_lora.region = fields["region"].toInt();
@@ -65,6 +68,8 @@ void DeviceConfig::updateFromLoRaPacket(const QVariantMap &fields)
     if (fields.contains("codingRate")) m_lora.codingRate = fields["codingRate"].toInt();
 
     m_hasLora = true;
+    qDebug() << "DeviceConfig: LoRa config updated - region:" << m_lora.region
+             << "preset:" << m_lora.modemPreset << "hopLimit:" << m_lora.hopLimit;
     emit loraConfigChanged();
 }
 

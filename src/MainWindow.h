@@ -10,6 +10,7 @@
 #include <QSplitter>
 #include <QHeaderView>
 #include <QSystemTrayIcon>
+#include <QLineEdit>
 
 #include "MeshtasticProtocol.h" // Need full include for nested type
 
@@ -56,6 +57,10 @@ private slots:
     void onSavePositionConfig();
     void onSaveChannelConfig(int channelIndex);
 
+    // Export handlers
+    void onExportNodes(const QString &format);
+    void onExportMessages(const QString &format);
+
 private:
     // Core components
     SerialConnection *m_serial;
@@ -71,7 +76,8 @@ private:
     QPushButton *m_refreshButton;
     QLabel *m_statusLabel;
     PacketListWidget *m_packetList;
-    QTableWidget *m_nodeTable; // Replaces QListWidget for node list
+    QTableWidget *m_nodeTable;
+    QLineEdit *m_nodeSearchEdit;
     MessagesWidget *m_messagesWidget;
     ConfigWidget *m_configWidget;
 

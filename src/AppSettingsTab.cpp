@@ -1,6 +1,7 @@
 #include "AppSettingsTab.h"
 #include "AppSettings.h"
 
+#include <QApplication>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>
@@ -112,6 +113,51 @@ void AppSettingsTab::setupUI()
 
     mainLayout->addWidget(packetsGroup);
 
+    // Appearance Settings Group
+    QGroupBox *appearanceGroup = new QGroupBox("Appearance");
+    QVBoxLayout *appearanceLayout = new QVBoxLayout(appearanceGroup);
+
+    m_darkThemeCheck = new QCheckBox("Dark theme");
+    m_darkThemeCheck->setToolTip("Switch between light and dark color schemes");
+    connect(m_darkThemeCheck, &QCheckBox::toggled, this, &AppSettingsTab::onDarkThemeChanged);
+    appearanceLayout->addWidget(m_darkThemeCheck);
+
+    mainLayout->addWidget(appearanceGroup);
+
+    // Export Data Group
+    QGroupBox *exportGroup = new QGroupBox("Export Data");
+    QVBoxLayout *exportLayout = new QVBoxLayout(exportGroup);
+
+    QHBoxLayout *nodesExportLayout = new QHBoxLayout;
+    QLabel *nodesLabel = new QLabel("Nodes:");
+    m_exportNodesCsvBtn = new QPushButton("Export CSV");
+    m_exportNodesJsonBtn = new QPushButton("Export JSON");
+    m_exportNodesCsvBtn->setToolTip("Export all known nodes to a CSV file");
+    m_exportNodesJsonBtn->setToolTip("Export all known nodes to a JSON file");
+    connect(m_exportNodesCsvBtn, &QPushButton::clicked, this, &AppSettingsTab::onExportNodesCsv);
+    connect(m_exportNodesJsonBtn, &QPushButton::clicked, this, &AppSettingsTab::onExportNodesJson);
+    nodesExportLayout->addWidget(nodesLabel);
+    nodesExportLayout->addWidget(m_exportNodesCsvBtn);
+    nodesExportLayout->addWidget(m_exportNodesJsonBtn);
+    nodesExportLayout->addStretch();
+    exportLayout->addLayout(nodesExportLayout);
+
+    QHBoxLayout *messagesExportLayout = new QHBoxLayout;
+    QLabel *messagesLabel = new QLabel("Messages:");
+    m_exportMessagesCsvBtn = new QPushButton("Export CSV");
+    m_exportMessagesJsonBtn = new QPushButton("Export JSON");
+    m_exportMessagesCsvBtn->setToolTip("Export all messages to a CSV file");
+    m_exportMessagesJsonBtn->setToolTip("Export all messages to a JSON file");
+    connect(m_exportMessagesCsvBtn, &QPushButton::clicked, this, &AppSettingsTab::onExportMessagesCsv);
+    connect(m_exportMessagesJsonBtn, &QPushButton::clicked, this, &AppSettingsTab::onExportMessagesJson);
+    messagesExportLayout->addWidget(messagesLabel);
+    messagesExportLayout->addWidget(m_exportMessagesCsvBtn);
+    messagesExportLayout->addWidget(m_exportMessagesJsonBtn);
+    messagesExportLayout->addStretch();
+    exportLayout->addLayout(messagesExportLayout);
+
+    mainLayout->addWidget(exportGroup);
+
     // Spacer
     mainLayout->addStretch();
 
@@ -134,6 +180,8 @@ void AppSettingsTab::loadSettings()
     m_hideLocalDevicePacketsCheck->setChecked(settings->hideLocalDevicePackets());
     m_nodeBlinkCheck->setChecked(settings->mapNodeBlinkEnabled());
     m_nodeBlinkDurationSpin->setValue(settings->mapNodeBlinkDuration());
+    m_darkThemeCheck->setChecked(settings->darkTheme());
+    applyTheme(settings->darkTheme());
 
     // Find matching tile server or set to custom
     QString currentServer = settings->mapTileServer();
@@ -211,4 +259,157 @@ void AppSettingsTab::onNodeBlinkEnabledChanged(bool checked)
 void AppSettingsTab::onNodeBlinkDurationChanged(int value)
 {
     AppSettings::instance()->setMapNodeBlinkDuration(value);
+}
+
+void AppSettingsTab::onDarkThemeChanged(bool checked)
+{
+    AppSettings::instance()->setDarkTheme(checked);
+    applyTheme(checked);
+}
+
+void AppSettingsTab::onExportNodesCsv()
+{
+    emit exportNodesRequested("csv");
+}
+
+void AppSettingsTab::onExportNodesJson()
+{
+    emit exportNodesRequested("json");
+}
+
+void AppSettingsTab::onExportMessagesCsv()
+{
+    emit exportMessagesRequested("csv");
+}
+
+void AppSettingsTab::onExportMessagesJson()
+{
+    emit exportMessagesRequested("json");
+}
+
+void AppSettingsTab::applyTheme(bool dark)
+{
+    if (dark) {
+        qApp->setStyleSheet(R"(
+            QMainWindow, QWidget {
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+            }
+            QTabWidget::pane {
+                border: 1px solid #3c3c3c;
+                background-color: #252526;
+            }
+            QTabBar::tab {
+                background-color: #2d2d2d;
+                color: #d4d4d4;
+                padding: 8px 16px;
+                border: 1px solid #3c3c3c;
+            }
+            QTabBar::tab:selected {
+                background-color: #1e1e1e;
+                border-bottom-color: #1e1e1e;
+            }
+            QTableWidget, QListWidget, QTreeWidget {
+                background-color: #252526;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+                gridline-color: #3c3c3c;
+            }
+            QTableWidget::item, QListWidget::item, QTreeWidget::item {
+                color: #d4d4d4;
+            }
+            QTableWidget::item:selected, QListWidget::item:selected, QTreeWidget::item:selected {
+                background-color: #094771;
+            }
+            QHeaderView::section {
+                background-color: #2d2d2d;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+                padding: 4px;
+            }
+            QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+                background-color: #3c3c3c;
+                color: #d4d4d4;
+                border: 1px solid #555;
+                padding: 4px;
+                border-radius: 3px;
+            }
+            QPushButton {
+                background-color: #0e639c;
+                color: white;
+                border: none;
+                padding: 6px 16px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: #1177bb;
+            }
+            QPushButton:pressed {
+                background-color: #094771;
+            }
+            QPushButton:disabled {
+                background-color: #3c3c3c;
+                color: #888;
+            }
+            QGroupBox {
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+                margin-top: 8px;
+                padding-top: 8px;
+                color: #d4d4d4;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+            QCheckBox, QRadioButton {
+                color: #d4d4d4;
+            }
+            QLabel {
+                color: #d4d4d4;
+            }
+            QToolBar {
+                background-color: #2d2d2d;
+                border: none;
+                spacing: 4px;
+            }
+            QStatusBar {
+                background-color: #007acc;
+                color: white;
+            }
+            QMenuBar {
+                background-color: #2d2d2d;
+                color: #d4d4d4;
+            }
+            QMenuBar::item:selected {
+                background-color: #094771;
+            }
+            QMenu {
+                background-color: #252526;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+            }
+            QMenu::item:selected {
+                background-color: #094771;
+            }
+            QScrollBar:vertical {
+                background-color: #1e1e1e;
+                width: 12px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #5a5a5a;
+                border-radius: 4px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #787878;
+            }
+            QSplitter::handle {
+                background-color: #3c3c3c;
+            }
+        )");
+    } else {
+        qApp->setStyleSheet("");  // Reset to default light theme
+    }
 }

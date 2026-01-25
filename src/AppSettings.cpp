@@ -224,3 +224,13 @@ void AppSettings::setMapNodeBlinkDuration(int seconds)
 {
     setValue("map/node_blink_duration", seconds);
 }
+
+bool AppSettings::darkTheme() const
+{
+    return value("appearance/dark_theme", false).toBool();
+}
+
+void AppSettings::setDarkTheme(bool dark)
+{
+    setValue("appearance/dark_theme", dark);
+}

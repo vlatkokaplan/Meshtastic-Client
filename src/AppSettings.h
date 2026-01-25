@@ -54,6 +54,9 @@ public:
     int mapNodeBlinkDuration() const;
     void setMapNodeBlinkDuration(int seconds);
 
+    bool darkTheme() const;
+    void setDarkTheme(bool dark);
+
 signals:
     void settingChanged(const QString &key, const QVariant &value);
 

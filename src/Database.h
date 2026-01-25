@@ -7,6 +7,8 @@
 #include <QList>
 #include "NodeManager.h"
 
+struct ChatMessage;  // Forward declaration
+
 class Database : public QObject
 {
     Q_OBJECT
@@ -46,6 +48,7 @@ public:
     bool markMessageRead(qint64 messageId);
     int unreadMessageCount();
     bool deleteMessagesWithNode(uint32_t nodeNum);
+    QList<ChatMessage> getAllMessages();  // For export
 
 private:
     QSqlDatabase m_db;

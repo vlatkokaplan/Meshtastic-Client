@@ -1,4 +1,5 @@
 #include "Database.h"
+#include "MessagesWidget.h"  // For ChatMessage struct
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QStandardPaths>
@@ -107,6 +108,7 @@ bool Database::createTables()
             snr REAL DEFAULT 0,
             rssi INTEGER DEFAULT 0,
             hops_away INTEGER DEFAULT -1,
+            is_external_power INTEGER DEFAULT 0,
             last_heard INTEGER,
             first_seen INTEGER,
             updated_at INTEGER
@@ -115,6 +117,9 @@ bool Database::createTables()
         qWarning() << "Failed to create nodes table:" << query.lastError().text();
         return false;
     }
+
+    // Ensure is_external_power column exists (for older databases)
+    query.exec("ALTER TABLE nodes ADD COLUMN is_external_power INTEGER DEFAULT 0");
 
     // Messages table
     if (!query.exec(R"(
@@ -467,4 +472,33 @@ bool Database::deleteMessagesWithNode(uint32_t nodeNum)
 
     qDebug() << "Deleted messages with node" << nodeNum;
     return true;
+}
+
+QList<ChatMessage> Database::getAllMessages()
+{
+    QList<ChatMessage> messages;
+    QSqlQuery query(m_db);
+
+    if (!query.exec("SELECT * FROM messages ORDER BY timestamp ASC")) {
+        qWarning() << "Failed to load all messages:" << query.lastError().text();
+        return messages;
+    }
+
+    while (query.next()) {
+        ChatMessage msg;
+        msg.id = query.value("id").toLongLong();
+        msg.fromNode = query.value("from_node").toUInt();
+        msg.toNode = query.value("to_node").toUInt();
+        msg.channelIndex = query.value("channel").toString().toInt();
+        msg.text = query.value("text").toString();
+        msg.read = query.value("read").toBool();
+        msg.packetId = 0;  // Not stored in DB currently
+        qint64 ts = query.value("timestamp").toLongLong();
+        if (ts > 0) {
+            msg.timestamp = QDateTime::fromSecsSinceEpoch(ts);
+        }
+        messages.append(msg);
+    }
+
+    return messages;
 }

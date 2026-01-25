@@ -19,6 +19,7 @@ public:
     explicit ConfigWidget(QWidget *parent = nullptr);
 
     DeviceConfig *deviceConfig() const { return m_deviceConfig; }
+    AppSettingsTab *appSettingsTab() const { return m_appSettingsTab; }
 
 signals:
     void saveLoRaConfig();

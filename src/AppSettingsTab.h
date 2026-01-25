@@ -6,6 +6,7 @@
 #include <QSpinBox>
 #include <QComboBox>
 #include <QLineEdit>
+#include <QPushButton>
 
 class AppSettingsTab : public QWidget
 {
@@ -14,7 +15,15 @@ class AppSettingsTab : public QWidget
 public:
     explicit AppSettingsTab(QWidget *parent = nullptr);
 
+signals:
+    void exportNodesRequested(const QString &format);  // "csv" or "json"
+    void exportMessagesRequested(const QString &format);
+
 private slots:
+    void onExportNodesCsv();
+    void onExportNodesJson();
+    void onExportMessagesCsv();
+    void onExportMessagesJson();
     void onAutoConnectChanged(bool checked);
     void onShowOfflineNodesChanged(bool checked);
     void onOfflineThresholdChanged(int value);
@@ -25,6 +34,7 @@ private slots:
     void onHideLocalDevicePacketsChanged(bool checked);
     void onNodeBlinkEnabledChanged(bool checked);
     void onNodeBlinkDurationChanged(int value);
+    void onDarkThemeChanged(bool checked);
 
 private:
     // Connection settings
@@ -47,8 +57,18 @@ private:
     // Packet display settings
     QCheckBox *m_hideLocalDevicePacketsCheck;
 
+    // Appearance settings
+    QCheckBox *m_darkThemeCheck;
+
+    // Export buttons
+    QPushButton *m_exportNodesCsvBtn;
+    QPushButton *m_exportNodesJsonBtn;
+    QPushButton *m_exportMessagesCsvBtn;
+    QPushButton *m_exportMessagesJsonBtn;
+
     void setupUI();
     void loadSettings();
+    void applyTheme(bool dark);
 };
 
 #endif // APPSETTINGSTAB_H

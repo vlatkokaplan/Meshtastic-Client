@@ -12,6 +12,7 @@
 #include <QMessageBox>
 #include <QApplication>
 #include <QClipboard>
+#include <QBrush>
 
 MessagesWidget::MessagesWidget(NodeManager *nodeManager, QWidget *parent)
     : QWidget(parent)
@@ -94,8 +95,8 @@ void MessagesWidget::setupUI()
             border-radius: 10px;
             margin: 4px 8px;
         }
-        QListWidget::item:hover {
-            background-color: rgba(0, 0, 0, 0.05);
+        QListWidget::item:selected {
+            background-color: #d0e8ff;
         }
     )");
     m_messageList->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -394,18 +395,14 @@ void MessagesWidget::updateMessageDisplay()
 
         bool isOutgoing = (msg.fromNode == myNode);
 
+        // Use explicit brush colors that override any theme/stylesheet
         if (isOutgoing) {
-            item->setBackground(QColor("#0084ff"));  // Messenger-style blue
-            item->setForeground(QColor("#ffffff"));
+            item->setBackground(QBrush(QColor("#0084ff")));
+            item->setForeground(QBrush(QColor(255, 255, 255)));  // White text
             item->setTextAlignment(Qt::AlignRight);
         } else {
-            if (m_currentType == ConversationType::Channel) {
-                item->setBackground(QColor("#e4e6eb"));  // Light gray for channel
-                item->setForeground(QColor("#1c1e21"));
-            } else {
-                item->setBackground(QColor("#e4e6eb"));  // Light gray for DM
-                item->setForeground(QColor("#1c1e21"));
-            }
+            item->setBackground(QBrush(QColor("#e4e6eb")));
+            item->setForeground(QBrush(QColor(28, 30, 33)));  // Dark text #1c1e21
             item->setTextAlignment(Qt::AlignLeft);
         }
 

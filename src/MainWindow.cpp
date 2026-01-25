@@ -8,6 +8,7 @@
 #include "ConfigWidget.h"
 #include "DeviceConfig.h"
 #include "AppSettings.h"
+#include "AppSettingsTab.h"
 
 #include "MapWidget.h"
 
@@ -24,6 +25,10 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QTextEdit>
+#include <QFileDialog>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <algorithm>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -178,7 +183,15 @@ void MainWindow::setupMapTab()
     nodesLabel->setStyleSheet("font-weight: bold; padding: 5px;");
     sidebarLayout->addWidget(nodesLabel);
 
-    // Node table setup (remove color column)
+    // Node search filter
+    m_nodeSearchEdit = new QLineEdit;
+    m_nodeSearchEdit->setPlaceholderText("Search nodes...");
+    m_nodeSearchEdit->setClearButtonEnabled(true);
+    connect(m_nodeSearchEdit, &QLineEdit::textChanged,
+            this, &MainWindow::updateNodeList);
+    sidebarLayout->addWidget(m_nodeSearchEdit);
+
+    // Node table setup
     m_nodeTable = new QTableWidget;
     m_nodeTable->setColumnCount(3);
     m_nodeTable->setHorizontalHeaderLabels({"Node Name", "Last Heard", "Battery %"});
@@ -236,6 +249,15 @@ void MainWindow::setupConfigTab()
             this, &MainWindow::onSavePositionConfig);
     connect(m_configWidget, &ConfigWidget::saveChannelConfig,
             this, &MainWindow::onSaveChannelConfig);
+
+    // Connect export signals from AppSettingsTab
+    AppSettingsTab *appSettings = m_configWidget->appSettingsTab();
+    if (appSettings) {
+        connect(appSettings, &AppSettingsTab::exportNodesRequested,
+                this, &MainWindow::onExportNodes);
+        connect(appSettings, &AppSettingsTab::exportMessagesRequested,
+                this, &MainWindow::onExportMessages);
+    }
 }
 
 void MainWindow::refreshPorts()
@@ -388,11 +410,18 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             QString configType = packet.fields.value("configType").toString();
             DeviceConfig *devConfig = m_configWidget->deviceConfig();
 
+            qDebug() << "Received Config packet, type:" << configType;
+
             if (configType == "lora") {
+                qDebug() << "  LoRa config - region:" << packet.fields.value("region")
+                         << "preset:" << packet.fields.value("modemPreset")
+                         << "hopLimit:" << packet.fields.value("hopLimit");
                 devConfig->updateFromLoRaPacket(packet.fields);
             } else if (configType == "device") {
+                qDebug() << "  Device config - role:" << packet.fields.value("role");
                 devConfig->updateFromDevicePacket(packet.fields);
             } else if (configType == "position") {
+                qDebug() << "  Position config - gpsMode:" << packet.fields.value("gpsMode");
                 devConfig->updateFromPositionPacket(packet.fields);
             }
         }
@@ -673,6 +702,9 @@ void MainWindow::updateNodeList()
     int offlineThresholdMins = AppSettings::instance()->offlineThresholdMinutes();
     QDateTime offlineThreshold = QDateTime::currentDateTime().addSecs(-offlineThresholdMins * 60);
 
+    // Get search filter
+    QString searchTerm = m_nodeSearchEdit ? m_nodeSearchEdit->text().trimmed().toLower() : QString();
+
     int row = 0;
     for (const NodeInfo &node : nodes)
     {
@@ -680,6 +712,15 @@ void MainWindow::updateNodeList()
         if (!showOffline && node.lastHeard.isValid() && node.lastHeard < offlineThreshold) {
             continue;
         }
+
+        // Filter by search term
+        if (!searchTerm.isEmpty()) {
+            bool matches = node.longName.toLower().contains(searchTerm) ||
+                          node.shortName.toLower().contains(searchTerm) ||
+                          node.nodeId.toLower().contains(searchTerm);
+            if (!matches) continue;
+        }
+
         m_nodeTable->insertRow(row);
         // Node Name
         QString name = node.longName.isEmpty() ? node.nodeId : node.longName;
@@ -789,7 +830,11 @@ void MainWindow::openDatabaseForNode(uint32_t nodeNum)
     if (m_database->open(dbPath))
     {
         m_nodeManager->setDatabase(m_database);
+
+        // Save any nodes received before database was ready, then load all
+        m_nodeManager->saveToDatabase();
         m_nodeManager->loadFromDatabase();
+
         if (m_messagesWidget)
         {
             m_messagesWidget->setDatabase(m_database);
@@ -1177,4 +1222,152 @@ void MainWindow::onSaveChannelConfig(int channelIndex)
     m_serial->sendData(packet);
 
     statusBar()->showMessage(QString("Channel %1 config saved to device").arg(channelIndex), 3000);
+}
+
+void MainWindow::onExportNodes(const QString &format)
+{
+    QList<NodeInfo> nodes = m_nodeManager->allNodes();
+    if (nodes.isEmpty()) {
+        QMessageBox::information(this, "Export Nodes", "No nodes to export.");
+        return;
+    }
+
+    QString filter = format == "csv" ? "CSV Files (*.csv)" : "JSON Files (*.json)";
+    QString defaultName = format == "csv" ? "nodes.csv" : "nodes.json";
+    QString fileName = QFileDialog::getSaveFileName(this, "Export Nodes", defaultName, filter);
+    if (fileName.isEmpty()) return;
+
+    QFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::critical(this, "Export Error", "Could not open file for writing.");
+        return;
+    }
+
+    if (format == "csv") {
+        QTextStream out(&file);
+        out << "NodeNum,NodeID,LongName,ShortName,Latitude,Longitude,Altitude,BatteryLevel,Voltage,LastHeard,SNR,RSSI,Hops\n";
+        for (const NodeInfo &node : nodes) {
+            QString longName = QString(node.longName).replace("\"", "\"\"");
+            QString shortName = QString(node.shortName).replace("\"", "\"\"");
+            out << node.nodeNum << ","
+                << "\"" << node.nodeId << "\","
+                << "\"" << longName << "\","
+                << "\"" << shortName << "\","
+                << (node.hasPosition ? QString::number(node.latitude, 'f', 6) : "") << ","
+                << (node.hasPosition ? QString::number(node.longitude, 'f', 6) : "") << ","
+                << (node.hasPosition ? QString::number(node.altitude) : "") << ","
+                << (node.batteryLevel >= 0 ? QString::number(node.batteryLevel) : "") << ","
+                << (node.voltage > 0 ? QString::number(node.voltage, 'f', 2) : "") << ","
+                << node.lastHeard.toString(Qt::ISODate) << ","
+                << QString::number(node.snr, 'f', 1) << ","
+                << node.rssi << ","
+                << (node.hopsAway >= 0 ? QString::number(node.hopsAway) : "") << "\n";
+        }
+    } else {
+        QJsonArray nodesArray;
+        for (const NodeInfo &node : nodes) {
+            QJsonObject obj;
+            obj["nodeNum"] = static_cast<qint64>(node.nodeNum);
+            obj["nodeId"] = node.nodeId;
+            obj["longName"] = node.longName;
+            obj["shortName"] = node.shortName;
+            if (node.hasPosition) {
+                obj["latitude"] = node.latitude;
+                obj["longitude"] = node.longitude;
+                obj["altitude"] = node.altitude;
+            }
+            if (node.batteryLevel >= 0) {
+                obj["batteryLevel"] = node.batteryLevel;
+            }
+            if (node.voltage > 0) {
+                obj["voltage"] = node.voltage;
+            }
+            obj["lastHeard"] = node.lastHeard.toString(Qt::ISODate);
+            obj["snr"] = node.snr;
+            obj["rssi"] = node.rssi;
+            if (node.hopsAway >= 0) {
+                obj["hops"] = node.hopsAway;
+            }
+            obj["isExternalPower"] = node.isExternalPower;
+            nodesArray.append(obj);
+        }
+
+        QJsonObject root;
+        root["exportDate"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+        root["nodeCount"] = nodes.size();
+        root["nodes"] = nodesArray;
+
+        QJsonDocument doc(root);
+        file.write(doc.toJson(QJsonDocument::Indented));
+    }
+
+    file.close();
+    statusBar()->showMessage(QString("Exported %1 nodes to %2").arg(nodes.size()).arg(fileName), 5000);
+}
+
+void MainWindow::onExportMessages(const QString &format)
+{
+    if (!m_database || !m_database->isOpen()) {
+        QMessageBox::information(this, "Export Messages", "No database connected. Connect to a device first.");
+        return;
+    }
+
+    // Get messages from database
+    QList<ChatMessage> messages = m_database->getAllMessages();
+    if (messages.isEmpty()) {
+        QMessageBox::information(this, "Export Messages", "No messages to export.");
+        return;
+    }
+
+    QString filter = format == "csv" ? "CSV Files (*.csv)" : "JSON Files (*.json)";
+    QString defaultName = format == "csv" ? "messages.csv" : "messages.json";
+    QString fileName = QFileDialog::getSaveFileName(this, "Export Messages", defaultName, filter);
+    if (fileName.isEmpty()) return;
+
+    QFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::critical(this, "Export Error", "Could not open file for writing.");
+        return;
+    }
+
+    if (format == "csv") {
+        QTextStream out(&file);
+        out << "Timestamp,FromNode,ToNode,Channel,Text,PacketID\n";
+        for (const ChatMessage &msg : messages) {
+            QString fromId = MeshtasticProtocol::nodeIdToString(msg.fromNode);
+            QString toId = msg.toNode == 0xFFFFFFFF ? "broadcast" : MeshtasticProtocol::nodeIdToString(msg.toNode);
+            QString text = QString(msg.text).replace("\"", "\"\"").replace("\n", "\\n");
+            out << msg.timestamp.toString(Qt::ISODate) << ","
+                << "\"" << fromId << "\","
+                << "\"" << toId << "\","
+                << msg.channelIndex << ","
+                << "\"" << text << "\","
+                << msg.packetId << "\n";
+        }
+    } else {
+        QJsonArray messagesArray;
+        for (const ChatMessage &msg : messages) {
+            QJsonObject obj;
+            obj["timestamp"] = msg.timestamp.toString(Qt::ISODate);
+            obj["fromNode"] = MeshtasticProtocol::nodeIdToString(msg.fromNode);
+            obj["fromNodeNum"] = static_cast<qint64>(msg.fromNode);
+            obj["toNode"] = msg.toNode == 0xFFFFFFFF ? "broadcast" : MeshtasticProtocol::nodeIdToString(msg.toNode);
+            obj["toNodeNum"] = static_cast<qint64>(msg.toNode);
+            obj["channel"] = msg.channelIndex;
+            obj["text"] = msg.text;
+            obj["packetId"] = static_cast<qint64>(msg.packetId);
+            messagesArray.append(obj);
+        }
+
+        QJsonObject root;
+        root["exportDate"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+        root["messageCount"] = messages.size();
+        root["messages"] = messagesArray;
+
+        QJsonDocument doc(root);
+        file.write(doc.toJson(QJsonDocument::Indented));
+    }
+
+    file.close();
+    statusBar()->showMessage(QString("Exported %1 messages to %2").arg(messages.size()).arg(fileName), 5000);
 }

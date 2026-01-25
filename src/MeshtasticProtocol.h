@@ -96,6 +96,9 @@ public:
     QByteArray createNodeInfoRequestPacket(uint32_t destNode, uint32_t myNode);
     QByteArray createTextMessagePacket(const QString &text, uint32_t destNode, uint32_t myNode, int channel = 0, uint32_t replyId = 0);
 
+    // Create admin packets for config requests
+    QByteArray createGetConfigRequestPacket(uint32_t destNode, uint32_t myNode, int configType);
+
     // Create admin packets for config updates
     QByteArray createLoRaConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config);
     QByteArray createDeviceConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config);

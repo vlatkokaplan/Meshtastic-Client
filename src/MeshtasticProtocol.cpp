@@ -376,6 +376,73 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
             break;
         }
 
+        case PortNum::Admin: {
+            meshtastic::AdminMessage admin;
+            if (admin.ParseFromArray(payloadData.constData(), payloadData.size())) {
+                fields["adminType"] = "response";
+
+                // Handle get_config_response
+                if (admin.has_get_config_response()) {
+                    const auto &config = admin.get_config_response();
+                    switch (config.payload_variant_case()) {
+                    case meshtastic::Config::kDevice: {
+                        fields["configType"] = "device";
+                        const auto &dev = config.device();
+                        fields["role"] = static_cast<int>(dev.role());
+                        fields["serialEnabled"] = dev.serial_enabled();
+                        fields["debugLogEnabled"] = dev.debug_log_enabled();
+                        fields["buttonGpio"] = dev.button_gpio();
+                        fields["buzzerGpio"] = dev.buzzer_gpio();
+                        fields["rebroadcastMode"] = static_cast<int>(dev.rebroadcast_mode());
+                        fields["nodeInfoBroadcastSecs"] = dev.node_info_broadcast_secs();
+                        fields["doubleTapAsButtonPress"] = dev.double_tap_as_button_press();
+                        fields["isManaged"] = dev.is_managed();
+                        fields["disableTripleClick"] = dev.disable_triple_click();
+                        fields["tzdef"] = QString::fromStdString(dev.tzdef());
+                        fields["ledHeartbeatDisabled"] = dev.led_heartbeat_disabled();
+                        break;
+                    }
+                    case meshtastic::Config::kPosition: {
+                        fields["configType"] = "position";
+                        const auto &pos = config.position();
+                        fields["positionBroadcastSecs"] = pos.position_broadcast_secs();
+                        fields["smartPositionEnabled"] = pos.position_broadcast_smart_enabled();
+                        fields["fixedPosition"] = pos.fixed_position();
+                        fields["gpsEnabled"] = pos.gps_enabled();
+                        fields["gpsUpdateInterval"] = pos.gps_update_interval();
+                        fields["gpsAttemptTime"] = pos.gps_attempt_time();
+                        fields["positionFlags"] = pos.position_flags();
+                        fields["broadcastSmartMinDistance"] = pos.broadcast_smart_minimum_distance();
+                        fields["broadcastSmartMinIntervalSecs"] = pos.broadcast_smart_minimum_interval_secs();
+                        fields["gpsMode"] = static_cast<int>(pos.gps_mode());
+                        break;
+                    }
+                    case meshtastic::Config::kLora: {
+                        fields["configType"] = "lora";
+                        const auto &lora = config.lora();
+                        fields["usePreset"] = lora.use_preset();
+                        fields["modemPreset"] = static_cast<int>(lora.modem_preset());
+                        fields["bandwidth"] = lora.bandwidth();
+                        fields["spreadFactor"] = lora.spread_factor();
+                        fields["codingRate"] = lora.coding_rate();
+                        fields["frequencyOffset"] = lora.frequency_offset();
+                        fields["region"] = static_cast<int>(lora.region());
+                        fields["hopLimit"] = lora.hop_limit();
+                        fields["txEnabled"] = lora.tx_enabled();
+                        fields["txPower"] = lora.tx_power();
+                        fields["channelNum"] = lora.channel_num();
+                        fields["overrideDutyCycle"] = lora.override_duty_cycle();
+                        break;
+                    }
+                    default:
+                        fields["configType"] = "unknown";
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+
         default:
             fields["payloadHex"] = payloadData.toHex();
             break;
@@ -787,6 +854,15 @@ static QByteArray createAdminFrame(uint32_t destNode, uint32_t myNode, const std
     frame.append(QByteArray::fromStdString(serialized));
 
     return frame;
+}
+
+QByteArray MeshtasticProtocol::createGetConfigRequestPacket(uint32_t destNode, uint32_t myNode, int configType)
+{
+    meshtastic::AdminMessage admin;
+    // configType: 1=Device, 2=Position, 3=Power, 4=Network, 5=Display, 6=LoRa, 7=Bluetooth
+    admin.set_get_config_request(configType);
+
+    return createAdminFrame(destNode, myNode, admin.SerializeAsString());
 }
 
 QByteArray MeshtasticProtocol::createLoRaConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config)

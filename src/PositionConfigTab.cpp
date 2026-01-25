@@ -1,6 +1,7 @@
 #include "PositionConfigTab.h"
 #include "DeviceConfig.h"
 
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -18,6 +19,14 @@ PositionConfigTab::PositionConfigTab(DeviceConfig *config, QWidget *parent)
     if (m_config->hasPositionConfig()) {
         updateUIFromConfig();
     }
+
+    // Show timeout message if config not received after 5 seconds
+    QTimer::singleShot(5000, this, [this]() {
+        if (!m_config->hasPositionConfig()) {
+            m_statusLabel->setText("Config not available from device");
+            m_statusLabel->setStyleSheet("color: orange;");
+        }
+    });
 }
 
 void PositionConfigTab::setupUI()

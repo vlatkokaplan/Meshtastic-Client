@@ -518,6 +518,25 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             }
             break;
 
+        case MeshtasticProtocol::PortNum::Admin:
+            // Handle admin config responses
+            if (packet.fields.contains("configType") && m_configWidget && m_configWidget->deviceConfig())
+            {
+                QString configType = packet.fields.value("configType").toString();
+                DeviceConfig *devConfig = m_configWidget->deviceConfig();
+
+                qDebug() << "Admin config response received, type:" << configType;
+
+                if (configType == "lora") {
+                    devConfig->updateFromLoRaPacket(packet.fields);
+                } else if (configType == "device") {
+                    devConfig->updateFromDevicePacket(packet.fields);
+                } else if (configType == "position") {
+                    devConfig->updateFromPositionPacket(packet.fields);
+                }
+            }
+            break;
+
         default:
             break;
         }
@@ -817,6 +836,31 @@ void MainWindow::requestConfig()
     QByteArray packet = m_protocol->createWantConfigPacket(configId);
     m_serial->sendData(packet);
     statusBar()->showMessage("Requested configuration...", 3000);
+
+    // Also request device configs via admin messages after a delay
+    // (to allow want_config to complete first)
+    QTimer::singleShot(2000, this, [this]() {
+        if (!m_serial->isConnected()) return;
+        uint32_t myNode = m_nodeManager->myNodeNum();
+        if (myNode == 0) return;
+
+        // Request device configs via admin messages
+
+        // For local admin commands, use myNode as both from and to
+        // But set want_ack=false since it's local
+        // Request Device config (type 1)
+        m_serial->sendData(m_protocol->createGetConfigRequestPacket(myNode, myNode, 1));
+        // Request Position config (type 2)
+        QTimer::singleShot(500, this, [this, myNode]() {
+            if (m_serial->isConnected())
+                m_serial->sendData(m_protocol->createGetConfigRequestPacket(myNode, myNode, 2));
+        });
+        // Request LoRa config (type 6)
+        QTimer::singleShot(1000, this, [this, myNode]() {
+            if (m_serial->isConnected())
+                m_serial->sendData(m_protocol->createGetConfigRequestPacket(myNode, myNode, 6));
+        });
+    });
 }
 
 void MainWindow::openDatabaseForNode(uint32_t nodeNum)

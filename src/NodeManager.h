@@ -33,6 +33,7 @@ struct NodeInfo
     int hopsAway = -1;
 
     bool isExternalPower = false; // True if node is externally powered
+    bool isFavorite = false;      // True if node is marked as favorite
 
     QVariantMap toVariantMap() const
     {
@@ -53,6 +54,7 @@ struct NodeInfo
         map["lastHeard"] = lastHeard;
         map["hopsAway"] = hopsAway;
         map["isExternalPower"] = isExternalPower;
+        map["isFavorite"] = isFavorite;
         return map;
     }
 };
@@ -74,6 +76,7 @@ public:
                         const QString &userId, const QString &hwModel);
     void updateNodeTelemetry(uint32_t nodeNum, const QVariantMap &telemetry);
     void updateNodeSignal(uint32_t nodeNum, float snr, int rssi, int hopsAway);
+    void setNodeFavorite(uint32_t nodeNum, bool favorite);
 
     NodeInfo getNode(uint32_t nodeNum) const;
     QList<NodeInfo> allNodes() const;

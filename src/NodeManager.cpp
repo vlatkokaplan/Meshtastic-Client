@@ -82,7 +82,22 @@ void NodeManager::updateNodeFromPacket(const QVariantMap &fields)
                     node.altitude = fields["altitude"].toInt();
                 }
                 emit nodePositionUpdated(nodeNum, lat, lon);
+            if (lat != 0.0 || lon != 0.0)
+            {
+                node.latitude = lat;
+                node.longitude = lon;
+                node.hasPosition = true;
+                if (fields.contains("altitude"))
+                {
+                    node.altitude = fields["altitude"].toInt();
+                }
+                emit nodePositionUpdated(nodeNum, lat, lon);
             }
+        }
+        
+        if (fields.contains("isFavorite"))
+        {
+            node.isFavorite = fields["isFavorite"].toBool();
         }
 
         persistNode(nodeNum);
@@ -187,6 +202,21 @@ void NodeManager::updateNodeSignal(uint32_t nodeNum, float snr, int rssi, int ho
     persistNode(nodeNum);
     emit nodeUpdated(nodeNum);
     scheduleUpdate();
+}
+
+void NodeManager::setNodeFavorite(uint32_t nodeNum, bool favorite)
+{
+    if (m_nodes.contains(nodeNum))
+    {
+        NodeInfo &node = m_nodes[nodeNum];
+        if (node.isFavorite != favorite)
+        {
+            node.isFavorite = favorite;
+            persistNode(nodeNum);
+            emit nodeUpdated(nodeNum);
+            scheduleUpdate();
+        }
+    }
 }
 
 NodeInfo NodeManager::getNode(uint32_t nodeNum) const

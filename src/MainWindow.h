@@ -40,6 +40,13 @@ private slots:
     void onDataReceived(const QByteArray &data);
     void onPacketReceived(const MeshtasticProtocol::DecodedPacket &packet);
     void onSerialError(const QString &error);
+    void onConfigCompleteIdReceived(uint32_t configId);
+
+    // Config loading state
+    uint32_t m_expectedConfigId = 0;
+    QTimer *m_configHeartbeatTimer = nullptr;
+    
+    // UI Setup
     void onNodeSelected(QTableWidgetItem *item);
     void onNodeContextMenu(const QPoint &pos);
     void requestConfig();

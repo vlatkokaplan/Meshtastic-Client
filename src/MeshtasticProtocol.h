@@ -35,7 +35,10 @@ public:
         Metadata,
         MqttClientProxyMessage,
         FileInfo,
-        ClientNotification
+        ClientNotification,
+        ConfigCompleteId,
+        LogRecord,
+        Rebooted
     };
     Q_ENUM(PacketType)
 

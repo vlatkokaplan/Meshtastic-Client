@@ -76,6 +76,7 @@ void MeshtasticProtocol::processFrame(const QByteArray &frame)
         DecodedPacket decoded = decodeFromRadio(frame);
         emit packetReceived(decoded);
     } catch (const std::exception &e) {
+        qWarning() << "[Protocol] Parse error:" << e.what();
         emit parseError(QString("Failed to decode packet: %1").arg(e.what()));
     }
 }
@@ -150,6 +151,7 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
                 }
             }
         }
+        result.fields["isFavorite"] = nodeInfo.is_favorite();
         break;
     }
 
@@ -291,6 +293,27 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
         const auto &meta = fromRadio.metadata();
         result.fields["firmwareVersion"] = QString::fromStdString(meta.firmware_version());
         result.fields["deviceStateVersion"] = meta.device_state_version();
+        break;
+    }
+
+    case meshtastic::FromRadio::kConfigCompleteId: {
+        result.type = PacketType::ConfigCompleteId;
+        result.fields["configId"] = fromRadio.config_complete_id();
+        break;
+    }
+
+    case meshtastic::FromRadio::kLogRecord: {
+        result.type = PacketType::LogRecord;
+        const auto &log = fromRadio.log_record();
+        result.fields["message"] = QString::fromStdString(log.message());
+        result.fields["level"] = log.level();
+        result.fields["source"] = QString::fromStdString(log.source());
+        break;
+    }
+
+    case meshtastic::FromRadio::kRebooted: {
+        result.type = PacketType::Rebooted;
+        result.fields["rebooted"] = fromRadio.rebooted();
         break;
     }
 
@@ -664,6 +687,9 @@ QString MeshtasticProtocol::packetTypeToString(PacketType type)
     case PacketType::MqttClientProxyMessage: return "MqttProxy";
     case PacketType::FileInfo: return "FileInfo";
     case PacketType::ClientNotification: return "Notification";
+    case PacketType::ConfigCompleteId: return "ConfigCompleteId";
+    case PacketType::LogRecord: return "LogRecord";
+    case PacketType::Rebooted: return "Rebooted";
     default: return "Unknown";
     }
 }

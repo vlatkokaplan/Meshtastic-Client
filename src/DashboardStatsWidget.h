@@ -53,6 +53,12 @@ private:
     QLabel *m_chUtilLabel;
     QProgressBar *m_airTxBar;
     QLabel *m_airTxLabel;
+    QLabel *m_envLabel;
+    QLabel *m_envTitleLabel;
+    QLabel *m_uptimeLabel;
+    QLabel *m_uptimeTitleLabel;
+    QLabel *m_signalLabel;
+    QLabel *m_signalTitleLabel;
 
     // Config section
     QLabel *m_roleLabel;

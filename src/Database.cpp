@@ -7,7 +7,7 @@
 #include <QDebug>
 #include <QUuid>
 
-static const int SCHEMA_VERSION = 2;
+static const int SCHEMA_VERSION = 3;
 
 Database::Database(QObject *parent)
     : QObject(parent)
@@ -58,12 +58,15 @@ bool Database::open(const QString &path)
         setSchemaVersion(SCHEMA_VERSION);
     }
 
+    prepareStatements();
+
     qDebug() << "Database opened successfully, schema version:" << SCHEMA_VERSION;
     return true;
 }
 
 void Database::close()
 {
+    cleanupStatements();
     if (m_db.isOpen()) {
         m_db.close();
     }
@@ -118,8 +121,12 @@ bool Database::createTables()
         return false;
     }
 
-    // Ensure is_external_power column exists (for older databases)
+    // Ensure columns exist (for older databases)
     query.exec("ALTER TABLE nodes ADD COLUMN is_external_power INTEGER DEFAULT 0");
+    query.exec("ALTER TABLE nodes ADD COLUMN temperature REAL DEFAULT 0");
+    query.exec("ALTER TABLE nodes ADD COLUMN relative_humidity REAL DEFAULT 0");
+    query.exec("ALTER TABLE nodes ADD COLUMN barometric_pressure REAL DEFAULT 0");
+    query.exec("ALTER TABLE nodes ADD COLUMN uptime_seconds INTEGER DEFAULT 0");
 
     // Messages table
     if (!query.exec(R"(
@@ -164,6 +171,14 @@ bool Database::migrateSchema(int fromVersion, int toVersion)
             }
             qDebug() << "Database migrated to schema version 2";
             break;
+        case 3:
+            // Add environment telemetry columns
+            query.exec("ALTER TABLE nodes ADD COLUMN temperature REAL DEFAULT 0");
+            query.exec("ALTER TABLE nodes ADD COLUMN relative_humidity REAL DEFAULT 0");
+            query.exec("ALTER TABLE nodes ADD COLUMN barometric_pressure REAL DEFAULT 0");
+            query.exec("ALTER TABLE nodes ADD COLUMN uptime_seconds INTEGER DEFAULT 0");
+            qDebug() << "Database migrated to schema version 3";
+            break;
         }
     }
     return true;
@@ -187,54 +202,104 @@ void Database::setSchemaVersion(int version)
     query.exec();
 }
 
-bool Database::saveNode(const NodeInfo &node)
+void Database::prepareStatements()
 {
-    if (node.nodeNum == 0) return false;
-
-    QSqlQuery query(m_db);
-    query.prepare(R"(
+    m_saveNodeStmt = new QSqlQuery(m_db);
+    m_saveNodeStmt->prepare(R"(
         INSERT OR REPLACE INTO nodes (
             node_num, node_id, long_name, short_name, hw_model,
             latitude, longitude, altitude, has_position,
             battery_level, voltage, channel_utilization, air_util_tx,
-            snr, rssi, hops_away, is_external_power, last_heard, first_seen, updated_at
+            snr, rssi, hops_away, is_external_power,
+            temperature, relative_humidity, barometric_pressure, uptime_seconds,
+            last_heard, first_seen, updated_at
         ) VALUES (
             :node_num, :node_id, :long_name, :short_name, :hw_model,
             :latitude, :longitude, :altitude, :has_position,
             :battery_level, :voltage, :channel_utilization, :air_util_tx,
-            :snr, :rssi, :hops_away, :is_external_power, :last_heard,
+            :snr, :rssi, :hops_away, :is_external_power,
+            :temperature, :relative_humidity, :barometric_pressure, :uptime_seconds,
+            :last_heard,
             COALESCE((SELECT first_seen FROM nodes WHERE node_num = :node_num2), :now),
             :updated_at
         )
     )");
 
+    m_saveMessageStmt = new QSqlQuery(m_db);
+    m_saveMessageStmt->prepare(R"(
+        INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at)
+        VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at)
+    )");
+}
+
+void Database::cleanupStatements()
+{
+    delete m_saveNodeStmt;
+    m_saveNodeStmt = nullptr;
+    delete m_saveMessageStmt;
+    m_saveMessageStmt = nullptr;
+}
+
+bool Database::saveNode(const NodeInfo &node)
+{
+    if (node.nodeNum == 0) return false;
+
+    QSqlQuery *query = m_saveNodeStmt;
+    QSqlQuery fallback(m_db);
+    if (!query) {
+        fallback.prepare(R"(
+            INSERT OR REPLACE INTO nodes (
+                node_num, node_id, long_name, short_name, hw_model,
+                latitude, longitude, altitude, has_position,
+                battery_level, voltage, channel_utilization, air_util_tx,
+                snr, rssi, hops_away, is_external_power,
+                temperature, relative_humidity, barometric_pressure, uptime_seconds,
+                last_heard, first_seen, updated_at
+            ) VALUES (
+                :node_num, :node_id, :long_name, :short_name, :hw_model,
+                :latitude, :longitude, :altitude, :has_position,
+                :battery_level, :voltage, :channel_utilization, :air_util_tx,
+                :snr, :rssi, :hops_away, :is_external_power,
+                :temperature, :relative_humidity, :barometric_pressure, :uptime_seconds,
+                :last_heard,
+                COALESCE((SELECT first_seen FROM nodes WHERE node_num = :node_num2), :now),
+                :updated_at
+            )
+        )");
+        query = &fallback;
+    }
+
     qint64 now = QDateTime::currentSecsSinceEpoch();
     qint64 lastHeard = node.lastHeard.isValid() ? node.lastHeard.toSecsSinceEpoch() : 0;
 
-    query.bindValue(":node_num", node.nodeNum);
-    query.bindValue(":node_num2", node.nodeNum);
-    query.bindValue(":node_id", node.nodeId);
-    query.bindValue(":long_name", node.longName);
-    query.bindValue(":short_name", node.shortName);
-    query.bindValue(":hw_model", node.hwModel);
-    query.bindValue(":latitude", node.latitude);
-    query.bindValue(":longitude", node.longitude);
-    query.bindValue(":altitude", node.altitude);
-    query.bindValue(":has_position", node.hasPosition ? 1 : 0);
-    query.bindValue(":battery_level", node.batteryLevel);
-    query.bindValue(":voltage", node.voltage);
-    query.bindValue(":channel_utilization", node.channelUtilization);
-    query.bindValue(":air_util_tx", node.airUtilTx);
-    query.bindValue(":snr", node.snr);
-    query.bindValue(":rssi", node.rssi);
-    query.bindValue(":hops_away", node.hopsAway);
-    query.bindValue(":is_external_power", node.isExternalPower ? 1 : 0);
-    query.bindValue(":last_heard", lastHeard);
-    query.bindValue(":now", now);
-    query.bindValue(":updated_at", now);
+    query->bindValue(":node_num", node.nodeNum);
+    query->bindValue(":node_num2", node.nodeNum);
+    query->bindValue(":node_id", node.nodeId);
+    query->bindValue(":long_name", node.longName);
+    query->bindValue(":short_name", node.shortName);
+    query->bindValue(":hw_model", node.hwModel);
+    query->bindValue(":latitude", node.latitude);
+    query->bindValue(":longitude", node.longitude);
+    query->bindValue(":altitude", node.altitude);
+    query->bindValue(":has_position", node.hasPosition ? 1 : 0);
+    query->bindValue(":battery_level", node.batteryLevel);
+    query->bindValue(":voltage", node.voltage);
+    query->bindValue(":channel_utilization", node.channelUtilization);
+    query->bindValue(":air_util_tx", node.airUtilTx);
+    query->bindValue(":snr", node.snr);
+    query->bindValue(":rssi", node.rssi);
+    query->bindValue(":hops_away", node.hopsAway);
+    query->bindValue(":is_external_power", node.isExternalPower ? 1 : 0);
+    query->bindValue(":temperature", node.temperature);
+    query->bindValue(":relative_humidity", node.relativeHumidity);
+    query->bindValue(":barometric_pressure", node.barometricPressure);
+    query->bindValue(":uptime_seconds", node.uptimeSeconds);
+    query->bindValue(":last_heard", lastHeard);
+    query->bindValue(":now", now);
+    query->bindValue(":updated_at", now);
 
-    if (!query.exec()) {
-        qWarning() << "Failed to save node:" << query.lastError().text();
+    if (!query->exec()) {
+        qWarning() << "Failed to save node:" << query->lastError().text();
         return false;
     }
 
@@ -278,6 +343,11 @@ NodeInfo Database::loadNode(uint32_t nodeNum)
         node.rssi = query.value("rssi").toInt();
         node.hopsAway = query.value("hops_away").toInt();
         node.isExternalPower = query.value("is_external_power").toBool();
+        node.temperature = query.value("temperature").toFloat();
+        node.relativeHumidity = query.value("relative_humidity").toFloat();
+        node.barometricPressure = query.value("barometric_pressure").toFloat();
+        node.uptimeSeconds = query.value("uptime_seconds").toUInt();
+        node.hasEnvironmentTelemetry = (node.temperature != 0.0f || node.relativeHumidity != 0.0f || node.barometricPressure != 0.0f);
         qint64 lastHeard = query.value("last_heard").toLongLong();
         if (lastHeard > 0) {
             node.lastHeard = QDateTime::fromSecsSinceEpoch(lastHeard);
@@ -316,6 +386,11 @@ QList<NodeInfo> Database::loadAllNodes()
         node.rssi = query.value("rssi").toInt();
         node.hopsAway = query.value("hops_away").toInt();
         node.isExternalPower = query.value("is_external_power").toBool();
+        node.temperature = query.value("temperature").toFloat();
+        node.relativeHumidity = query.value("relative_humidity").toFloat();
+        node.barometricPressure = query.value("barometric_pressure").toFloat();
+        node.uptimeSeconds = query.value("uptime_seconds").toUInt();
+        node.hasEnvironmentTelemetry = (node.temperature != 0.0f || node.relativeHumidity != 0.0f || node.barometricPressure != 0.0f);
         qint64 lastHeard = query.value("last_heard").toLongLong();
         if (lastHeard > 0) {
             node.lastHeard = QDateTime::fromSecsSinceEpoch(lastHeard);
@@ -348,27 +423,31 @@ int Database::nodeCount()
 
 bool Database::saveMessage(const Message &msg)
 {
-    QSqlQuery query(m_db);
-    query.prepare(R"(
-        INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at)
-        VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at)
-    )");
+    QSqlQuery *query = m_saveMessageStmt;
+    QSqlQuery fallback(m_db);
+    if (!query) {
+        fallback.prepare(R"(
+            INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at)
+            VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at)
+        )");
+        query = &fallback;
+    }
 
     qint64 now = QDateTime::currentSecsSinceEpoch();
     qint64 timestamp = msg.timestamp.isValid() ? msg.timestamp.toSecsSinceEpoch() : now;
 
-    query.bindValue(":from", msg.fromNode);
-    query.bindValue(":to", msg.toNode);
-    query.bindValue(":channel", msg.channel);
-    query.bindValue(":port_num", msg.portNum);
-    query.bindValue(":text", msg.text);
-    query.bindValue(":payload", msg.payload);
-    query.bindValue(":timestamp", timestamp);
-    query.bindValue(":read", msg.read ? 1 : 0);
-    query.bindValue(":created_at", now);
+    query->bindValue(":from", msg.fromNode);
+    query->bindValue(":to", msg.toNode);
+    query->bindValue(":channel", msg.channel);
+    query->bindValue(":port_num", msg.portNum);
+    query->bindValue(":text", msg.text);
+    query->bindValue(":payload", msg.payload);
+    query->bindValue(":timestamp", timestamp);
+    query->bindValue(":read", msg.read ? 1 : 0);
+    query->bindValue(":created_at", now);
 
-    if (!query.exec()) {
-        qWarning() << "Failed to save message:" << query.lastError().text();
+    if (!query->exec()) {
+        qWarning() << "Failed to save message:" << query->lastError().text();
         return false;
     }
 

@@ -169,6 +169,28 @@ void NodeManager::updateNodeTelemetry(uint32_t nodeNum, const QVariantMap &telem
     {
         node.isExternalPower = false;
     }
+
+    // Environment telemetry
+    if (telemetry.contains("temperature"))
+    {
+        node.temperature = telemetry["temperature"].toFloat();
+        node.hasEnvironmentTelemetry = true;
+    }
+    if (telemetry.contains("relativeHumidity"))
+    {
+        node.relativeHumidity = telemetry["relativeHumidity"].toFloat();
+        node.hasEnvironmentTelemetry = true;
+    }
+    if (telemetry.contains("barometricPressure"))
+    {
+        node.barometricPressure = telemetry["barometricPressure"].toFloat();
+        node.hasEnvironmentTelemetry = true;
+    }
+    if (telemetry.contains("uptimeSeconds"))
+    {
+        node.uptimeSeconds = telemetry["uptimeSeconds"].toUInt();
+    }
+
     node.lastHeard = QDateTime::currentDateTime();
 
     persistNode(nodeNum);

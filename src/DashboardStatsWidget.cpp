@@ -129,6 +129,39 @@ void DashboardStatsWidget::setupUI()
     telemetryLayout->addWidget(m_airTxBar, 3, 1);
     telemetryLayout->addWidget(m_airTxLabel, 3, 2);
 
+    // Environment row
+    m_envTitleLabel = new QLabel("Environ");
+    m_envTitleLabel->setStyleSheet("font-size: 11px;");
+    m_envLabel = new QLabel;
+    m_envLabel->setStyleSheet("font-size: 11px;");
+    m_envLabel->setAlignment(Qt::AlignRight);
+    telemetryLayout->addWidget(m_envTitleLabel, 4, 0);
+    telemetryLayout->addWidget(m_envLabel, 4, 1, 1, 2);
+    m_envTitleLabel->hide();
+    m_envLabel->hide();
+
+    // Uptime row
+    m_uptimeTitleLabel = new QLabel("Uptime");
+    m_uptimeTitleLabel->setStyleSheet("font-size: 11px;");
+    m_uptimeLabel = new QLabel;
+    m_uptimeLabel->setStyleSheet("font-size: 11px;");
+    m_uptimeLabel->setAlignment(Qt::AlignRight);
+    telemetryLayout->addWidget(m_uptimeTitleLabel, 5, 0);
+    telemetryLayout->addWidget(m_uptimeLabel, 5, 1, 1, 2);
+    m_uptimeTitleLabel->hide();
+    m_uptimeLabel->hide();
+
+    // Signal row
+    m_signalTitleLabel = new QLabel("Signal");
+    m_signalTitleLabel->setStyleSheet("font-size: 11px;");
+    m_signalLabel = new QLabel;
+    m_signalLabel->setStyleSheet("font-size: 11px;");
+    m_signalLabel->setAlignment(Qt::AlignRight);
+    telemetryLayout->addWidget(m_signalTitleLabel, 6, 0);
+    telemetryLayout->addWidget(m_signalLabel, 6, 1, 1, 2);
+    m_signalTitleLabel->hide();
+    m_signalLabel->hide();
+
     mainLayout->addLayout(telemetryLayout);
 
     // Separator
@@ -269,6 +302,47 @@ void DashboardStatsWidget::updateTelemetry()
     // Air TX utilization
     m_airTxBar->setValue(static_cast<int>(node.airUtilTx * 10));
     m_airTxLabel->setText(QString("%1%").arg(node.airUtilTx, 0, 'f', 1));
+
+    // Environment telemetry
+    if (node.hasEnvironmentTelemetry) {
+        QStringList parts;
+        if (node.temperature != 0.0f)
+            parts << QString("%1\u00b0C").arg(node.temperature, 0, 'f', 1);
+        if (node.relativeHumidity != 0.0f)
+            parts << QString("%1% RH").arg(node.relativeHumidity, 0, 'f', 0);
+        if (node.barometricPressure != 0.0f)
+            parts << QString("%1 hPa").arg(node.barometricPressure, 0, 'f', 1);
+        m_envLabel->setText(parts.join("  \u00b7  "));
+        m_envTitleLabel->show();
+        m_envLabel->show();
+    }
+
+    // Uptime
+    if (node.uptimeSeconds > 0) {
+        uint32_t secs = node.uptimeSeconds;
+        uint32_t days = secs / 86400; secs %= 86400;
+        uint32_t hours = secs / 3600; secs %= 3600;
+        uint32_t mins = secs / 60;
+        QStringList parts;
+        if (days > 0) parts << QString("%1d").arg(days);
+        if (hours > 0) parts << QString("%1h").arg(hours);
+        parts << QString("%1m").arg(mins);
+        m_uptimeLabel->setText(parts.join(" "));
+        m_uptimeTitleLabel->show();
+        m_uptimeLabel->show();
+    }
+
+    // Signal quality
+    if (node.snr != 0.0f || node.rssi != 0) {
+        QStringList parts;
+        if (node.snr != 0.0f)
+            parts << QString("SNR %1 dB").arg(node.snr, 0, 'f', 1);
+        if (node.rssi != 0)
+            parts << QString("RSSI %1 dBm").arg(node.rssi);
+        m_signalLabel->setText(parts.join("  /  "));
+        m_signalTitleLabel->show();
+        m_signalLabel->show();
+    }
 }
 
 void DashboardStatsWidget::updateConfig()

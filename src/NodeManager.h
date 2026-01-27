@@ -35,6 +35,13 @@ struct NodeInfo
     bool isExternalPower = false; // True if node is externally powered
     bool isFavorite = false;      // True if node is marked as favorite
 
+    // Environment telemetry
+    float temperature = 0.0;
+    float relativeHumidity = 0.0;
+    float barometricPressure = 0.0;
+    uint32_t uptimeSeconds = 0;
+    bool hasEnvironmentTelemetry = false;
+
     QVariantMap toVariantMap() const
     {
         QVariantMap map;
@@ -55,6 +62,11 @@ struct NodeInfo
         map["hopsAway"] = hopsAway;
         map["isExternalPower"] = isExternalPower;
         map["isFavorite"] = isFavorite;
+        map["temperature"] = temperature;
+        map["relativeHumidity"] = relativeHumidity;
+        map["barometricPressure"] = barometricPressure;
+        map["uptimeSeconds"] = uptimeSeconds;
+        map["hasEnvironmentTelemetry"] = hasEnvironmentTelemetry;
         return map;
     }
 };

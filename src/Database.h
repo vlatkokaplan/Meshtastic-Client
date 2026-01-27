@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QString>
 #include <QList>
 #include "NodeManager.h"
@@ -54,10 +55,16 @@ private:
     QSqlDatabase m_db;
     QString m_connectionName;
 
+    // Cached prepared statements
+    QSqlQuery *m_saveNodeStmt = nullptr;
+    QSqlQuery *m_saveMessageStmt = nullptr;
+
     bool createTables();
     bool migrateSchema(int fromVersion, int toVersion);
     int getSchemaVersion();
     void setSchemaVersion(int version);
+    void prepareStatements();
+    void cleanupStatements();
 };
 
 #endif // DATABASE_H

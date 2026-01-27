@@ -83,6 +83,7 @@ set(SOURCES
     src/ConfigWidget.cpp
     src/AppSettingsTab.cpp
     src/DeviceConfig.cpp
+    src/DashboardStatsWidget.cpp
     src/RadioConfigTab.cpp
     src/DeviceConfigTab.cpp
     src/PositionConfigTab.cpp
@@ -102,6 +103,7 @@ set(HEADERS
     src/ConfigWidget.h
     src/AppSettingsTab.h
     src/DeviceConfig.h
+    src/DashboardStatsWidget.h
     src/RadioConfigTab.h
     src/DeviceConfigTab.h
     src/PositionConfigTab.h

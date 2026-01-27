@@ -14,6 +14,7 @@
 
 #include "MeshtasticProtocol.h" // Need full include for nested type
 
+class QTimer;
 class SerialConnection;
 class NodeManager;
 class PacketListWidget;
@@ -22,6 +23,7 @@ class MessagesWidget;
 class ConfigWidget;
 
 class MapWidget;
+class DashboardStatsWidget;
 
 class MainWindow : public QMainWindow
 {
@@ -42,10 +44,6 @@ private slots:
     void onSerialError(const QString &error);
     void onConfigCompleteIdReceived(uint32_t configId);
 
-    // Config loading state
-    uint32_t m_expectedConfigId = 0;
-    QTimer *m_configHeartbeatTimer = nullptr;
-    
     // UI Setup
     void onNodeSelected(QTableWidgetItem *item);
     void onNodeContextMenu(const QPoint &pos);
@@ -69,6 +67,10 @@ private slots:
     void onExportMessages(const QString &format);
 
 private:
+    // Config loading state
+    uint32_t m_expectedConfigId = 0;
+    QTimer *m_configHeartbeatTimer = nullptr;
+
     // Core components
     SerialConnection *m_serial;
     MeshtasticProtocol *m_protocol;
@@ -89,6 +91,8 @@ private:
     ConfigWidget *m_configWidget;
 
     MapWidget *m_mapWidget;
+    DashboardStatsWidget *m_dashboardStats;
+    QString m_firmwareVersion;
     QSystemTrayIcon *m_trayIcon;
 
     void setupUI();

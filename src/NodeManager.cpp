@@ -82,16 +82,6 @@ void NodeManager::updateNodeFromPacket(const QVariantMap &fields)
                     node.altitude = fields["altitude"].toInt();
                 }
                 emit nodePositionUpdated(nodeNum, lat, lon);
-            if (lat != 0.0 || lon != 0.0)
-            {
-                node.latitude = lat;
-                node.longitude = lon;
-                node.hasPosition = true;
-                if (fields.contains("altitude"))
-                {
-                    node.altitude = fields["altitude"].toInt();
-                }
-                emit nodePositionUpdated(nodeNum, lat, lon);
             }
         }
         

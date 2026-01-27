@@ -11,6 +11,7 @@
 #include "AppSettingsTab.h"
 
 #include "MapWidget.h"
+#include "DashboardStatsWidget.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -43,6 +44,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_database = nullptr; // Database opened after connection with device-specific path
 
     m_mapWidget = nullptr;
+    m_dashboardStats = nullptr;
     m_messagesWidget = nullptr;
     m_configWidget = nullptr;
     m_trayIcon = nullptr;
@@ -57,8 +59,6 @@ MainWindow::MainWindow(QWidget *parent)
         m_trayIcon->show();
     }
 
-    m_reconnectTimer->setInterval(2000);
-    
     // Config heartbeat timer (fast heartbeat during config)
     m_configHeartbeatTimer = new QTimer(this);
     m_configHeartbeatTimer->setInterval(5000); // 5 seconds
@@ -136,6 +136,9 @@ void MainWindow::setupUI()
     m_tabWidget = new QTabWidget;
     setCentralWidget(m_tabWidget);
 
+    // Create ConfigWidget early so DeviceConfig is available for DashboardStatsWidget
+    m_configWidget = new ConfigWidget;
+
     setupMapTab();
     setupMessagesTab();
     setupPacketTab();
@@ -198,6 +201,10 @@ void MainWindow::setupMapTab()
     QVBoxLayout *sidebarLayout = new QVBoxLayout(sidebar);
     sidebarLayout->setContentsMargins(0, 0, 0, 0);
 
+    // Dashboard stats panel
+    m_dashboardStats = new DashboardStatsWidget(m_nodeManager, m_configWidget->deviceConfig());
+    sidebarLayout->addWidget(m_dashboardStats);
+
     QLabel *nodesLabel = new QLabel("Nodes");
     nodesLabel->setStyleSheet("font-weight: bold; padding: 5px;");
     sidebarLayout->addWidget(nodesLabel);
@@ -256,7 +263,6 @@ void MainWindow::setupPacketTab()
 
 void MainWindow::setupConfigTab()
 {
-    m_configWidget = new ConfigWidget;
     m_tabWidget->addTab(m_configWidget, "Config");
 
     // Connect config save signals
@@ -562,8 +568,17 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
         break;
     }
 
+    case MeshtasticProtocol::PacketType::Metadata:
+        if (packet.fields.contains("firmwareVersion"))
+        {
+            m_firmwareVersion = packet.fields["firmwareVersion"].toString();
+            if (m_dashboardStats) {
+                m_dashboardStats->setFirmwareVersion(m_firmwareVersion);
+            }
+        }
+        break;
+
     default:
-        qWarning() << "Unknown packet type received";
         break;
     }
 
@@ -599,11 +614,16 @@ void MainWindow::onNodeContextMenu(const QPoint &pos)
     QTableWidgetItem *item = m_nodeTable->itemAt(pos);
     if (!item)
         return;
-    int row = item->row();
-    uint32_t nodeNum = m_nodeTable->item(row, 0)->data(Qt::UserRole).toUInt();
+
+    // Ensure we have the data
+    uint32_t nodeNum = item->data(Qt::UserRole).toUInt();
+    if (nodeNum == 0)
+        return;
+
     NodeInfo node = m_nodeManager->getNode(nodeNum);
+
     QMenu menu(this);
-    QString nodeName = node.longName.isEmpty() ? node.shortName : node.longName;
+    QString nodeName = node.longName;
     if (nodeName.isEmpty())
         nodeName = node.nodeId;
     QAction *headerAction = menu.addAction(nodeName);
@@ -763,6 +783,9 @@ void MainWindow::updateNodeList()
         m_nodeTable->insertRow(row);
         // Node Name
         QString name = node.longName.isEmpty() ? node.nodeId : node.longName;
+        if (node.isFavorite) {
+            name = "⭐ " + name;
+        }
         QTableWidgetItem *nameItem = new QTableWidgetItem(name);
         nameItem->setData(Qt::UserRole, node.nodeNum);
         if (!node.hasPosition)

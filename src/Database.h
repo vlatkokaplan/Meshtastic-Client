@@ -8,7 +8,7 @@
 #include <QList>
 #include "NodeManager.h"
 
-struct ChatMessage;  // Forward declaration
+struct ChatMessage; // Forward declaration
 
 class Database : public QObject
 {
@@ -31,7 +31,8 @@ public:
     int nodeCount();
 
     // Message operations (for future use)
-    struct Message {
+    struct Message
+    {
         qint64 id = 0;
         uint32_t fromNode = 0;
         uint32_t toNode = 0;
@@ -41,15 +42,18 @@ public:
         bool read = false;
         int portNum = 0;
         QByteArray payload;
+        int status = 0; // MessageStatus enum value
+        uint32_t packetId = 0;
     };
 
     bool saveMessage(const Message &msg);
     QList<Message> loadMessages(int limit = 100, int offset = 0);
     QList<Message> loadMessagesForNode(uint32_t nodeNum, int limit = 100);
+    bool updateMessageStatusByPacketId(uint32_t packetId, int status);
     bool markMessageRead(qint64 messageId);
     int unreadMessageCount();
     bool deleteMessagesWithNode(uint32_t nodeNum);
-    QList<ChatMessage> getAllMessages();  // For export
+    QList<ChatMessage> getAllMessages(); // For export
 
 private:
     QSqlDatabase m_db;

@@ -1,5 +1,5 @@
 #include "Database.h"
-#include "MessagesWidget.h"  // For ChatMessage struct
+#include "MessagesWidget.h" // For ChatMessage struct
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QStandardPaths>
@@ -7,7 +7,7 @@
 #include <QDebug>
 #include <QUuid>
 
-static const int SCHEMA_VERSION = 3;
+static const int SCHEMA_VERSION = 4;
 
 Database::Database(QObject *parent)
     : QObject(parent)
@@ -23,7 +23,8 @@ Database::~Database()
 bool Database::open(const QString &path)
 {
     QString dbPath = path;
-    if (dbPath.isEmpty()) {
+    if (dbPath.isEmpty())
+    {
         QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         QDir().mkpath(dataDir);
         dbPath = dataDir + "/meshtastic.db";
@@ -34,7 +35,8 @@ bool Database::open(const QString &path)
     m_db = QSqlDatabase::addDatabase("QSQLITE", m_connectionName);
     m_db.setDatabaseName(dbPath);
 
-    if (!m_db.open()) {
+    if (!m_db.open())
+    {
         qWarning() << "Failed to open database:" << m_db.lastError().text();
         return false;
     }
@@ -45,13 +47,19 @@ bool Database::open(const QString &path)
 
     // Create or migrate tables
     int version = getSchemaVersion();
-    if (version < SCHEMA_VERSION) {
-        if (version == 0) {
-            if (!createTables()) {
+    if (version < SCHEMA_VERSION)
+    {
+        if (version == 0)
+        {
+            if (!createTables())
+            {
                 return false;
             }
-        } else {
-            if (!migrateSchema(version, SCHEMA_VERSION)) {
+        }
+        else
+        {
+            if (!migrateSchema(version, SCHEMA_VERSION))
+            {
                 return false;
             }
         }
@@ -67,7 +75,8 @@ bool Database::open(const QString &path)
 void Database::close()
 {
     cleanupStatements();
-    if (m_db.isOpen()) {
+    if (m_db.isOpen())
+    {
         m_db.close();
     }
     QSqlDatabase::removeDatabase(m_connectionName);
@@ -87,7 +96,8 @@ bool Database::createTables()
         CREATE TABLE IF NOT EXISTS schema_version (
             version INTEGER PRIMARY KEY
         )
-    )")) {
+    )"))
+    {
         qWarning() << "Failed to create schema_version table:" << query.lastError().text();
         return false;
     }
@@ -116,7 +126,8 @@ bool Database::createTables()
             first_seen INTEGER,
             updated_at INTEGER
         )
-    )")) {
+    )"))
+    {
         qWarning() << "Failed to create nodes table:" << query.lastError().text();
         return false;
     }
@@ -141,9 +152,12 @@ bool Database::createTables()
             timestamp INTEGER,
             read INTEGER DEFAULT 0,
             created_at INTEGER,
+            status INTEGER DEFAULT 0,
+            packet_id INTEGER DEFAULT 0,
             FOREIGN KEY (from_node) REFERENCES nodes(node_num)
         )
-    )")) {
+    )"))
+    {
         qWarning() << "Failed to create messages table:" << query.lastError().text();
         return false;
     }
@@ -161,11 +175,14 @@ bool Database::migrateSchema(int fromVersion, int toVersion)
 {
     QSqlQuery query(m_db);
 
-    for (int v = fromVersion + 1; v <= toVersion; v++) {
-        switch (v) {
+    for (int v = fromVersion + 1; v <= toVersion; v++)
+    {
+        switch (v)
+        {
         case 2:
             // Add is_external_power column
-            if (!query.exec("ALTER TABLE nodes ADD COLUMN is_external_power INTEGER DEFAULT 0")) {
+            if (!query.exec("ALTER TABLE nodes ADD COLUMN is_external_power INTEGER DEFAULT 0"))
+            {
                 qWarning() << "Migration to v2 failed:" << query.lastError().text();
                 return false;
             }
@@ -179,6 +196,12 @@ bool Database::migrateSchema(int fromVersion, int toVersion)
             query.exec("ALTER TABLE nodes ADD COLUMN uptime_seconds INTEGER DEFAULT 0");
             qDebug() << "Database migrated to schema version 3";
             break;
+        case 4:
+            // Add message status and packet id columns
+            query.exec("ALTER TABLE messages ADD COLUMN status INTEGER DEFAULT 0");
+            query.exec("ALTER TABLE messages ADD COLUMN packet_id INTEGER DEFAULT 0");
+            qDebug() << "Database migrated to schema version 4";
+            break;
         }
     }
     return true;
@@ -187,7 +210,8 @@ bool Database::migrateSchema(int fromVersion, int toVersion)
 int Database::getSchemaVersion()
 {
     QSqlQuery query(m_db);
-    if (query.exec("SELECT version FROM schema_version LIMIT 1") && query.next()) {
+    if (query.exec("SELECT version FROM schema_version LIMIT 1") && query.next())
+    {
         return query.value(0).toInt();
     }
     return 0;
@@ -227,8 +251,8 @@ void Database::prepareStatements()
 
     m_saveMessageStmt = new QSqlQuery(m_db);
     m_saveMessageStmt->prepare(R"(
-        INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at)
-        VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at)
+        INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at, status, packet_id)
+        VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at, :status, :packet_id)
     )");
 }
 
@@ -242,11 +266,13 @@ void Database::cleanupStatements()
 
 bool Database::saveNode(const NodeInfo &node)
 {
-    if (node.nodeNum == 0) return false;
+    if (node.nodeNum == 0)
+        return false;
 
     QSqlQuery *query = m_saveNodeStmt;
     QSqlQuery fallback(m_db);
-    if (!query) {
+    if (!query)
+    {
         fallback.prepare(R"(
             INSERT OR REPLACE INTO nodes (
                 node_num, node_id, long_name, short_name, hw_model,
@@ -298,7 +324,8 @@ bool Database::saveNode(const NodeInfo &node)
     query->bindValue(":now", now);
     query->bindValue(":updated_at", now);
 
-    if (!query->exec()) {
+    if (!query->exec())
+    {
         qWarning() << "Failed to save node:" << query->lastError().text();
         return false;
     }
@@ -309,8 +336,10 @@ bool Database::saveNode(const NodeInfo &node)
 bool Database::saveNodes(const QList<NodeInfo> &nodes)
 {
     m_db.transaction();
-    for (const NodeInfo &node : nodes) {
-        if (!saveNode(node)) {
+    for (const NodeInfo &node : nodes)
+    {
+        if (!saveNode(node))
+        {
             m_db.rollback();
             return false;
         }
@@ -325,7 +354,8 @@ NodeInfo Database::loadNode(uint32_t nodeNum)
     query.prepare("SELECT * FROM nodes WHERE node_num = ?");
     query.addBindValue(nodeNum);
 
-    if (query.exec() && query.next()) {
+    if (query.exec() && query.next())
+    {
         node.nodeNum = query.value("node_num").toUInt();
         node.nodeId = query.value("node_id").toString();
         node.longName = query.value("long_name").toString();
@@ -349,7 +379,8 @@ NodeInfo Database::loadNode(uint32_t nodeNum)
         node.uptimeSeconds = query.value("uptime_seconds").toUInt();
         node.hasEnvironmentTelemetry = (node.temperature != 0.0f || node.relativeHumidity != 0.0f || node.barometricPressure != 0.0f);
         qint64 lastHeard = query.value("last_heard").toLongLong();
-        if (lastHeard > 0) {
+        if (lastHeard > 0)
+        {
             node.lastHeard = QDateTime::fromSecsSinceEpoch(lastHeard);
         }
     }
@@ -362,12 +393,14 @@ QList<NodeInfo> Database::loadAllNodes()
     QList<NodeInfo> nodes;
     QSqlQuery query(m_db);
 
-    if (!query.exec("SELECT * FROM nodes ORDER BY last_heard DESC")) {
+    if (!query.exec("SELECT * FROM nodes ORDER BY last_heard DESC"))
+    {
         qWarning() << "Failed to load nodes:" << query.lastError().text();
         return nodes;
     }
 
-    while (query.next()) {
+    while (query.next())
+    {
         NodeInfo node;
         node.nodeNum = query.value("node_num").toUInt();
         node.nodeId = query.value("node_id").toString();
@@ -392,7 +425,8 @@ QList<NodeInfo> Database::loadAllNodes()
         node.uptimeSeconds = query.value("uptime_seconds").toUInt();
         node.hasEnvironmentTelemetry = (node.temperature != 0.0f || node.relativeHumidity != 0.0f || node.barometricPressure != 0.0f);
         qint64 lastHeard = query.value("last_heard").toLongLong();
-        if (lastHeard > 0) {
+        if (lastHeard > 0)
+        {
             node.lastHeard = QDateTime::fromSecsSinceEpoch(lastHeard);
         }
         nodes.append(node);
@@ -413,7 +447,8 @@ bool Database::deleteNode(uint32_t nodeNum)
 int Database::nodeCount()
 {
     QSqlQuery query(m_db);
-    if (query.exec("SELECT COUNT(*) FROM nodes") && query.next()) {
+    if (query.exec("SELECT COUNT(*) FROM nodes") && query.next())
+    {
         return query.value(0).toInt();
     }
     return 0;
@@ -425,10 +460,11 @@ bool Database::saveMessage(const Message &msg)
 {
     QSqlQuery *query = m_saveMessageStmt;
     QSqlQuery fallback(m_db);
-    if (!query) {
+    if (!query)
+    {
         fallback.prepare(R"(
-            INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at)
-            VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at)
+            INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at, status, packet_id)
+            VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at, :status, :packet_id)
         )");
         query = &fallback;
     }
@@ -445,8 +481,11 @@ bool Database::saveMessage(const Message &msg)
     query->bindValue(":timestamp", timestamp);
     query->bindValue(":read", msg.read ? 1 : 0);
     query->bindValue(":created_at", now);
+    query->bindValue(":status", msg.status);
+    query->bindValue(":packet_id", msg.packetId);
 
-    if (!query->exec()) {
+    if (!query->exec())
+    {
         qWarning() << "Failed to save message:" << query->lastError().text();
         return false;
     }
@@ -462,12 +501,14 @@ QList<Database::Message> Database::loadMessages(int limit, int offset)
     query.addBindValue(limit);
     query.addBindValue(offset);
 
-    if (!query.exec()) {
+    if (!query.exec())
+    {
         qWarning() << "Failed to load messages:" << query.lastError().text();
         return messages;
     }
 
-    while (query.next()) {
+    while (query.next())
+    {
         Message msg;
         msg.id = query.value("id").toLongLong();
         msg.fromNode = query.value("from_node").toUInt();
@@ -477,8 +518,11 @@ QList<Database::Message> Database::loadMessages(int limit, int offset)
         msg.text = query.value("text").toString();
         msg.payload = query.value("payload").toByteArray();
         msg.read = query.value("read").toBool();
+        msg.status = query.value("status").toInt();
+        msg.packetId = query.value("packet_id").toUInt();
         qint64 ts = query.value("timestamp").toLongLong();
-        if (ts > 0) {
+        if (ts > 0)
+        {
             msg.timestamp = QDateTime::fromSecsSinceEpoch(ts);
         }
         messages.append(msg);
@@ -496,11 +540,13 @@ QList<Database::Message> Database::loadMessagesForNode(uint32_t nodeNum, int lim
     query.addBindValue(nodeNum);
     query.addBindValue(limit);
 
-    if (!query.exec()) {
+    if (!query.exec())
+    {
         return messages;
     }
 
-    while (query.next()) {
+    while (query.next())
+    {
         Message msg;
         msg.id = query.value("id").toLongLong();
         msg.fromNode = query.value("from_node").toUInt();
@@ -511,7 +557,8 @@ QList<Database::Message> Database::loadMessagesForNode(uint32_t nodeNum, int lim
         msg.payload = query.value("payload").toByteArray();
         msg.read = query.value("read").toBool();
         qint64 ts = query.value("timestamp").toLongLong();
-        if (ts > 0) {
+        if (ts > 0)
+        {
             msg.timestamp = QDateTime::fromSecsSinceEpoch(ts);
         }
         messages.append(msg);
@@ -531,7 +578,8 @@ bool Database::markMessageRead(qint64 messageId)
 int Database::unreadMessageCount()
 {
     QSqlQuery query(m_db);
-    if (query.exec("SELECT COUNT(*) FROM messages WHERE read = 0") && query.next()) {
+    if (query.exec("SELECT COUNT(*) FROM messages WHERE read = 0") && query.next())
+    {
         return query.value(0).toInt();
     }
     return 0;
@@ -544,7 +592,8 @@ bool Database::deleteMessagesWithNode(uint32_t nodeNum)
     query.addBindValue(nodeNum);
     query.addBindValue(nodeNum);
 
-    if (!query.exec()) {
+    if (!query.exec())
+    {
         qWarning() << "Failed to delete messages:" << query.lastError().text();
         return false;
     }
@@ -558,12 +607,14 @@ QList<ChatMessage> Database::getAllMessages()
     QList<ChatMessage> messages;
     QSqlQuery query(m_db);
 
-    if (!query.exec("SELECT * FROM messages ORDER BY timestamp ASC")) {
+    if (!query.exec("SELECT * FROM messages ORDER BY timestamp ASC"))
+    {
         qWarning() << "Failed to load all messages:" << query.lastError().text();
         return messages;
     }
 
-    while (query.next()) {
+    while (query.next())
+    {
         ChatMessage msg;
         msg.id = query.value("id").toLongLong();
         msg.fromNode = query.value("from_node").toUInt();
@@ -571,9 +622,10 @@ QList<ChatMessage> Database::getAllMessages()
         msg.channelIndex = query.value("channel").toString().toInt();
         msg.text = query.value("text").toString();
         msg.read = query.value("read").toBool();
-        msg.packetId = 0;  // Not stored in DB currently
+        msg.packetId = 0; // Not stored in DB currently
         qint64 ts = query.value("timestamp").toLongLong();
-        if (ts > 0) {
+        if (ts > 0)
+        {
             msg.timestamp = QDateTime::fromSecsSinceEpoch(ts);
         }
         messages.append(msg);

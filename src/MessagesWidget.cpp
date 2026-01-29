@@ -288,6 +288,8 @@ void MessagesWidget::addMessage(const ChatMessage &msg)
         dbMsg.text = msg.text;
         dbMsg.timestamp = msg.timestamp;
         dbMsg.portNum = 1;
+        dbMsg.status = static_cast<int>(msg.status);
+        dbMsg.packetId = msg.packetId;
         m_database->saveMessage(dbMsg);
     }
 
@@ -312,7 +314,11 @@ void MessagesWidget::updateMessageStatus(uint32_t packetId, int errorReason)
             switch (errorReason)
             {
             case 0: // NONE
-                msg.status = MessageStatus::Sent;
+                // Keep Delivered if we've already confirmed delivery
+                if (msg.status != MessageStatus::Delivered)
+                {
+                    msg.status = MessageStatus::Sent;
+                }
                 break;
             case 1: // NO_ROUTE
                 msg.status = MessageStatus::NoRoute;
@@ -354,7 +360,7 @@ void MessagesWidget::updateMessageStatus(uint32_t packetId, int errorReason)
     qDebug() << "[MessagesWidget] No message found with packetId" << packetId;
 }
 
-void MessagesWidget::updateMessageDelivered(uint32_t packetId)
+void MessagesWidget::updateMessageDelivered(uint32_t packetId, uint32_t fromNode)
 {
     if (packetId == 0)
         return;
@@ -365,9 +371,12 @@ void MessagesWidget::updateMessageDelivered(uint32_t packetId)
     {
         if (msg.packetId == packetId)
         {
-            // Only mark as delivered if it's a private message and currently at "Sent" status
+            // Only mark as delivered if it's a private message and currently at "Sending" or "Sent" status
             bool isPrivateMessage = (msg.toNode != 0xFFFFFFFF && msg.toNode != 0);
-            if (isPrivateMessage && msg.status == MessageStatus::Sent)
+            // If fromNode is provided, validate it's from the destination (not an intermediate relay)
+            bool isFromDestination = (fromNode == 0 || msg.toNode == fromNode);
+
+            if (isPrivateMessage && (msg.status == MessageStatus::Sent || msg.status == MessageStatus::Sending) && isFromDestination)
             {
                 msg.status = MessageStatus::Delivered;
                 qDebug() << "[MessagesWidget] Message marked as delivered";
@@ -409,6 +418,8 @@ void MessagesWidget::loadFromDatabase()
         msg.timestamp = dbMsg.timestamp;
         msg.read = dbMsg.read;
         msg.isOutgoing = (dbMsg.fromNode == m_nodeManager->myNodeNum());
+        msg.status = static_cast<MessageStatus>(dbMsg.status);
+        msg.packetId = dbMsg.packetId;
 
         m_messages.append(msg);
     }

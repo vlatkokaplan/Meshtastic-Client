@@ -60,7 +60,7 @@ public:
     void setDatabase(Database *db);
     void addMessage(const ChatMessage &msg);
     void updateMessageStatus(uint32_t packetId, int errorReason);
-    void updateMessageDelivered(uint32_t packetId);
+    void updateMessageDelivered(uint32_t packetId, uint32_t fromNode = 0);
     void loadFromDatabase();
     void clear();
     void startDirectMessage(uint32_t nodeNum);

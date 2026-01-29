@@ -576,7 +576,7 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
                         // This routing ACK came from an intermediate node or destination
                         // If we have a message to this node with matching packetId, mark it as delivered
                         qDebug() << "Delivery confirmation from node" << QString::number(packet.from, 16);
-                        m_messagesWidget->updateMessageDelivered(packetId);
+                        m_messagesWidget->updateMessageDelivered(packetId, packet.from);
                     }
                 }
                 else

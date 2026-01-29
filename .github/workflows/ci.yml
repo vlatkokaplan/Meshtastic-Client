@@ -3,11 +3,12 @@ name: CI
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,3 +30,85 @@ jobs:
         run: |
           cd build
           cmake --build . -- -j$(nproc)
+
+      - name: Build DEB Package
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          cd build
+          cpack -G DEB
+
+      - name: Upload Linux Artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v3
+        with:
+          name: linux-deb
+          path: build/meshtastic-vibe-client-*.deb
+
+  build-windows:
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.4.2'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_mingw'
+          modules: 'qtserialport qtwebengine'
+          tools: 'tools_mingw'
+
+      - name: Install dependencies
+        run: |
+          choco install cmake protobuf -y
+
+      - name: Configure for Windows
+        run: |
+          mkdir build-win
+          cd build-win
+          cmake -G "MinGW Makefiles" ..
+
+      - name: Build for Windows
+        run: |
+          cd build-win
+          cmake --build . --config Release -- -j%NUMBER_OF_PROCESSORS%
+
+      - name: Package Windows executable
+        run: |
+          cd build-win
+          mkdir meshtastic-vibe-client-win
+          copy meshtastic-vibe-client.exe meshtastic-vibe-client-win\
+          xcopy resources meshtastic-vibe-client-win\resources /E /I
+          7z a meshtastic-vibe-client-windows.zip meshtastic-vibe-client-win
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: windows-exe
+          path: build-win/meshtastic-vibe-client-windows.zip
+
+  create-release:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: linux-deb
+          path: linux-artifacts
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: windows-exe
+          path: windows-artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            linux-artifacts/meshtastic-vibe-client-*.deb
+            windows-artifacts/meshtastic-vibe-client-windows.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -15,53 +15,81 @@
 #include <QBrush>
 #include <QStyledItemDelegate>
 #include <QPainter>
+#include <QToolTip>
+#include <QHelpEvent>
+#include <QShortcut>
+#include <QKeySequence>
+#include "AppSettings.h"
 
-// Custom delegate to paint message items with their explicit colors
+// Custom delegate to paint message items with their explicit colors and show tooltips
 class MessageItemDelegate : public QStyledItemDelegate
 {
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
-    
+
+    bool helpEvent(QHelpEvent *event, QAbstractItemView *view, const QStyleOptionViewItem &option, const QModelIndex &index) override
+    {
+        if (event && event->type() == QEvent::ToolTip)
+        {
+            QString tooltip = index.data(Qt::ToolTipRole).toString();
+            if (!tooltip.isEmpty())
+            {
+                QToolTip::showText(event->globalPos(), tooltip, view);
+                return true;
+            }
+        }
+        return QStyledItemDelegate::helpEvent(event, view, option, index);
+    }
+
     void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override
     {
         painter->save();
-        
+
         // Get the item's background and foreground colors
         QVariant bgVar = index.data(Qt::BackgroundRole);
         QVariant fgVar = index.data(Qt::ForegroundRole);
-        
+
         QRect rect = option.rect;
-        
+
         // Draw background
-        if (bgVar.isValid()) {
+        if (bgVar.isValid())
+        {
             QBrush bgBrush = bgVar.value<QBrush>();
             painter->fillRect(rect, bgBrush);
         }
-        
+
         // Draw selection overlay if selected
-        if (option.state & QStyle::State_Selected) {
+        if (option.state & QStyle::State_Selected)
+        {
             painter->fillRect(rect, QColor(0, 0, 0, 40));
         }
-        
+
         // Draw text with explicit foreground color
-        if (fgVar.isValid()) {
+        if (fgVar.isValid())
+        {
             painter->setPen(fgVar.value<QBrush>().color());
-        } else {
+        }
+        else
+        {
             painter->setPen(option.palette.text().color());
         }
-        
+
+        // Use the font from the option (which includes widget's font)
+        painter->setFont(option.font);
+
         QString text = index.data(Qt::DisplayRole).toString();
         QRect textRect = rect.adjusted(4, 4, -4, -4);
-        
+
         // Check alignment
         int alignment = index.data(Qt::TextAlignmentRole).toInt();
-        if (alignment == 0) alignment = Qt::AlignLeft | Qt::AlignVCenter;
-        
+        if (alignment == 0)
+            alignment = Qt::AlignLeft | Qt::AlignVCenter;
+
         painter->drawText(textRect, alignment | Qt::TextWordWrap, text);
-        
+
         painter->restore();
     }
-    
+
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
     {
         QString text = index.data(Qt::DisplayRole).toString();
@@ -73,11 +101,25 @@ public:
 };
 
 MessagesWidget::MessagesWidget(NodeManager *nodeManager, QWidget *parent)
-    : QWidget(parent)
-    , m_nodeManager(nodeManager)
-    , m_database(nullptr)
+    : QWidget(parent), m_nodeManager(nodeManager), m_database(nullptr), m_fontSize(AppSettings::instance()->messageFontSize())
 {
     setupUI();
+
+    // Set up zoom shortcuts
+    QShortcut *zoomInShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Plus), this);
+    connect(zoomInShortcut, &QShortcut::activated, this, &MessagesWidget::zoomIn);
+
+    QShortcut *zoomInShortcut2 = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Equal), this);
+    connect(zoomInShortcut2, &QShortcut::activated, this, &MessagesWidget::zoomIn);
+
+    QShortcut *zoomOutShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Minus), this);
+    connect(zoomOutShortcut, &QShortcut::activated, this, &MessagesWidget::zoomOut);
+
+    QShortcut *zoomResetShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_0), this);
+    connect(zoomResetShortcut, &QShortcut::activated, this, &MessagesWidget::zoomReset);
+
+    // Apply saved font size
+    updateMessageFont();
 
     // Update DM list when nodes change
     connect(m_nodeManager, &NodeManager::nodesChanged, this, &MessagesWidget::updateConversationList);
@@ -182,11 +224,12 @@ void MessagesWidget::setupUI()
     mainLayout->addWidget(m_splitter);
 
     // Initialize with default channels
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 8; i++)
+    {
         ChannelInfo ch;
         ch.index = i;
         ch.name = (i == 0) ? "Primary" : QString("Channel %1").arg(i);
-        ch.enabled = (i == 0);  // Only primary enabled by default
+        ch.enabled = (i == 0); // Only primary enabled by default
         m_channels[i] = ch;
     }
 
@@ -200,7 +243,8 @@ void MessagesWidget::setDatabase(Database *db)
 
 void MessagesWidget::setChannel(int index, const QString &name, bool enabled)
 {
-    if (index < 0 || index > 7) return;
+    if (index < 0 || index > 7)
+        return;
 
     ChannelInfo ch;
     ch.index = index;
@@ -214,7 +258,8 @@ void MessagesWidget::setChannel(int index, const QString &name, bool enabled)
 void MessagesWidget::clearChannels()
 {
     m_channels.clear();
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 8; i++)
+    {
         ChannelInfo ch;
         ch.index = i;
         ch.name = (i == 0) ? "Primary" : QString("Channel %1").arg(i);
@@ -226,14 +271,16 @@ void MessagesWidget::clearChannels()
 
 void MessagesWidget::addMessage(const ChatMessage &msg)
 {
-    if (isDuplicate(msg)) {
+    if (isDuplicate(msg))
+    {
         return;
     }
 
     m_messages.append(msg);
 
     // Save to database
-    if (m_database) {
+    if (m_database)
+    {
         Database::Message dbMsg;
         dbMsg.fromNode = msg.fromNode;
         dbMsg.toNode = msg.toNode;
@@ -249,15 +296,109 @@ void MessagesWidget::addMessage(const ChatMessage &msg)
     updateStatusLabel();
 }
 
+void MessagesWidget::updateMessageStatus(uint32_t packetId, int errorReason)
+{
+    if (packetId == 0)
+        return;
+
+    qDebug() << "[MessagesWidget] Updating status for packet" << packetId << "with error reason" << errorReason;
+
+    for (ChatMessage &msg : m_messages)
+    {
+        if (msg.packetId == packetId)
+        {
+            qDebug() << "[MessagesWidget] Found message with matching packetId, updating from status" << static_cast<int>(msg.status);
+            // Map Routing_Error enum to MessageStatus
+            switch (errorReason)
+            {
+            case 0: // NONE
+                msg.status = MessageStatus::Sent;
+                break;
+            case 1: // NO_ROUTE
+                msg.status = MessageStatus::NoRoute;
+                break;
+            case 2: // GOT_NAK
+                msg.status = MessageStatus::GotNak;
+                break;
+            case 3: // TIMEOUT
+                msg.status = MessageStatus::Timeout;
+                break;
+            case 5: // MAX_RETRANSMIT
+                msg.status = MessageStatus::MaxRetransmit;
+                break;
+            case 8: // NO_RESPONSE
+                msg.status = MessageStatus::NoResponse;
+                break;
+            default:
+                msg.status = MessageStatus::Failed;
+                break;
+            }
+
+            qDebug() << "[MessagesWidget] Status updated to" << static_cast<int>(msg.status);
+
+            // Update display if this conversation is currently visible
+            if ((m_currentType == ConversationType::DirectMessage &&
+                 (msg.fromNode == m_currentDmNode || msg.toNode == m_currentDmNode)) ||
+                (m_currentType == ConversationType::Channel && msg.channelIndex == m_currentChannel))
+            {
+                qDebug() << "[MessagesWidget] Refreshing message display";
+                updateMessageDisplay();
+            }
+            else
+            {
+                qDebug() << "[MessagesWidget] Message not in current view, skipping display update";
+            }
+            return;
+        }
+    }
+    qDebug() << "[MessagesWidget] No message found with packetId" << packetId;
+}
+
+void MessagesWidget::updateMessageDelivered(uint32_t packetId)
+{
+    if (packetId == 0)
+        return;
+
+    qDebug() << "[MessagesWidget] Marking delivery confirmation for packet" << packetId;
+
+    for (ChatMessage &msg : m_messages)
+    {
+        if (msg.packetId == packetId)
+        {
+            // Only mark as delivered if it's a private message and currently at "Sent" status
+            bool isPrivateMessage = (msg.toNode != 0xFFFFFFFF && msg.toNode != 0);
+            if (isPrivateMessage && msg.status == MessageStatus::Sent)
+            {
+                msg.status = MessageStatus::Delivered;
+                qDebug() << "[MessagesWidget] Message marked as delivered";
+
+                // Update display if this conversation is currently visible
+                if ((m_currentType == ConversationType::DirectMessage &&
+                     (msg.fromNode == m_currentDmNode || msg.toNode == m_currentDmNode)) ||
+                    (m_currentType == ConversationType::Channel && msg.channelIndex == m_currentChannel))
+                {
+                    qDebug() << "[MessagesWidget] Refreshing message display for delivery";
+                    updateMessageDisplay();
+                }
+            }
+            return;
+        }
+    }
+    qDebug() << "[MessagesWidget] No message found with packetId" << packetId;
+}
+
 void MessagesWidget::loadFromDatabase()
 {
-    if (!m_database) return;
+    if (!m_database)
+        return;
 
     m_messages.clear();
 
     QList<Database::Message> dbMessages = m_database->loadMessages(1000, 0);
-    for (const Database::Message &dbMsg : dbMessages) {
-        if (dbMsg.portNum != 1) continue;
+    for (const Database::Message &dbMsg : dbMessages)
+    {
+        if (dbMsg.portNum != 1)
+            continue;
 
         ChatMessage msg;
         msg.id = dbMsg.id;
@@ -272,9 +413,8 @@ void MessagesWidget::loadFromDatabase()
         m_messages.append(msg);
     }
 
-    std::sort(m_messages.begin(), m_messages.end(), [](const ChatMessage &a, const ChatMessage &b) {
-        return a.timestamp < b.timestamp;
-    });
+    std::sort(m_messages.begin(), m_messages.end(), [](const ChatMessage &a, const ChatMessage &b)
+              { return a.timestamp < b.timestamp; });
 
     updateConversationList();
     updateMessageDisplay();
@@ -311,15 +451,18 @@ void MessagesWidget::updateConversationList()
     boldFont.setBold(true);
     channelsHeader->setFont(0, boldFont);
 
-    for (auto it = m_channels.begin(); it != m_channels.end(); ++it) {
+    for (auto it = m_channels.begin(); it != m_channels.end(); ++it)
+    {
         const ChannelInfo &ch = it.value();
-        if (!ch.enabled && ch.index != 0) continue;  // Skip disabled channels except primary
+        if (!ch.enabled && ch.index != 0)
+            continue; // Skip disabled channels except primary
 
         QTreeWidgetItem *item = new QTreeWidgetItem(channelsHeader);
 
         int unread = getUnreadCount(ConversationType::Channel, ch.index, 0);
         QString label = ch.name;
-        if (unread > 0) {
+        if (unread > 0)
+        {
             label += QString(" (%1)").arg(unread);
         }
         item->setText(0, label);
@@ -327,28 +470,34 @@ void MessagesWidget::updateConversationList()
         item->setData(0, Qt::UserRole + 1, static_cast<int>(ConversationType::Channel));
 
         // Icon based on channel
-        if (ch.index == 0) {
+        if (ch.index == 0)
+        {
             item->setIcon(0, QIcon::fromTheme("network-wireless"));
-        } else {
+        }
+        else
+        {
             item->setIcon(0, QIcon::fromTheme("folder"));
         }
     }
 
     // Direct Messages section
     QSet<uint32_t> dmPartners = getDmPartners();
-    if (!dmPartners.isEmpty()) {
+    if (!dmPartners.isEmpty())
+    {
         QTreeWidgetItem *dmHeader = new QTreeWidgetItem(m_conversationTree);
         dmHeader->setText(0, "Direct Messages");
         dmHeader->setFlags(Qt::ItemIsEnabled);
         dmHeader->setExpanded(true);
         dmHeader->setFont(0, boldFont);
 
-        for (uint32_t nodeNum : dmPartners) {
+        for (uint32_t nodeNum : dmPartners)
+        {
             QTreeWidgetItem *item = new QTreeWidgetItem(dmHeader);
 
             QString name = getNodeName(nodeNum);
             int unread = getUnreadCount(ConversationType::DirectMessage, 0, nodeNum);
-            if (unread > 0) {
+            if (unread > 0)
+            {
                 name += QString(" (%1)").arg(unread);
             }
             item->setText(0, name);
@@ -364,20 +513,24 @@ void MessagesWidget::updateConversationList()
 void MessagesWidget::onConversationSelected(QTreeWidgetItem *item, int column)
 {
     Q_UNUSED(column);
-    if (!item || !item->parent()) return;  // Skip headers
+    if (!item || !item->parent())
+        return; // Skip headers
 
     ConversationType type = static_cast<ConversationType>(item->data(0, Qt::UserRole + 1).toInt());
 
-    if (type == ConversationType::Channel) {
+    if (type == ConversationType::Channel)
+    {
         m_currentType = ConversationType::Channel;
         m_currentChannel = item->data(0, Qt::UserRole).toInt();
         m_currentDmNode = 0;
 
         QString channelName = m_channels.contains(m_currentChannel)
-            ? m_channels[m_currentChannel].name
-            : QString("Channel %1").arg(m_currentChannel);
+                                  ? m_channels[m_currentChannel].name
+                                  : QString("Channel %1").arg(m_currentChannel);
         m_headerLabel->setText(QString("# %1").arg(channelName));
-    } else if (type == ConversationType::DirectMessage) {
+    }
+    else if (type == ConversationType::DirectMessage)
+    {
         m_currentType = ConversationType::DirectMessage;
         m_currentChannel = -1;
         m_currentDmNode = item->data(0, Qt::UserRole).toUInt();
@@ -396,12 +549,16 @@ void MessagesWidget::onConversationSelected(QTreeWidgetItem *item, int column)
 void MessagesWidget::onSendClicked()
 {
     QString text = m_inputEdit->text().trimmed();
-    if (text.isEmpty()) return;
+    if (text.isEmpty())
+        return;
 
-    if (m_currentType == ConversationType::Channel) {
+    if (m_currentType == ConversationType::Channel)
+    {
         // Send to channel (broadcast)
         emit sendMessage(text, 0xFFFFFFFF, m_currentChannel);
-    } else if (m_currentType == ConversationType::DirectMessage) {
+    }
+    else if (m_currentType == ConversationType::DirectMessage)
+    {
         // Send direct message to specific node
         emit sendMessage(text, m_currentDmNode, 0);
     }
@@ -417,19 +574,24 @@ void MessagesWidget::updateMessageDisplay()
 {
     m_messageList->clear();
 
-    if (m_currentType == ConversationType::None) {
+    if (m_currentType == ConversationType::None)
+    {
         return;
     }
 
     uint32_t myNode = m_nodeManager->myNodeNum();
 
-    for (const ChatMessage &msg : m_messages) {
+    for (const ChatMessage &msg : m_messages)
+    {
         bool show = false;
 
-        if (m_currentType == ConversationType::Channel) {
+        if (m_currentType == ConversationType::Channel)
+        {
             // Show messages on this channel that are broadcast
             show = (msg.channelIndex == m_currentChannel && msg.toNode == 0xFFFFFFFF);
-        } else if (m_currentType == ConversationType::DirectMessage) {
+        }
+        else if (m_currentType == ConversationType::DirectMessage)
+        {
             // Show DMs to/from this node
             bool isDm = (msg.toNode != 0xFFFFFFFF);
             bool involves = (msg.fromNode == m_currentDmNode || msg.toNode == m_currentDmNode);
@@ -437,23 +599,61 @@ void MessagesWidget::updateMessageDisplay()
             show = isDm && involves && involvesMe;
         }
 
-        if (!show) continue;
+        if (!show)
+            continue;
 
         QListWidgetItem *item = new QListWidgetItem;
-        item->setData(Qt::UserRole, QVariant::fromValue(msg.packetId));  // Store packet ID for reactions
+        item->setData(Qt::UserRole, QVariant::fromValue(msg.packetId)); // Store packet ID for reactions
         item->setData(Qt::UserRole + 1, QVariant::fromValue(msg.fromNode));
         item->setText(formatMessage(msg));
+
+        // Add tooltip for message status (DMs only)
+        if (msg.toNode != 0xFFFFFFFF && msg.isOutgoing)
+        {
+            QString tooltip;
+            switch (msg.status)
+            {
+            case MessageStatus::Sending:
+                tooltip = "Sending - waiting for response";
+                break;
+            case MessageStatus::Sent:
+                tooltip = "Sent - delivered successfully";
+                break;
+            case MessageStatus::NoRoute:
+                tooltip = "Failed - no route to destination";
+                break;
+            case MessageStatus::GotNak:
+                tooltip = "Failed - received negative acknowledgment";
+                break;
+            case MessageStatus::Timeout:
+                tooltip = "Failed - message timed out";
+                break;
+            case MessageStatus::MaxRetransmit:
+                tooltip = "Failed - maximum retransmissions reached";
+                break;
+            case MessageStatus::NoResponse:
+                tooltip = "Failed - no response from recipient";
+                break;
+            case MessageStatus::Failed:
+                tooltip = "Failed - delivery error";
+                break;
+            }
+            item->setToolTip(tooltip);
+        }
 
         bool isOutgoing = (msg.fromNode == myNode);
 
         // Use explicit brush colors that override any theme/stylesheet
-        if (isOutgoing) {
+        if (isOutgoing)
+        {
             item->setBackground(QBrush(QColor("#0084ff")));
-            item->setForeground(QBrush(QColor(255, 255, 255)));  // White text
+            item->setForeground(QBrush(QColor(255, 255, 255))); // White text
             item->setTextAlignment(Qt::AlignRight);
-        } else {
+        }
+        else
+        {
             item->setBackground(QBrush(QColor("#e4e6eb")));
-            item->setForeground(QBrush(QColor(28, 30, 33)));  // Dark text #1c1e21
+            item->setForeground(QBrush(QColor(28, 30, 33))); // Dark text #1c1e21
             item->setTextAlignment(Qt::AlignLeft);
         }
 
@@ -469,40 +669,90 @@ QString MessagesWidget::formatMessage(const ChatMessage &msg)
     QString sender = getNodeName(msg.fromNode);
     QString time = msg.timestamp.toString("hh:mm");
     QString date = msg.timestamp.date() == QDate::currentDate()
-                   ? "" : msg.timestamp.toString("MMM d ");
+                       ? ""
+                       : msg.timestamp.toString("MMM d ");
 
     QString prefix = QString("[%1%2] %3:\n").arg(date, time, sender);
-    return prefix + msg.text;
+
+    // Add status icon for outgoing messages (channel and DM)
+    QString statusIcon;
+    if (msg.isOutgoing)
+    {
+        switch (msg.status)
+        {
+        case MessageStatus::Sending:
+            statusIcon = "⏱ ";
+            break;
+        case MessageStatus::Sent:
+            // Single tick for ACK from mesh
+            statusIcon = "✓ ";
+            break;
+        case MessageStatus::Delivered:
+            // Double tick for delivery confirmation (private messages only)
+            statusIcon = "✓✓ ";
+            break;
+        case MessageStatus::NoRoute:
+            statusIcon = "❌ ";
+            break;
+        case MessageStatus::GotNak:
+            statusIcon = "⚠ ";
+            break;
+        case MessageStatus::Timeout:
+            statusIcon = "⏰ ";
+            break;
+        case MessageStatus::MaxRetransmit:
+            statusIcon = "🔁 ";
+            break;
+        case MessageStatus::NoResponse:
+            statusIcon = "❓ ";
+            break;
+        case MessageStatus::Failed:
+            statusIcon = "⛔ ";
+            break;
+        }
+    }
+
+    return prefix + msg.text + "\n" + statusIcon;
 }
 
 QString MessagesWidget::getNodeName(uint32_t nodeNum)
 {
-    if (nodeNum == 0xFFFFFFFF) return "Everyone";
-    if (nodeNum == m_nodeManager->myNodeNum()) return "You";
+    if (nodeNum == 0xFFFFFFFF)
+        return "Everyone";
+    if (nodeNum == m_nodeManager->myNodeNum())
+        return "You";
 
     NodeInfo node = m_nodeManager->getNode(nodeNum);
-    if (!node.longName.isEmpty()) return node.longName;
-    if (!node.shortName.isEmpty()) return node.shortName;
-    if (!node.nodeId.isEmpty()) return node.nodeId;
+    if (!node.longName.isEmpty())
+        return node.longName;
+    if (!node.shortName.isEmpty())
+        return node.shortName;
+    if (!node.nodeId.isEmpty())
+        return node.nodeId;
 
     return QString("!%1").arg(nodeNum, 8, 16, QChar('0'));
 }
 
 bool MessagesWidget::isDuplicate(const ChatMessage &msg)
 {
-    if (msg.packetId != 0) {
-        for (const ChatMessage &existing : m_messages) {
-            if (existing.packetId == msg.packetId) {
+    if (msg.packetId != 0)
+    {
+        for (const ChatMessage &existing : m_messages)
+        {
+            if (existing.packetId == msg.packetId)
+            {
                 return true;
             }
         }
     }
 
-    for (const ChatMessage &existing : m_messages) {
+    for (const ChatMessage &existing : m_messages)
+    {
         if (existing.fromNode == msg.fromNode &&
             existing.text == msg.text &&
             existing.channelIndex == msg.channelIndex &&
-            qAbs(existing.timestamp.secsTo(msg.timestamp)) < 2) {
+            qAbs(existing.timestamp.secsTo(msg.timestamp)) < 2)
+        {
             return true;
         }
     }
@@ -515,16 +765,23 @@ int MessagesWidget::getUnreadCount(ConversationType type, int channel, uint32_t 
     int count = 0;
     uint32_t myNode = m_nodeManager->myNodeNum();
 
-    for (const ChatMessage &msg : m_messages) {
-        if (msg.read || msg.fromNode == myNode) continue;
+    for (const ChatMessage &msg : m_messages)
+    {
+        if (msg.read || msg.fromNode == myNode)
+            continue;
 
-        if (type == ConversationType::Channel) {
-            if (msg.channelIndex == channel && msg.toNode == 0xFFFFFFFF) {
+        if (type == ConversationType::Channel)
+        {
+            if (msg.channelIndex == channel && msg.toNode == 0xFFFFFFFF)
+            {
                 count++;
             }
-        } else if (type == ConversationType::DirectMessage) {
+        }
+        else if (type == ConversationType::DirectMessage)
+        {
             if (msg.toNode != 0xFFFFFFFF &&
-                (msg.fromNode == nodeNum || msg.toNode == nodeNum)) {
+                (msg.fromNode == nodeNum || msg.toNode == nodeNum))
+            {
                 count++;
             }
         }
@@ -541,12 +798,17 @@ QSet<uint32_t> MessagesWidget::getDmPartners()
     // Include manually started DM conversations
     partners = m_manualDmPartners;
 
-    for (const ChatMessage &msg : m_messages) {
-        if (msg.toNode == 0xFFFFFFFF) continue;  // Skip broadcast
+    for (const ChatMessage &msg : m_messages)
+    {
+        if (msg.toNode == 0xFFFFFFFF)
+            continue; // Skip broadcast
 
-        if (msg.fromNode == myNode && msg.toNode != myNode) {
+        if (msg.fromNode == myNode && msg.toNode != myNode)
+        {
             partners.insert(msg.toNode);
-        } else if (msg.toNode == myNode && msg.fromNode != myNode) {
+        }
+        else if (msg.toNode == myNode && msg.fromNode != myNode)
+        {
             partners.insert(msg.fromNode);
         }
     }
@@ -564,7 +826,8 @@ void MessagesWidget::updateStatusLabel()
 void MessagesWidget::onMessageContextMenu(const QPoint &pos)
 {
     QListWidgetItem *item = m_messageList->itemAt(pos);
-    if (!item) return;
+    if (!item)
+        return;
 
     uint32_t packetId = item->data(Qt::UserRole).toUInt();
     uint32_t fromNode = item->data(Qt::UserRole + 1).toUInt();
@@ -574,11 +837,11 @@ void MessagesWidget::onMessageContextMenu(const QPoint &pos)
     // Quick reactions
     QMenu *reactMenu = menu.addMenu("React");
     QStringList reactions = {"👍", "❤️", "😂", "😮", "😢", "🎉"};
-    for (const QString &emoji : reactions) {
+    for (const QString &emoji : reactions)
+    {
         QAction *action = reactMenu->addAction(emoji);
-        connect(action, &QAction::triggered, this, [this, emoji, packetId]() {
-            sendReactionToMessage(emoji, packetId);
-        });
+        connect(action, &QAction::triggered, this, [this, emoji, packetId]()
+                { sendReactionToMessage(emoji, packetId); });
     }
 
     QAction *replyAction = menu.addAction("Reply");
@@ -591,17 +854,21 @@ void MessagesWidget::onMessageContextMenu(const QPoint &pos)
 
     QAction *selected = menu.exec(m_messageList->viewport()->mapToGlobal(pos));
 
-    if (selected == replyAction) {
+    if (selected == replyAction)
+    {
         // Set up reply mode - prefix input with reply indicator
         m_replyToPacketId = packetId;
         m_replyToNode = fromNode;
         m_inputEdit->setPlaceholderText(QString("Replying to message..."));
         m_inputEdit->setFocus();
-    } else if (selected == copyAction) {
+    }
+    else if (selected == copyAction)
+    {
         QString text = item->text();
         // Extract just the message part (after the newline)
         int newlinePos = text.indexOf('\n');
-        if (newlinePos >= 0) {
+        if (newlinePos >= 0)
+        {
             text = text.mid(newlinePos + 1);
         }
         QApplication::clipboard()->setText(text);
@@ -611,11 +878,13 @@ void MessagesWidget::onMessageContextMenu(const QPoint &pos)
 void MessagesWidget::onConversationContextMenu(const QPoint &pos)
 {
     QTreeWidgetItem *item = m_conversationTree->itemAt(pos);
-    if (!item || !item->parent()) return;  // Skip headers
+    if (!item || !item->parent())
+        return; // Skip headers
 
     ConversationType type = static_cast<ConversationType>(item->data(0, Qt::UserRole + 1).toInt());
 
-    if (type != ConversationType::DirectMessage) return;  // Only DMs can be deleted
+    if (type != ConversationType::DirectMessage)
+        return; // Only DMs can be deleted
 
     uint32_t nodeNum = item->data(0, Qt::UserRole).toUInt();
     QString nodeName = getNodeName(nodeNum);
@@ -627,14 +896,16 @@ void MessagesWidget::onConversationContextMenu(const QPoint &pos)
 
     QAction *selected = menu.exec(m_conversationTree->viewport()->mapToGlobal(pos));
 
-    if (selected == deleteAction) {
+    if (selected == deleteAction)
+    {
         // Confirm deletion
         QMessageBox::StandardButton reply = QMessageBox::question(
             this, "Delete Conversation",
             QString("Delete all messages with %1?\n\nThis cannot be undone.").arg(nodeName),
             QMessageBox::Yes | QMessageBox::No);
 
-        if (reply == QMessageBox::Yes) {
+        if (reply == QMessageBox::Yes)
+        {
             deleteConversation(nodeNum);
         }
     }
@@ -642,9 +913,12 @@ void MessagesWidget::onConversationContextMenu(const QPoint &pos)
 
 void MessagesWidget::sendReactionToMessage(const QString &emoji, uint32_t replyToId)
 {
-    if (m_currentType == ConversationType::Channel) {
+    if (m_currentType == ConversationType::Channel)
+    {
         emit sendReaction(emoji, 0xFFFFFFFF, m_currentChannel, replyToId);
-    } else if (m_currentType == ConversationType::DirectMessage) {
+    }
+    else if (m_currentType == ConversationType::DirectMessage)
+    {
         emit sendReaction(emoji, m_currentDmNode, 0, replyToId);
     }
 }
@@ -654,25 +928,28 @@ void MessagesWidget::deleteConversation(uint32_t nodeNum)
     // Remove messages from memory
     m_messages.erase(
         std::remove_if(m_messages.begin(), m_messages.end(),
-            [nodeNum, this](const ChatMessage &msg) {
-                uint32_t myNode = m_nodeManager->myNodeNum();
-                bool isDm = (msg.toNode != 0xFFFFFFFF);
-                bool involves = (msg.fromNode == nodeNum || msg.toNode == nodeNum);
-                bool involvesMe = (msg.fromNode == myNode || msg.toNode == myNode);
-                return isDm && involves && involvesMe;
-            }),
+                       [nodeNum, this](const ChatMessage &msg)
+                       {
+                           uint32_t myNode = m_nodeManager->myNodeNum();
+                           bool isDm = (msg.toNode != 0xFFFFFFFF);
+                           bool involves = (msg.fromNode == nodeNum || msg.toNode == nodeNum);
+                           bool involvesMe = (msg.fromNode == myNode || msg.toNode == myNode);
+                           return isDm && involves && involvesMe;
+                       }),
         m_messages.end());
 
     // Remove from manual DM partners
     m_manualDmPartners.remove(nodeNum);
 
     // Delete from database
-    if (m_database) {
+    if (m_database)
+    {
         m_database->deleteMessagesWithNode(nodeNum);
     }
 
     // Clear selection if this was the current conversation
-    if (m_currentType == ConversationType::DirectMessage && m_currentDmNode == nodeNum) {
+    if (m_currentType == ConversationType::DirectMessage && m_currentDmNode == nodeNum)
+    {
         m_currentType = ConversationType::None;
         m_currentDmNode = 0;
         m_headerLabel->setText("Select a channel or conversation");
@@ -726,4 +1003,38 @@ void MessagesWidget::startDirectMessage(uint32_t nodeNum)
     m_inputEdit->setEnabled(true);
     m_sendButton->setEnabled(true);
     m_inputEdit->setFocus();
+}
+
+void MessagesWidget::zoomIn()
+{
+    if (m_fontSize < 24)
+    {
+        m_fontSize++;
+        AppSettings::instance()->setMessageFontSize(m_fontSize);
+        updateMessageFont();
+    }
+}
+
+void MessagesWidget::zoomOut()
+{
+    if (m_fontSize > 6)
+    {
+        m_fontSize--;
+        AppSettings::instance()->setMessageFontSize(m_fontSize);
+        updateMessageFont();
+    }
+}
+
+void MessagesWidget::zoomReset()
+{
+    m_fontSize = 10;
+    AppSettings::instance()->setMessageFontSize(m_fontSize);
+    updateMessageFont();
+}
+
+void MessagesWidget::updateMessageFont()
+{
+    QFont font = m_messageList->font();
+    font.setPointSize(m_fontSize);
+    m_messageList->setFont(font);
 }

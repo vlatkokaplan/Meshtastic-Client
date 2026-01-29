@@ -9,16 +9,17 @@ NodeManager::NodeManager(QObject *parent)
     // Debounce timer - coalesce rapid updates into one signal
     m_updateTimer = new QTimer(this);
     m_updateTimer->setSingleShot(true);
-    m_updateTimer->setInterval(100);  // 100ms debounce
-    connect(m_updateTimer, &QTimer::timeout, this, [this]() {
+    m_updateTimer->setInterval(100); // 100ms debounce
+    connect(m_updateTimer, &QTimer::timeout, this, [this]()
+            {
         m_pendingUpdate = false;
-        emit nodesChanged();
-    });
+        emit nodesChanged(); });
 }
 
 void NodeManager::scheduleUpdate()
 {
-    if (!m_pendingUpdate) {
+    if (!m_pendingUpdate)
+    {
         m_pendingUpdate = true;
         m_updateTimer->start();
     }
@@ -88,7 +89,7 @@ void NodeManager::updateNodeFromPacket(const QVariantMap &fields)
                 emit nodePositionUpdated(nodeNum, lat, lon);
             }
         }
-        
+
         if (fields.contains("isFavorite"))
         {
             node.isFavorite = fields["isFavorite"].toBool();
@@ -268,7 +269,7 @@ void NodeManager::clear()
     m_nodes.clear();
     m_updateTimer->stop();
     m_pendingUpdate = false;
-    emit nodesChanged();  // Immediate emit for clear
+    emit nodesChanged(); // Immediate emit for clear
 }
 
 QVariantList NodeManager::getNodesForMap() const
@@ -324,7 +325,7 @@ void NodeManager::loadFromDatabase()
 
     if (!nodes.isEmpty())
     {
-        emit nodesChanged();  // Immediate emit for bulk load
+        emit nodesChanged(); // Immediate emit for bulk load
     }
 
     qDebug() << "Loaded" << nodes.size() << "nodes from database";
@@ -472,7 +473,7 @@ QString NodeManager::roleToString(int role)
     switch (role)
     {
     case 0:
-        return "Client";
+        return ""; // Unknown or default role - display nothing
     case 1:
         return "Client Mute";
     case 2:

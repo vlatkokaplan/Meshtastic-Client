@@ -11,7 +11,7 @@ class AppSettings : public QObject
     Q_OBJECT
 
 public:
-    static AppSettings* instance();
+    static AppSettings *instance();
 
     bool open();
     void close();
@@ -56,6 +56,9 @@ public:
 
     bool darkTheme() const;
     void setDarkTheme(bool dark);
+
+    int messageFontSize() const;
+    void setMessageFontSize(int size);
 
 signals:
     void settingChanged(const QString &key, const QVariant &value);

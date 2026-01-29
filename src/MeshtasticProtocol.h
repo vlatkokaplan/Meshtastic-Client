@@ -7,13 +7,14 @@
 #include <memory>
 
 // Forward declarations for protobuf types
-namespace meshtastic {
-class FromRadio;
-class ToRadio;
-class MeshPacket;
-class Position;
-class User;
-class Data;
+namespace meshtastic
+{
+    class FromRadio;
+    class ToRadio;
+    class MeshPacket;
+    class Position;
+    class User;
+    class Data;
 }
 
 class MeshtasticProtocol : public QObject
@@ -22,7 +23,8 @@ class MeshtasticProtocol : public QObject
 
 public:
     // Packet types from FromRadio
-    enum class PacketType {
+    enum class PacketType
+    {
         Unknown,
         PacketReceived,
         MyInfo,
@@ -43,7 +45,8 @@ public:
     Q_ENUM(PacketType)
 
     // Port numbers for MeshPacket data
-    enum class PortNum {
+    enum class PortNum
+    {
         Unknown = 0,
         TextMessage = 1,
         RemoteHardware = 2,
@@ -74,7 +77,8 @@ public:
     };
     Q_ENUM(PortNum)
 
-    struct DecodedPacket {
+    struct DecodedPacket
+    {
         qint64 timestamp;
         PacketType type;
         uint32_t from;
@@ -97,7 +101,7 @@ public:
     QByteArray createPositionRequestPacket(uint32_t destNode, uint32_t myNode);
     QByteArray createTelemetryRequestPacket(uint32_t destNode, uint32_t myNode);
     QByteArray createNodeInfoRequestPacket(uint32_t destNode, uint32_t myNode);
-    QByteArray createTextMessagePacket(const QString &text, uint32_t destNode, uint32_t myNode, int channel = 0, uint32_t replyId = 0);
+    QByteArray createTextMessagePacket(const QString &text, uint32_t destNode, uint32_t myNode, int channel = 0, uint32_t replyId = 0, uint32_t *outPacketId = nullptr);
 
     // Create admin packets for config requests
     QByteArray createGetConfigRequestPacket(uint32_t destNode, uint32_t myNode, int configType);
@@ -124,7 +128,8 @@ private:
     static const uint8_t SYNC_BYTE_2 = 0xC3;
     static const int MAX_PACKET_SIZE = 512;
 
-    enum class ParseState {
+    enum class ParseState
+    {
         WaitingForSync1,
         WaitingForSync2,
         WaitingForMSB,

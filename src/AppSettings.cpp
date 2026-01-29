@@ -6,11 +6,12 @@
 #include <QDebug>
 #include <QUuid>
 
-AppSettings* AppSettings::s_instance = nullptr;
+AppSettings *AppSettings::s_instance = nullptr;
 
-AppSettings* AppSettings::instance()
+AppSettings *AppSettings::instance()
 {
-    if (!s_instance) {
+    if (!s_instance)
+    {
         s_instance = new AppSettings();
     }
     return s_instance;
@@ -38,7 +39,8 @@ bool AppSettings::open()
     m_db = QSqlDatabase::addDatabase("QSQLITE", m_connectionName);
     m_db.setDatabaseName(dbPath);
 
-    if (!m_db.open()) {
+    if (!m_db.open())
+    {
         qWarning() << "Failed to open settings database:" << m_db.lastError().text();
         return false;
     }
@@ -48,7 +50,8 @@ bool AppSettings::open()
 
 void AppSettings::close()
 {
-    if (m_db.isOpen()) {
+    if (m_db.isOpen())
+    {
         m_db.close();
     }
     QSqlDatabase::removeDatabase(m_connectionName);
@@ -64,7 +67,8 @@ bool AppSettings::createTables()
             value TEXT,
             updated_at INTEGER
         )
-    )")) {
+    )"))
+    {
         qWarning() << "Failed to create settings table:" << query.lastError().text();
         return false;
     }
@@ -78,15 +82,21 @@ QVariant AppSettings::value(const QString &key, const QVariant &defaultValue) co
     query.prepare("SELECT value FROM settings WHERE key = ?");
     query.addBindValue(key);
 
-    if (query.exec() && query.next()) {
+    if (query.exec() && query.next())
+    {
         QString strValue = query.value(0).toString();
 
         // Try to preserve type from defaultValue
-        if (defaultValue.typeId() == QMetaType::Bool) {
+        if (defaultValue.typeId() == QMetaType::Bool)
+        {
             return strValue == "true" || strValue == "1";
-        } else if (defaultValue.typeId() == QMetaType::Int) {
+        }
+        else if (defaultValue.typeId() == QMetaType::Int)
+        {
             return strValue.toInt();
-        } else if (defaultValue.typeId() == QMetaType::Double) {
+        }
+        else if (defaultValue.typeId() == QMetaType::Double)
+        {
             return strValue.toDouble();
         }
         return strValue;
@@ -105,7 +115,8 @@ void AppSettings::setValue(const QString &key, const QVariant &value)
     query.addBindValue(key);
     query.addBindValue(value.toString());
 
-    if (!query.exec()) {
+    if (!query.exec())
+    {
         qWarning() << "Failed to save setting:" << key << query.lastError().text();
         return;
     }
@@ -233,4 +244,14 @@ bool AppSettings::darkTheme() const
 void AppSettings::setDarkTheme(bool dark)
 {
     setValue("appearance/dark_theme", dark);
+}
+
+int AppSettings::messageFontSize() const
+{
+    return value("messages/font_size", 10).toInt();
+}
+
+void AppSettings::setMessageFontSize(int size)
+{
+    setValue("messages/font_size", size);
 }

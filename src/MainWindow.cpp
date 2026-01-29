@@ -52,7 +52,8 @@ MainWindow::MainWindow(QWidget *parent)
     setupUI();
 
     // Set up system tray for notifications
-    if (QSystemTrayIcon::isSystemTrayAvailable()) {
+    if (QSystemTrayIcon::isSystemTrayAvailable())
+    {
         m_trayIcon = new QSystemTrayIcon(this);
         m_trayIcon->setIcon(QIcon::fromTheme("network-wireless", QIcon(":/icon.png")));
         m_trayIcon->setToolTip("Meshtastic Vibe Client");
@@ -62,7 +63,8 @@ MainWindow::MainWindow(QWidget *parent)
     // Config heartbeat timer (fast heartbeat during config)
     m_configHeartbeatTimer = new QTimer(this);
     m_configHeartbeatTimer->setInterval(5000); // 5 seconds
-    connect(m_configHeartbeatTimer, &QTimer::timeout, this, [this]() {
+    connect(m_configHeartbeatTimer, &QTimer::timeout, this, [this]()
+            {
         if (m_serial->isConnected()) {
             qDebug() << "[MainWindow] Sending config heartbeat";
             // Send heartbeat (empty ToRadio with heartbeat variant would be ideal, 
@@ -73,8 +75,7 @@ MainWindow::MainWindow(QWidget *parent)
             // If not, we can assume standard traffic keeps it alive or implement heartbeat packet creation.
             // Checking MeshtasticProtocol.h... ToRadio has heartbeat=7.
             // Let's implement createHeartbeatPacket in Protocol first if missing.
-        }
-    });
+        } });
 
     // Connect signals
     connect(m_serial, &SerialConnection::connected,
@@ -102,12 +103,16 @@ MainWindow::MainWindow(QWidget *parent)
     updateStatusLabel();
 
     // Auto-connect if enabled
-    if (AppSettings::instance()->autoConnect()) {
+    if (AppSettings::instance()->autoConnect())
+    {
         QString lastPort = AppSettings::instance()->lastPort();
-        if (!lastPort.isEmpty()) {
+        if (!lastPort.isEmpty())
+        {
             // Find the port in combo box
-            for (int i = 0; i < m_portCombo->count(); i++) {
-                if (m_portCombo->itemData(i).toString() == lastPort) {
+            for (int i = 0; i < m_portCombo->count(); i++)
+            {
+                if (m_portCombo->itemData(i).toString() == lastPort)
+                {
                     m_portCombo->setCurrentIndex(i);
                     QTimer::singleShot(500, this, &MainWindow::connectToSelected);
                     break;
@@ -129,7 +134,6 @@ MainWindow::~MainWindow()
 void MainWindow::setupUI()
 {
     setWindowTitle("Meshtastic Client");
-    resize(1200, 800);
 
     setupToolbar();
 
@@ -277,7 +281,8 @@ void MainWindow::setupConfigTab()
 
     // Connect export signals from AppSettingsTab
     AppSettingsTab *appSettings = m_configWidget->appSettingsTab();
-    if (appSettings) {
+    if (appSettings)
+    {
         connect(appSettings, &AppSettingsTab::exportNodesRequested,
                 this, &MainWindow::onExportNodes);
         connect(appSettings, &AppSettingsTab::exportMessagesRequested,
@@ -418,12 +423,14 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             bool enabled = (role > 0);
 
             // Update MessagesWidget
-            if (m_messagesWidget) {
+            if (m_messagesWidget)
+            {
                 m_messagesWidget->setChannel(index, name, enabled);
             }
 
             // Update DeviceConfig for config tab
-            if (m_configWidget && m_configWidget->deviceConfig()) {
+            if (m_configWidget && m_configWidget->deviceConfig())
+            {
                 m_configWidget->deviceConfig()->updateFromChannelPacket(packet.fields);
             }
         }
@@ -437,15 +444,20 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
 
             qDebug() << "Received Config packet, type:" << configType;
 
-            if (configType == "lora") {
+            if (configType == "lora")
+            {
                 qDebug() << "  LoRa config - region:" << packet.fields.value("region")
                          << "preset:" << packet.fields.value("modemPreset")
                          << "hopLimit:" << packet.fields.value("hopLimit");
                 devConfig->updateFromLoRaPacket(packet.fields);
-            } else if (configType == "device") {
+            }
+            else if (configType == "device")
+            {
                 qDebug() << "  Device config - role:" << packet.fields.value("role");
                 devConfig->updateFromDevicePacket(packet.fields);
-            } else if (configType == "position") {
+            }
+            else if (configType == "position")
+            {
                 qDebug() << "  Position config - gpsMode:" << packet.fields.value("gpsMode");
                 devConfig->updateFromPositionPacket(packet.fields);
             }
@@ -521,7 +533,7 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
                 msg.text = packet.fields["text"].toString();
                 msg.channelIndex = packet.fields.value("channel", 0).toInt();
                 msg.timestamp = QDateTime::currentDateTime();
-                msg.packetId = packet.fields.value("id", 0).toUInt();
+                msg.packetId = packet.fields.value("packetId", 0).toUInt();
                 m_messagesWidget->addMessage(msg);
 
                 // Show notification for incoming messages (not from ourselves)
@@ -529,8 +541,8 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
                 {
                     NodeInfo fromNode = m_nodeManager->getNode(packet.from);
                     QString senderName = fromNode.longName.isEmpty()
-                        ? MeshtasticProtocol::nodeIdToString(packet.from)
-                        : fromNode.longName;
+                                             ? MeshtasticProtocol::nodeIdToString(packet.from)
+                                             : fromNode.longName;
                     showNotification(QString("Message from %1").arg(senderName), msg.text);
                 }
             }
@@ -543,6 +555,39 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             }
             break;
 
+        case MeshtasticProtocol::PortNum::Routing:
+            // Handle routing responses to update message status
+            if (m_messagesWidget && packet.fields.contains("errorReason"))
+            {
+                uint32_t packetId = packet.fields.value("packetId", 0).toUInt();
+                int errorReason = packet.fields["errorReason"].toInt();
+
+                // Reason 0 = NONE (success/ACK), only log actual errors
+                if (errorReason == 0)
+                {
+                    qDebug() << "Message ACK received for packet" << packetId;
+
+                    // Check if this is a delivery confirmation from a specific node (private message acknowledgment)
+                    // A delivery confirmation is a routing ACK coming from the destination node (not a relay)
+                    // The packet.from will be the node that received our message
+                    uint32_t myNode = m_nodeManager->myNodeNum();
+                    if (packet.from != myNode)
+                    {
+                        // This routing ACK came from an intermediate node or destination
+                        // If we have a message to this node with matching packetId, mark it as delivered
+                        qDebug() << "Delivery confirmation from node" << QString::number(packet.from, 16);
+                        m_messagesWidget->updateMessageDelivered(packetId);
+                    }
+                }
+                else
+                {
+                    qDebug() << "Routing error for packet" << packetId << "- reason:" << errorReason;
+                }
+
+                m_messagesWidget->updateMessageStatus(packetId, errorReason);
+            }
+            break;
+
         case MeshtasticProtocol::PortNum::Admin:
             // Handle admin config responses
             if (packet.fields.contains("configType") && m_configWidget && m_configWidget->deviceConfig())
@@ -552,11 +597,16 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
 
                 qDebug() << "Admin config response received, type:" << configType;
 
-                if (configType == "lora") {
+                if (configType == "lora")
+                {
                     devConfig->updateFromLoRaPacket(packet.fields);
-                } else if (configType == "device") {
+                }
+                else if (configType == "device")
+                {
                     devConfig->updateFromDevicePacket(packet.fields);
-                } else if (configType == "position") {
+                }
+                else if (configType == "position")
+                {
                     devConfig->updateFromPositionPacket(packet.fields);
                 }
             }
@@ -572,7 +622,8 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
         if (packet.fields.contains("firmwareVersion"))
         {
             m_firmwareVersion = packet.fields["firmwareVersion"].toString();
-            if (m_dashboardStats) {
+            if (m_dashboardStats)
+            {
                 m_dashboardStats->setFirmwareVersion(m_firmwareVersion);
             }
         }
@@ -768,22 +819,26 @@ void MainWindow::updateNodeList()
     for (const NodeInfo &node : nodes)
     {
         // Filter offline nodes if setting is disabled
-        if (!showOffline && node.lastHeard.isValid() && node.lastHeard < offlineThreshold) {
+        if (!showOffline && node.lastHeard.isValid() && node.lastHeard < offlineThreshold)
+        {
             continue;
         }
 
         // Filter by search term
-        if (!searchTerm.isEmpty()) {
+        if (!searchTerm.isEmpty())
+        {
             bool matches = node.longName.toLower().contains(searchTerm) ||
-                          node.shortName.toLower().contains(searchTerm) ||
-                          node.nodeId.toLower().contains(searchTerm);
-            if (!matches) continue;
+                           node.shortName.toLower().contains(searchTerm) ||
+                           node.nodeId.toLower().contains(searchTerm);
+            if (!matches)
+                continue;
         }
 
         m_nodeTable->insertRow(row);
         // Node Name
         QString name = node.longName.isEmpty() ? node.nodeId : node.longName;
-        if (node.isFavorite) {
+        if (node.isFavorite)
+        {
             name = "⭐ " + name;
         }
         QTableWidgetItem *nameItem = new QTableWidgetItem(name);
@@ -884,14 +939,16 @@ void MainWindow::requestConfig()
     }
 
     // Send wake-up sequence: 32 bytes of 0xC3 to wake sleeping devices
-    if (!m_serial->isConnected()) {
+    if (!m_serial->isConnected())
+    {
         return;
     }
 
     // Generate random 32-bit config ID
     m_expectedConfigId = static_cast<uint32_t>(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF);
     // Ensure non-zero
-    if (m_expectedConfigId == 0) m_expectedConfigId = 1;
+    if (m_expectedConfigId == 0)
+        m_expectedConfigId = 1;
 
     qDebug() << "[MainWindow] Starting config request flow. ConfigID:" << m_expectedConfigId;
     statusBar()->showMessage(QString("Requesting configuration (ID: %1)...").arg(m_expectedConfigId));
@@ -900,7 +957,8 @@ void MainWindow::requestConfig()
     m_serial->sendData(m_protocol->createWantConfigPacket(m_expectedConfigId));
 
     // Start fast heartbeat for config phase
-    if (!m_configHeartbeatTimer->isActive()) {
+    if (!m_configHeartbeatTimer->isActive())
+    {
         m_configHeartbeatTimer->start();
     }
 
@@ -964,8 +1022,11 @@ void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel
     }
 
     uint32_t myNode = m_nodeManager->myNodeNum();
-    QByteArray packet = m_protocol->createTextMessagePacket(text, toNode, myNode, channel);
+    uint32_t packetId = 0;
+    QByteArray packet = m_protocol->createTextMessagePacket(text, toNode, myNode, channel, 0, &packetId);
     m_serial->sendData(packet);
+
+    qDebug() << "[MainWindow] Sent message with packetId:" << packetId;
 
     // Add the outgoing message to our local display
     ChatMessage msg;
@@ -975,7 +1036,7 @@ void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel
     msg.text = text;
     msg.timestamp = QDateTime::currentDateTime();
     msg.isOutgoing = true;
-    msg.packetId = QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF;
+    msg.packetId = packetId;
     m_messagesWidget->addMessage(msg);
 
     QString destName;
@@ -1000,7 +1061,8 @@ void MainWindow::onSendReaction(const QString &emoji, uint32_t toNode, int chann
     }
 
     uint32_t myNode = m_nodeManager->myNodeNum();
-    QByteArray packet = m_protocol->createTextMessagePacket(emoji, toNode, myNode, channel, replyId);
+    uint32_t packetId = 0;
+    QByteArray packet = m_protocol->createTextMessagePacket(emoji, toNode, myNode, channel, replyId, &packetId);
     m_serial->sendData(packet);
 
     // Add the reaction to our local display
@@ -1011,7 +1073,7 @@ void MainWindow::onSendReaction(const QString &emoji, uint32_t toNode, int chann
     msg.text = emoji;
     msg.timestamp = QDateTime::currentDateTime();
     msg.isOutgoing = true;
-    msg.packetId = QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF;
+    msg.packetId = packetId;
     m_messagesWidget->addMessage(msg);
 
     statusBar()->showMessage(QString("Reaction %1 sent").arg(emoji), 3000);
@@ -1019,12 +1081,16 @@ void MainWindow::onSendReaction(const QString &emoji, uint32_t toNode, int chann
 
 void MainWindow::onSettingChanged(const QString &key, const QVariant &value)
 {
-    if (key == "nodes/show_offline" || key == "nodes/offline_threshold_minutes") {
+    if (key == "nodes/show_offline" || key == "nodes/offline_threshold_minutes")
+    {
         // Refresh node list with new filter settings
         updateNodeList();
-    } else if (key == "map/tile_server") {
+    }
+    else if (key == "map/tile_server")
+    {
         // Update map tile server
-        if (m_mapWidget) {
+        if (m_mapWidget)
+        {
             m_mapWidget->setTileServer(value.toString());
         }
     }
@@ -1032,11 +1098,13 @@ void MainWindow::onSettingChanged(const QString &key, const QVariant &value)
 
 void MainWindow::showNotification(const QString &title, const QString &message)
 {
-    if (!AppSettings::instance()->notificationsEnabled()) {
+    if (!AppSettings::instance()->notificationsEnabled())
+    {
         return;
     }
 
-    if (m_trayIcon && QSystemTrayIcon::supportsMessages()) {
+    if (m_trayIcon && QSystemTrayIcon::supportsMessages())
+    {
         m_trayIcon->showMessage(title, message, QSystemTrayIcon::Information, 5000);
     }
 }
@@ -1052,17 +1120,19 @@ void MainWindow::showTracerouteResult(const MeshtasticProtocol::DecodedPacket &p
 
     // Header with source and destination
     QString fromName, toName;
-    if (packet.from != 0) {
+    if (packet.from != 0)
+    {
         NodeInfo fromNode = m_nodeManager->getNode(packet.from);
         fromName = fromNode.longName.isEmpty()
-            ? MeshtasticProtocol::nodeIdToString(packet.from)
-            : fromNode.longName;
+                       ? MeshtasticProtocol::nodeIdToString(packet.from)
+                       : fromNode.longName;
     }
-    if (packet.to != 0) {
+    if (packet.to != 0)
+    {
         NodeInfo toNode = m_nodeManager->getNode(packet.to);
         toName = toNode.longName.isEmpty()
-            ? MeshtasticProtocol::nodeIdToString(packet.to)
-            : toNode.longName;
+                     ? MeshtasticProtocol::nodeIdToString(packet.to)
+                     : toNode.longName;
     }
 
     QLabel *headerLabel = new QLabel(QString("<h3>Traceroute: %1 → %2</h3>").arg(fromName, toName));
@@ -1090,15 +1160,19 @@ void MainWindow::showTracerouteResult(const MeshtasticProtocol::DecodedPacket &p
     QVariantList snrTowards = packet.fields.value("snrTowards").toList();
 
     html += "<h4>📡 Outgoing Route (to destination)</h4>";
-    if (route.isEmpty()) {
+    if (route.isEmpty())
+    {
         html += "<p><i>Direct connection (no hops)</i></p>";
-    } else {
+    }
+    else
+    {
         html += "<table><tr><th>Hop</th><th>Node</th><th>SNR (dB)</th></tr>";
 
         // Start from source
         html += QString("<tr><td>0</td><td><b>%1</b> (origin)</td><td>-</td></tr>").arg(fromName);
 
-        for (int i = 0; i < route.size(); i++) {
+        for (int i = 0; i < route.size(); i++)
+        {
             QString nodeId = route[i].toString();
             uint32_t nodeNum = MeshtasticProtocol::nodeIdFromString(nodeId);
             NodeInfo node = m_nodeManager->getNode(nodeNum);
@@ -1106,25 +1180,29 @@ void MainWindow::showTracerouteResult(const MeshtasticProtocol::DecodedPacket &p
 
             QString snrStr = "-";
             QString snrClass = "";
-            if (i < snrTowards.size()) {
+            if (i < snrTowards.size())
+            {
                 double snr = snrTowards[i].toDouble();
                 snrStr = QString::number(snr, 'f', 1);
-                if (snr >= 5.0) snrClass = "snr-good";
-                else if (snr >= 0.0) snrClass = "snr-ok";
-                else snrClass = "snr-bad";
+                if (snr >= 5.0)
+                    snrClass = "snr-good";
+                else if (snr >= 0.0)
+                    snrClass = "snr-ok";
+                else
+                    snrClass = "snr-bad";
             }
 
             html += QString("<tr><td>%1</td><td>%2</td><td class='%3'>%4</td></tr>")
-                .arg(i + 1)
-                .arg(nodeName)
-                .arg(snrClass)
-                .arg(snrStr);
+                        .arg(i + 1)
+                        .arg(nodeName)
+                        .arg(snrClass)
+                        .arg(snrStr);
         }
 
         // Destination
         html += QString("<tr><td>%1</td><td><b>%2</b> (destination)</td><td>-</td></tr>")
-            .arg(route.size() + 1)
-            .arg(toName);
+                    .arg(route.size() + 1)
+                    .arg(toName);
 
         html += "</table>";
     }
@@ -1134,15 +1212,19 @@ void MainWindow::showTracerouteResult(const MeshtasticProtocol::DecodedPacket &p
     QVariantList snrBack = packet.fields.value("snrBack").toList();
 
     html += "<h4>🔙 Return Route (from destination)</h4>";
-    if (routeBack.isEmpty()) {
+    if (routeBack.isEmpty())
+    {
         html += "<p><i>Direct return (no hops) or same as outgoing route</i></p>";
-    } else {
+    }
+    else
+    {
         html += "<table><tr><th>Hop</th><th>Node</th><th>SNR (dB)</th></tr>";
 
         // Start from destination
         html += QString("<tr><td>0</td><td><b>%1</b> (destination)</td><td>-</td></tr>").arg(toName);
 
-        for (int i = 0; i < routeBack.size(); i++) {
+        for (int i = 0; i < routeBack.size(); i++)
+        {
             QString nodeId = routeBack[i].toString();
             uint32_t nodeNum = MeshtasticProtocol::nodeIdFromString(nodeId);
             NodeInfo node = m_nodeManager->getNode(nodeNum);
@@ -1150,25 +1232,29 @@ void MainWindow::showTracerouteResult(const MeshtasticProtocol::DecodedPacket &p
 
             QString snrStr = "-";
             QString snrClass = "";
-            if (i < snrBack.size()) {
+            if (i < snrBack.size())
+            {
                 double snr = snrBack[i].toDouble();
                 snrStr = QString::number(snr, 'f', 1);
-                if (snr >= 5.0) snrClass = "snr-good";
-                else if (snr >= 0.0) snrClass = "snr-ok";
-                else snrClass = "snr-bad";
+                if (snr >= 5.0)
+                    snrClass = "snr-good";
+                else if (snr >= 0.0)
+                    snrClass = "snr-ok";
+                else
+                    snrClass = "snr-bad";
             }
 
             html += QString("<tr><td>%1</td><td>%2</td><td class='%3'>%4</td></tr>")
-                .arg(i + 1)
-                .arg(nodeName)
-                .arg(snrClass)
-                .arg(snrStr);
+                        .arg(i + 1)
+                        .arg(nodeName)
+                        .arg(snrClass)
+                        .arg(snrStr);
         }
 
         // Origin
         html += QString("<tr><td>%1</td><td><b>%2</b> (origin)</td><td>-</td></tr>")
-            .arg(routeBack.size() + 1)
-            .arg(fromName);
+                    .arg(routeBack.size() + 1)
+                    .arg(fromName);
 
         html += "</table>";
     }
@@ -1176,9 +1262,9 @@ void MainWindow::showTracerouteResult(const MeshtasticProtocol::DecodedPacket &p
     // Summary
     int totalHops = route.size() + routeBack.size();
     html += QString("<p><b>Total hops:</b> %1 outgoing + %2 return = %3</p>")
-        .arg(route.size())
-        .arg(routeBack.size())
-        .arg(totalHops);
+                .arg(route.size())
+                .arg(routeBack.size())
+                .arg(totalHops);
 
     // Legend
     html += "<hr><p><small><b>SNR Legend:</b> "
@@ -1199,13 +1285,15 @@ void MainWindow::showTracerouteResult(const MeshtasticProtocol::DecodedPacket &p
 
 void MainWindow::onSaveLoRaConfig()
 {
-    if (!m_serial->isConnected()) {
+    if (!m_serial->isConnected())
+    {
         statusBar()->showMessage("Not connected", 3000);
         return;
     }
 
     DeviceConfig *devConfig = m_configWidget->deviceConfig();
-    if (!devConfig) return;
+    if (!devConfig)
+        return;
 
     const auto &lora = devConfig->loraConfig();
     QVariantMap config;
@@ -1228,13 +1316,15 @@ void MainWindow::onSaveLoRaConfig()
 
 void MainWindow::onSaveDeviceConfig()
 {
-    if (!m_serial->isConnected()) {
+    if (!m_serial->isConnected())
+    {
         statusBar()->showMessage("Not connected", 3000);
         return;
     }
 
     DeviceConfig *devConfig = m_configWidget->deviceConfig();
-    if (!devConfig) return;
+    if (!devConfig)
+        return;
 
     const auto &device = devConfig->deviceConfig();
     QVariantMap config;
@@ -1260,13 +1350,15 @@ void MainWindow::onSaveDeviceConfig()
 
 void MainWindow::onSavePositionConfig()
 {
-    if (!m_serial->isConnected()) {
+    if (!m_serial->isConnected())
+    {
         statusBar()->showMessage("Not connected", 3000);
         return;
     }
 
     DeviceConfig *devConfig = m_configWidget->deviceConfig();
-    if (!devConfig) return;
+    if (!devConfig)
+        return;
 
     const auto &pos = devConfig->positionConfig();
     QVariantMap config;
@@ -1290,13 +1382,15 @@ void MainWindow::onSavePositionConfig()
 
 void MainWindow::onSaveChannelConfig(int channelIndex)
 {
-    if (!m_serial->isConnected()) {
+    if (!m_serial->isConnected())
+    {
         statusBar()->showMessage("Not connected", 3000);
         return;
     }
 
     DeviceConfig *devConfig = m_configWidget->deviceConfig();
-    if (!devConfig) return;
+    if (!devConfig)
+        return;
 
     const auto &ch = devConfig->channel(channelIndex);
     QVariantMap config;
@@ -1316,7 +1410,8 @@ void MainWindow::onSaveChannelConfig(int channelIndex)
 void MainWindow::onExportNodes(const QString &format)
 {
     QList<NodeInfo> nodes = m_nodeManager->allNodes();
-    if (nodes.isEmpty()) {
+    if (nodes.isEmpty())
+    {
         QMessageBox::information(this, "Export Nodes", "No nodes to export.");
         return;
     }
@@ -1324,18 +1419,22 @@ void MainWindow::onExportNodes(const QString &format)
     QString filter = format == "csv" ? "CSV Files (*.csv)" : "JSON Files (*.json)";
     QString defaultName = format == "csv" ? "nodes.csv" : "nodes.json";
     QString fileName = QFileDialog::getSaveFileName(this, "Export Nodes", defaultName, filter);
-    if (fileName.isEmpty()) return;
+    if (fileName.isEmpty())
+        return;
 
     QFile file(fileName);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    {
         QMessageBox::critical(this, "Export Error", "Could not open file for writing.");
         return;
     }
 
-    if (format == "csv") {
+    if (format == "csv")
+    {
         QTextStream out(&file);
         out << "NodeNum,NodeID,LongName,ShortName,Latitude,Longitude,Altitude,BatteryLevel,Voltage,LastHeard,SNR,RSSI,Hops\n";
-        for (const NodeInfo &node : nodes) {
+        for (const NodeInfo &node : nodes)
+        {
             QString longName = QString(node.longName).replace("\"", "\"\"");
             QString shortName = QString(node.shortName).replace("\"", "\"\"");
             out << node.nodeNum << ","
@@ -1352,29 +1451,36 @@ void MainWindow::onExportNodes(const QString &format)
                 << node.rssi << ","
                 << (node.hopsAway >= 0 ? QString::number(node.hopsAway) : "") << "\n";
         }
-    } else {
+    }
+    else
+    {
         QJsonArray nodesArray;
-        for (const NodeInfo &node : nodes) {
+        for (const NodeInfo &node : nodes)
+        {
             QJsonObject obj;
             obj["nodeNum"] = static_cast<qint64>(node.nodeNum);
             obj["nodeId"] = node.nodeId;
             obj["longName"] = node.longName;
             obj["shortName"] = node.shortName;
-            if (node.hasPosition) {
+            if (node.hasPosition)
+            {
                 obj["latitude"] = node.latitude;
                 obj["longitude"] = node.longitude;
                 obj["altitude"] = node.altitude;
             }
-            if (node.batteryLevel >= 0) {
+            if (node.batteryLevel >= 0)
+            {
                 obj["batteryLevel"] = node.batteryLevel;
             }
-            if (node.voltage > 0) {
+            if (node.voltage > 0)
+            {
                 obj["voltage"] = node.voltage;
             }
             obj["lastHeard"] = node.lastHeard.toString(Qt::ISODate);
             obj["snr"] = node.snr;
             obj["rssi"] = node.rssi;
-            if (node.hopsAway >= 0) {
+            if (node.hopsAway >= 0)
+            {
                 obj["hops"] = node.hopsAway;
             }
             obj["isExternalPower"] = node.isExternalPower;
@@ -1396,14 +1502,16 @@ void MainWindow::onExportNodes(const QString &format)
 
 void MainWindow::onExportMessages(const QString &format)
 {
-    if (!m_database || !m_database->isOpen()) {
+    if (!m_database || !m_database->isOpen())
+    {
         QMessageBox::information(this, "Export Messages", "No database connected. Connect to a device first.");
         return;
     }
 
     // Get messages from database
     QList<ChatMessage> messages = m_database->getAllMessages();
-    if (messages.isEmpty()) {
+    if (messages.isEmpty())
+    {
         QMessageBox::information(this, "Export Messages", "No messages to export.");
         return;
     }
@@ -1411,18 +1519,22 @@ void MainWindow::onExportMessages(const QString &format)
     QString filter = format == "csv" ? "CSV Files (*.csv)" : "JSON Files (*.json)";
     QString defaultName = format == "csv" ? "messages.csv" : "messages.json";
     QString fileName = QFileDialog::getSaveFileName(this, "Export Messages", defaultName, filter);
-    if (fileName.isEmpty()) return;
+    if (fileName.isEmpty())
+        return;
 
     QFile file(fileName);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    {
         QMessageBox::critical(this, "Export Error", "Could not open file for writing.");
         return;
     }
 
-    if (format == "csv") {
+    if (format == "csv")
+    {
         QTextStream out(&file);
         out << "Timestamp,FromNode,ToNode,Channel,Text,PacketID\n";
-        for (const ChatMessage &msg : messages) {
+        for (const ChatMessage &msg : messages)
+        {
             QString fromId = MeshtasticProtocol::nodeIdToString(msg.fromNode);
             QString toId = msg.toNode == 0xFFFFFFFF ? "broadcast" : MeshtasticProtocol::nodeIdToString(msg.toNode);
             QString text = QString(msg.text).replace("\"", "\"\"").replace("\n", "\\n");
@@ -1433,9 +1545,12 @@ void MainWindow::onExportMessages(const QString &format)
                 << "\"" << text << "\","
                 << msg.packetId << "\n";
         }
-    } else {
+    }
+    else
+    {
         QJsonArray messagesArray;
-        for (const ChatMessage &msg : messages) {
+        for (const ChatMessage &msg : messages)
+        {
             QJsonObject obj;
             obj["timestamp"] = msg.timestamp.toString(Qt::ISODate);
             obj["fromNode"] = MeshtasticProtocol::nodeIdToString(msg.fromNode);
@@ -1464,18 +1579,21 @@ void MainWindow::onExportMessages(const QString &format)
 void MainWindow::onConfigCompleteIdReceived(uint32_t configId)
 {
     qDebug() << "[MainWindow] Received ConfigCompleteId:" << configId;
-    
-    if (configId == m_expectedConfigId) {
+
+    if (configId == m_expectedConfigId)
+    {
         qDebug() << "[MainWindow] Config ID matches! Configuration complete.";
         statusBar()->showMessage("Configuration loaded successfully", 3000);
-        
+
         // Stop fast heartbeat
         if (m_configHeartbeatTimer)
             m_configHeartbeatTimer->stop();
-        
+
         // Explicitly refresh all tabs or signal config ready
         // For now, logging success is sufficient as tabs listen to config changes
-    } else {
+    }
+    else
+    {
         qWarning() << "[MainWindow] Mismatched Config ID. Expected:" << m_expectedConfigId << "Got:" << configId;
     }
 }

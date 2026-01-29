@@ -15,14 +15,29 @@
 class NodeManager;
 class Database;
 
-struct ChannelInfo {
+struct ChannelInfo
+{
     int index = 0;
     QString name;
-    QString psk;  // Not displayed, just stored
+    QString psk; // Not displayed, just stored
     bool enabled = false;
 };
 
-struct ChatMessage {
+enum class MessageStatus
+{
+    Sending,       // Just sent, waiting
+    Sent,          // ACK from mesh
+    Delivered,     // Confirmed delivery from destination node (private messages only)
+    NoRoute,       // No route to destination
+    GotNak,        // Received negative acknowledgment
+    Timeout,       // Message timed out
+    MaxRetransmit, // Hit max retransmission attempts
+    NoResponse,    // No response from recipient
+    Failed         // Other errors
+};
+
+struct ChatMessage
+{
     qint64 id = 0;
     uint32_t fromNode = 0;
     uint32_t toNode = 0;
@@ -32,6 +47,7 @@ struct ChatMessage {
     bool isOutgoing = false;
     bool read = false;
     uint32_t packetId = 0;
+    MessageStatus status = MessageStatus::Sending;
 };
 
 class MessagesWidget : public QWidget
@@ -43,6 +59,8 @@ public:
 
     void setDatabase(Database *db);
     void addMessage(const ChatMessage &msg);
+    void updateMessageStatus(uint32_t packetId, int errorReason);
+    void updateMessageDelivered(uint32_t packetId);
     void loadFromDatabase();
     void clear();
     void startDirectMessage(uint32_t nodeNum);
@@ -74,12 +92,24 @@ private:
     QLabel *m_headerLabel;
     QLabel *m_statusLabel;
 
+    // Font size management
+    int m_fontSize;
+    void zoomIn();
+    void zoomOut();
+    void zoomReset();
+    void updateMessageFont();
+
     // Data
     QList<ChatMessage> m_messages;
     QMap<int, ChannelInfo> m_channels;
 
     // Current selection
-    enum class ConversationType { None, Channel, DirectMessage };
+    enum class ConversationType
+    {
+        None,
+        Channel,
+        DirectMessage
+    };
     ConversationType m_currentType = ConversationType::None;
     int m_currentChannel = -1;
     uint32_t m_currentDmNode = 0;

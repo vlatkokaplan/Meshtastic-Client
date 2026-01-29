@@ -39,7 +39,7 @@ jobs:
 
       - name: Upload Linux Artifacts
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: linux-deb
           path: build/meshtastic-vibe-client-*.deb
@@ -84,7 +84,7 @@ jobs:
           7z a meshtastic-vibe-client-windows.zip meshtastic-vibe-client-win
 
       - name: Upload Windows Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: windows-exe
           path: build-win/meshtastic-vibe-client-windows.zip
@@ -94,12 +94,12 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: linux-deb
           path: linux-artifacts
 
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: windows-exe
           path: windows-artifacts

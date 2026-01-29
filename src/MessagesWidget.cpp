@@ -290,7 +290,15 @@ void MessagesWidget::addMessage(const ChatMessage &msg)
         dbMsg.portNum = 1;
         dbMsg.status = static_cast<int>(msg.status);
         dbMsg.packetId = msg.packetId;
-        m_database->saveMessage(dbMsg);
+        dbMsg.read = msg.read ? 1 : 0;
+        bool saved = m_database->saveMessage(dbMsg);
+        qDebug() << "[MessagesWidget] Saved message from" << QString::number(msg.fromNode, 16)
+                 << "to" << QString::number(msg.toNode, 16)
+                 << "success:" << saved;
+    }
+    else
+    {
+        qDebug() << "[MessagesWidget] Database not available, message not saved";
     }
 
     updateConversationList();
@@ -404,6 +412,8 @@ void MessagesWidget::loadFromDatabase()
     m_messages.clear();
 
     QList<Database::Message> dbMessages = m_database->loadMessages(1000, 0);
+    qDebug() << "[MessagesWidget] Retrieved" << dbMessages.size() << "messages from database";
+
     for (const Database::Message &dbMsg : dbMessages)
     {
         if (dbMsg.portNum != 1)
@@ -426,6 +436,8 @@ void MessagesWidget::loadFromDatabase()
 
     std::sort(m_messages.begin(), m_messages.end(), [](const ChatMessage &a, const ChatMessage &b)
               { return a.timestamp < b.timestamp; });
+
+    qDebug() << "[MessagesWidget] Loaded" << m_messages.size() << "text messages (portNum=1) for display";
 
     updateConversationList();
     updateMessageDisplay();

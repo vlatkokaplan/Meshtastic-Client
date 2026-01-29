@@ -41,6 +41,10 @@ int main(int argc, char *argv[])
                                    "Enable debug logging to console");
     parser.addOption(debugOption);
 
+    QCommandLineOption experimentalOption(QStringList() << "exp" << "experimental",
+                                          "Enable experimental features (packet flow visualization)");
+    parser.addOption(experimentalOption);
+
     parser.process(app);
 
     // Set debug mode based on command line flag
@@ -52,9 +56,15 @@ int main(int argc, char *argv[])
         qDebug() << "Debug logging enabled";
     }
 
+    bool experimentalMode = parser.isSet(experimentalOption);
+    if (experimentalMode)
+    {
+        qDebug() << "Experimental features enabled";
+    }
+
     app.setWindowIcon(QIcon(":/icon.svg"));
 
-    MainWindow window;
+    MainWindow window(experimentalMode);
     window.show();
 
     return app.exec();

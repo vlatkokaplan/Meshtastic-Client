@@ -33,8 +33,8 @@
 #include <QJsonObject>
 #include <algorithm>
 
-MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent)
+MainWindow::MainWindow(bool experimentalMode, QWidget *parent)
+    : QMainWindow(parent), m_experimentalMode(experimentalMode)
 {
     // Initialize app settings
     AppSettings::instance()->open();
@@ -240,8 +240,8 @@ void MainWindow::setupMapTab()
 
     // Node table setup
     m_nodeTable = new QTableWidget;
-    m_nodeTable->setColumnCount(4);
-    m_nodeTable->setHorizontalHeaderLabels({"Node Name", "Role", "Last Heard", "Battery %"});
+    m_nodeTable->setColumnCount(5);
+    m_nodeTable->setHorizontalHeaderLabels({"Node Name", "Role", "Last Heard", "Battery %", "Hops Away"});
     m_nodeTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_nodeTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_nodeTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -483,6 +483,44 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
 
     case MeshtasticProtocol::PacketType::PacketReceived:
     {
+        // Experimental: Visualize packet flow on map
+        if (m_experimentalMode && m_mapWidget)
+        {
+            uint32_t fromNode = packet.from;
+            uint32_t toNode = packet.to;
+
+            // Only draw line for direct packets (not broadcasts)
+            if (toNode != 0xFFFFFFFF && toNode != 0 && fromNode != 0)
+            {
+                qDebug() << "[Experimental] Packet flow: from" << QString::number(fromNode, 16)
+                         << "to" << QString::number(toNode, 16);
+
+                // Check if both nodes have positions
+                if (m_nodeManager->hasNode(fromNode) && m_nodeManager->hasNode(toNode))
+                {
+                    NodeInfo nodeFrom = m_nodeManager->getNode(fromNode);
+                    NodeInfo nodeTo = m_nodeManager->getNode(toNode);
+
+                    qDebug() << "[Experimental] Nodes exist. From hasPos:" << nodeFrom.hasPosition
+                             << "lat:" << nodeFrom.latitude << "lon:" << nodeFrom.longitude;
+                    qDebug() << "[Experimental] To hasPos:" << nodeTo.hasPosition
+                             << "lat:" << nodeTo.latitude << "lon:" << nodeTo.longitude;
+
+                    if (nodeFrom.hasPosition && nodeTo.hasPosition)
+                    {
+                        qDebug() << "[Experimental] Drawing packet flow line";
+                        m_mapWidget->drawPacketFlow(fromNode, toNode, nodeFrom.latitude, nodeFrom.longitude,
+                                                    nodeTo.latitude, nodeTo.longitude);
+                    }
+                }
+                else
+                {
+                    qDebug() << "[Experimental] One or both nodes missing. From exists:" << m_nodeManager->hasNode(fromNode)
+                             << "To exists:" << m_nodeManager->hasNode(toNode);
+                }
+            }
+        }
+
         // Check if we should ignore packets from local device
         bool isFromLocalNode = (packet.from == m_nodeManager->myNodeNum());
         bool hideLocal = AppSettings::instance()->hideLocalDevicePackets();
@@ -957,6 +995,22 @@ void MainWindow::updateNodeList()
             batteryItem->setText("?");
         }
         m_nodeTable->setItem(row, 3, batteryItem);
+        // Hops Away
+        QTableWidgetItem *hopsItem = new QTableWidgetItem;
+        if (!node.hasPosition)
+        {
+            hopsItem->setForeground(QBrush(Qt::gray));
+        }
+        if (node.hopsAway >= 0)
+        {
+            hopsItem->setText(QString::number(node.hopsAway));
+        }
+        else
+        {
+            hopsItem->setText("-");
+        }
+        hopsItem->setTextAlignment(Qt::AlignCenter);
+        m_nodeTable->setItem(row, 4, hopsItem);
         row++;
     }
 }

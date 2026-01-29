@@ -7,7 +7,7 @@
 #include <QDebug>
 #include <QUuid>
 
-static const int SCHEMA_VERSION = 3;
+static const int SCHEMA_VERSION = 4;
 
 Database::Database(QObject *parent)
     : QObject(parent)
@@ -214,11 +214,32 @@ bool Database::migrateSchema(int fromVersion, int toVersion)
             break;
         case 3:
             // Add environment telemetry columns
-            query.exec("ALTER TABLE nodes ADD COLUMN temperature REAL DEFAULT 0");
-            query.exec("ALTER TABLE nodes ADD COLUMN relative_humidity REAL DEFAULT 0");
-            query.exec("ALTER TABLE nodes ADD COLUMN barometric_pressure REAL DEFAULT 0");
-            query.exec("ALTER TABLE nodes ADD COLUMN uptime_seconds INTEGER DEFAULT 0");
+            if (!query.exec("ALTER TABLE nodes ADD COLUMN temperature REAL DEFAULT 0"))
+                qDebug() << "temperature column already exists or error:" << query.lastError().text();
+            if (!query.exec("ALTER TABLE nodes ADD COLUMN relative_humidity REAL DEFAULT 0"))
+                qDebug() << "relative_humidity column already exists or error:" << query.lastError().text();
+            if (!query.exec("ALTER TABLE nodes ADD COLUMN barometric_pressure REAL DEFAULT 0"))
+                qDebug() << "barometric_pressure column already exists or error:" << query.lastError().text();
+            if (!query.exec("ALTER TABLE nodes ADD COLUMN uptime_seconds INTEGER DEFAULT 0"))
+                qDebug() << "uptime_seconds column already exists or error:" << query.lastError().text();
             qDebug() << "Database migrated to schema version 3";
+            break;
+        case 4:
+            // Add message status and packet_id columns - these are CRITICAL for v4
+            qDebug() << "Migrating to schema version 4 - adding message columns";
+            if (!query.exec("ALTER TABLE messages ADD COLUMN status INTEGER DEFAULT 0"))
+            {
+                qWarning() << "Failed to add status column:" << query.lastError().text();
+                if (!query.exec("ALTER TABLE messages ADD COLUMN status INTEGER"))
+                    qWarning() << "Still failed to add status column:" << query.lastError().text();
+            }
+            if (!query.exec("ALTER TABLE messages ADD COLUMN packet_id INTEGER DEFAULT 0"))
+            {
+                qWarning() << "Failed to add packet_id column:" << query.lastError().text();
+                if (!query.exec("ALTER TABLE messages ADD COLUMN packet_id INTEGER"))
+                    qWarning() << "Still failed to add packet_id column:" << query.lastError().text();
+            }
+            qDebug() << "Database migrated to schema version 4";
             break;
         }
     }
@@ -476,35 +497,35 @@ int Database::nodeCount()
 
 bool Database::saveMessage(const Message &msg)
 {
-    QSqlQuery *query = m_saveMessageStmt;
-    QSqlQuery fallback(m_db);
-    if (!query)
+    QSqlQuery query(m_db);
+
+    if (!query.prepare(R"(
+        INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at, status, packet_id)
+        VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at, :status, :packet_id)
+    )"))
     {
-        fallback.prepare(R"(
-            INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at, status, packet_id)
-            VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at, :status, :packet_id)
-        )");
-        query = &fallback;
+        qWarning() << "Failed to prepare message insert:" << query.lastError().text();
+        return false;
     }
 
     qint64 now = QDateTime::currentSecsSinceEpoch();
     qint64 timestamp = msg.timestamp.isValid() ? msg.timestamp.toSecsSinceEpoch() : now;
 
-    query->bindValue(":from", msg.fromNode);
-    query->bindValue(":to", msg.toNode);
-    query->bindValue(":channel", msg.channel);
-    query->bindValue(":port_num", msg.portNum);
-    query->bindValue(":text", msg.text);
-    query->bindValue(":payload", msg.payload);
-    query->bindValue(":timestamp", timestamp);
-    query->bindValue(":read", msg.read ? 1 : 0);
-    query->bindValue(":created_at", now);
-    query->bindValue(":status", msg.status);
-    query->bindValue(":packet_id", msg.packetId);
+    query.bindValue(":from", msg.fromNode);
+    query.bindValue(":to", msg.toNode);
+    query.bindValue(":channel", msg.channel);
+    query.bindValue(":port_num", msg.portNum);
+    query.bindValue(":text", msg.text);
+    query.bindValue(":payload", msg.payload);
+    query.bindValue(":timestamp", timestamp);
+    query.bindValue(":read", msg.read ? 1 : 0);
+    query.bindValue(":created_at", now);
+    query.bindValue(":status", msg.status);
+    query.bindValue(":packet_id", msg.packetId);
 
-    if (!query->exec())
+    if (!query.exec())
     {
-        qWarning() << "Failed to save message:" << query->lastError().text();
+        qWarning() << "Failed to save message:" << query.lastError().text();
         return false;
     }
 
@@ -546,6 +567,7 @@ QList<Database::Message> Database::loadMessages(int limit, int offset)
         messages.append(msg);
     }
 
+    qDebug() << "[Database] Loaded" << messages.size() << "total messages from db";
     return messages;
 }
 

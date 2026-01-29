@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,13 +8,24 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        * { margin: 0; padding: 0; }
-        html, body, #map { width: 100%; height: 100%; }
+        * {
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body,
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+
         .node-marker {
             display: flex;
             flex-direction: column;
             align-items: center;
         }
+
         .node-pin {
             width: 24px;
             height: 24px;
@@ -27,6 +39,7 @@
             color: white;
             font-family: Arial, sans-serif;
         }
+
         .node-pointer {
             width: 0;
             height: 0;
@@ -35,6 +48,7 @@
             border-top: 8px solid #333;
             margin-top: -2px;
         }
+
         .node-tooltip {
             background: #333;
             color: white;
@@ -44,18 +58,38 @@
             font-family: Arial, sans-serif;
             white-space: pre-line;
         }
+
         @keyframes node-blink {
-            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 255, 0, 0.7); }
-            50% { transform: scale(1.2); box-shadow: 0 0 20px 10px rgba(255, 255, 0, 0.9); }
+
+            0%,
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(255, 255, 0, 0.7);
+            }
+
+            50% {
+                transform: scale(1.2);
+                box-shadow: 0 0 20px 10px rgba(255, 255, 0, 0.9);
+            }
         }
+
         @keyframes node-ring {
-            0% { transform: scale(1); opacity: 1; }
-            100% { transform: scale(3); opacity: 0; }
+            0% {
+                transform: scale(1);
+                opacity: 1;
+            }
+
+            100% {
+                transform: scale(3);
+                opacity: 0;
+            }
         }
+
         .node-blinking .node-pin {
             animation: node-blink 0.8s ease-in-out infinite;
             z-index: 1000 !important;
         }
+
         .node-blinking::before {
             content: '';
             position: absolute;
@@ -71,6 +105,7 @@
         }
     </style>
 </head>
+
 <body>
     <div id="map"></div>
     <script>
@@ -87,6 +122,10 @@
 
         // Store markers
         var markers = {};
+
+        // Store packet flow lines
+        var packetFlows = [];
+        var maxFlowLines = 100; // Keep only last 100 lines
 
         // Color palette for nodes
         var colors = ["#4A90D9", "#D94A4A", "#4AD94A", "#D9D94A", "#D94AD9", "#4AD9D9"];
@@ -129,15 +168,15 @@
 
         // API functions called from C++
         window.mapAPI = {
-            centerOn: function(lat, lon) {
+            centerOn: function (lat, lon) {
                 map.setView([lat, lon]);
             },
 
-            setZoom: function(level) {
+            setZoom: function (level) {
                 map.setZoom(level);
             },
 
-            updateNodes: function(nodes) {
+            updateNodes: function (nodes) {
                 // Remove old markers
                 for (var id in markers) {
                     map.removeLayer(markers[id]);
@@ -160,7 +199,7 @@
 
                     // Store nodeNum for click handler
                     marker.nodeNum = node.nodeNum;
-                    marker.on('click', function(e) {
+                    marker.on('click', function (e) {
                         if (window.mapBridge) {
                             mapBridge.notifyNodeClicked(e.target.nodeNum);
                         }
@@ -175,7 +214,7 @@
                 return bounds;
             },
 
-            fitToNodes: function() {
+            fitToNodes: function () {
                 var markerIds = Object.keys(markers);
                 if (markerIds.length === 0) return;
 
@@ -192,7 +231,7 @@
                 }
             },
 
-            blinkNode: function(nodeNum, durationMs) {
+            blinkNode: function (nodeNum, durationMs) {
                 var marker = markers[nodeNum];
                 if (!marker) return;
 
@@ -206,12 +245,12 @@
                 markerDiv.style.position = 'relative';
                 markerDiv.classList.add('node-blinking');
 
-                setTimeout(function() {
+                setTimeout(function () {
                     markerDiv.classList.remove('node-blinking');
                 }, durationMs || 10000);
             },
 
-            selectNode: function(nodeNum) {
+            selectNode: function (nodeNum) {
                 var marker = markers[nodeNum];
                 if (!marker) return;
 
@@ -225,7 +264,7 @@
                 this.blinkNode(nodeNum, 2000);
             },
 
-            setTileServer: function(url) {
+            setTileServer: function (url) {
                 // Remove old tile layer
                 if (currentTileLayer) {
                     map.removeLayer(currentTileLayer);
@@ -248,8 +287,47 @@
                 }).addTo(map);
             },
 
+            drawPacketFlow: function (fromNode, toNode, fromLat, fromLon, toLat, toLon) {
+                // Create animated line from sender to receiver
+                var latlngs = [[fromLat, fromLon], [toLat, toLon]];
+
+                var line = L.polyline(latlngs, {
+                    color: '#FFD700',
+                    weight: 2,
+                    opacity: 0.8,
+                    dashArray: '5, 10',
+                    className: 'packet-flow-line'
+                }).addTo(map);
+
+                // Store the line
+                packetFlows.push(line);
+
+                // Animate opacity fade out
+                var opacity = 0.8;
+                var fadeInterval = setInterval(function () {
+                    opacity -= 0.05;
+                    if (opacity <= 0) {
+                        clearInterval(fadeInterval);
+                        map.removeLayer(line);
+                        // Remove from array
+                        var idx = packetFlows.indexOf(line);
+                        if (idx > -1) {
+                            packetFlows.splice(idx, 1);
+                        }
+                    } else {
+                        line.setStyle({ opacity: opacity });
+                    }
+                }, 100); // Fade over ~1.6 seconds
+
+                // Limit number of lines
+                if (packetFlows.length > maxFlowLines) {
+                    var oldLine = packetFlows.shift();
+                    map.removeLayer(oldLine);
+                }
+            },
+
             // Called when map is ready
-            notifyReady: function() {
+            notifyReady: function () {
                 if (window.mapBridge) {
                     mapBridge.notifyMapReady();
                 }
@@ -257,7 +335,7 @@
         };
 
         // DOMContentLoaded - map tiles are ready but QWebChannel might not be
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             console.log('Map DOM ready');
         });
     </script>
@@ -279,7 +357,7 @@
                 return;
             }
 
-            new QWebChannel(qt.webChannelTransport, function(channel) {
+            new QWebChannel(qt.webChannelTransport, function (channel) {
                 window.mapBridge = channel.objects.mapBridge;
                 console.log('WebChannel connected, mapBridge:', window.mapBridge);
                 window.mapAPI.notifyReady();
@@ -290,4 +368,5 @@
         setTimeout(initWebChannel, 50);
     </script>
 </body>
+
 </html>

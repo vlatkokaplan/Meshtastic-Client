@@ -244,3 +244,18 @@ void MapWidget::setTileServer(const QString &url)
     QString script = QString("window.mapAPI.setTileServer('%1');").arg(escapedUrl);
     runJavaScript(script);
 }
+
+void MapWidget::drawPacketFlow(uint32_t fromNode, uint32_t toNode, double fromLat, double fromLon, double toLat, double toLon)
+{
+    if (!m_mapReady)
+        return;
+
+    QString script = QString("window.mapAPI.drawPacketFlow(%1, %2, %3, %4, %5, %6);")
+                         .arg(fromNode)
+                         .arg(toNode)
+                         .arg(fromLat, 0, 'f', 6)
+                         .arg(fromLon, 0, 'f', 6)
+                         .arg(toLat, 0, 'f', 6)
+                         .arg(toLon, 0, 'f', 6);
+    runJavaScript(script);
+}

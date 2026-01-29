@@ -37,6 +37,7 @@ public:
     void blinkNode(uint32_t nodeNum, int durationMs = 5000);
     void selectNode(uint32_t nodeNum);
     void setTileServer(const QString &url);
+    void drawPacketFlow(uint32_t fromNode, uint32_t toNode, double fromLat, double fromLon, double toLat, double toLon);
 
 signals:
     void nodeClicked(uint32_t nodeNum);

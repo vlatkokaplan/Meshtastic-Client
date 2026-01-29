@@ -47,9 +47,49 @@ QVariant TracerouteTableModel::data(const QModelIndex &index, int role) const
         case ColRouteBack:
             return tr.routeBack.join(" → ");
         case ColSnrTo:
-            return tr.snrTo.join(", ");
+        {
+            // Format SNR with first and last node signals properly
+            QString result;
+            if (!tr.snrTo.isEmpty())
+            {
+                // First SNR is signal from origin to first hop
+                result += "From: " + tr.snrTo.first();
+                if (tr.snrTo.size() > 1)
+                {
+                    // Last SNR is signal from last hop to destination
+                    result += ", To: " + tr.snrTo.last();
+                }
+                // If only one hop (direct), show it as the signal
+                if (tr.snrTo.size() > 2)
+                {
+                    // Multiple hops, show all
+                    result += " [" + tr.snrTo.join(", ") + "]";
+                }
+            }
+            return result;
+        }
         case ColSnrBack:
-            return tr.snrBack.join(", ");
+        {
+            // Format SNR with first and last node signals properly
+            QString result;
+            if (!tr.snrBack.isEmpty())
+            {
+                // First SNR is signal from destination to first hop (back)
+                result += "From: " + tr.snrBack.first();
+                if (tr.snrBack.size() > 1)
+                {
+                    // Last SNR is signal from last hop to origin
+                    result += ", To: " + tr.snrBack.last();
+                }
+                // If only one hop (direct), show it as the signal
+                if (tr.snrBack.size() > 2)
+                {
+                    // Multiple hops, show all
+                    result += " [" + tr.snrBack.join(", ") + "]";
+                }
+            }
+            return result;
+        }
         }
     }
 
@@ -86,40 +126,45 @@ void TracerouteTableModel::addTraceroute(const MeshtasticProtocol::DecodedPacket
 {
     Traceroute tr;
     tr.timestamp = packet.timestamp;
-    tr.from = packet.from;
-    tr.to = packet.to;
+    // Note: packet.from is actually the destination node, packet.to is the requesting node
+    // So we swap them for display purposes
+    tr.from = packet.to;
+    tr.to = packet.from;
 
     // Extract route and SNR data from packet fields
-    if (packet.fields.contains("route"))
+    // The "route" field is actually the path from destination back to source
+    // The "routeBack" field is the path from source to destination
+    // We need to swap them for correct display
+    if (packet.fields.contains("routeBack"))
     {
-        QVariantList routeList = packet.fields["route"].toList();
+        QVariantList routeList = packet.fields["routeBack"].toList();
         for (const auto &node : routeList)
         {
             tr.routeTo.append(node.toString());
         }
     }
 
-    if (packet.fields.contains("routeBack"))
+    if (packet.fields.contains("route"))
     {
-        QVariantList routeBackList = packet.fields["routeBack"].toList();
+        QVariantList routeBackList = packet.fields["route"].toList();
         for (const auto &node : routeBackList)
         {
             tr.routeBack.append(node.toString());
         }
     }
 
-    if (packet.fields.contains("snrTowards"))
+    if (packet.fields.contains("snrBack"))
     {
-        QVariantList snrList = packet.fields["snrTowards"].toList();
+        QVariantList snrList = packet.fields["snrBack"].toList();
         for (const auto &snr : snrList)
         {
             tr.snrTo.append(QString::number(snr.toFloat(), 'f', 1));
         }
     }
 
-    if (packet.fields.contains("snrBack"))
+    if (packet.fields.contains("snrTowards"))
     {
-        QVariantList snrBackList = packet.fields["snrBack"].toList();
+        QVariantList snrBackList = packet.fields["snrTowards"].toList();
         for (const auto &snr : snrBackList)
         {
             tr.snrBack.append(QString::number(snr.toFloat(), 'f', 1));

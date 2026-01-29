@@ -31,7 +31,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    explicit MainWindow(bool experimentalMode = false, QWidget *parent = nullptr);
     ~MainWindow();
 
 private slots:
@@ -78,6 +78,9 @@ private:
     QLabel *m_tracerouteCooldownLabel = nullptr;
     int m_tracerouteCooldownRemaining = 0;
     static const int TRACEROUTE_COOLDOWN_MS = 30000; // 30 seconds
+
+    // Experimental features
+    bool m_experimentalMode = false;
 
     // Core components
     SerialConnection *m_serial;

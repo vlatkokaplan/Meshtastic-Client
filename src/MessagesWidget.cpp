@@ -13,6 +13,64 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QBrush>
+#include <QStyledItemDelegate>
+#include <QPainter>
+
+// Custom delegate to paint message items with their explicit colors
+class MessageItemDelegate : public QStyledItemDelegate
+{
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        painter->save();
+        
+        // Get the item's background and foreground colors
+        QVariant bgVar = index.data(Qt::BackgroundRole);
+        QVariant fgVar = index.data(Qt::ForegroundRole);
+        
+        QRect rect = option.rect;
+        
+        // Draw background
+        if (bgVar.isValid()) {
+            QBrush bgBrush = bgVar.value<QBrush>();
+            painter->fillRect(rect, bgBrush);
+        }
+        
+        // Draw selection overlay if selected
+        if (option.state & QStyle::State_Selected) {
+            painter->fillRect(rect, QColor(0, 0, 0, 40));
+        }
+        
+        // Draw text with explicit foreground color
+        if (fgVar.isValid()) {
+            painter->setPen(fgVar.value<QBrush>().color());
+        } else {
+            painter->setPen(option.palette.text().color());
+        }
+        
+        QString text = index.data(Qt::DisplayRole).toString();
+        QRect textRect = rect.adjusted(4, 4, -4, -4);
+        
+        // Check alignment
+        int alignment = index.data(Qt::TextAlignmentRole).toInt();
+        if (alignment == 0) alignment = Qt::AlignLeft | Qt::AlignVCenter;
+        
+        painter->drawText(textRect, alignment | Qt::TextWordWrap, text);
+        
+        painter->restore();
+    }
+    
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        QString text = index.data(Qt::DisplayRole).toString();
+        QFontMetrics fm(option.font);
+        int width = option.rect.width() > 0 ? option.rect.width() - 8 : 300;
+        QRect bound = fm.boundingRect(0, 0, width, 10000, Qt::TextWordWrap, text);
+        return QSize(width, bound.height() + 16);
+    }
+};
 
 MessagesWidget::MessagesWidget(NodeManager *nodeManager, QWidget *parent)
     : QWidget(parent)
@@ -43,22 +101,19 @@ void MessagesWidget::setupUI()
     m_conversationTree->setMinimumWidth(180);
     m_conversationTree->setStyleSheet(R"(
         QTreeWidget {
-            background-color: #ffffff;
-            border: 1px solid #ddd;
             border-radius: 4px;
             font-size: 13px;
         }
         QTreeWidget::item {
             padding: 6px 4px;
             border-radius: 4px;
-            color: #1c1e21;
         }
         QTreeWidget::item:selected {
             background-color: #0084ff;
             color: white;
         }
         QTreeWidget::item:hover:!selected {
-            background-color: #f0f2f5;
+            background-color: rgba(128, 128, 128, 0.2);
         }
     )");
     connect(m_conversationTree, &QTreeWidget::itemClicked,
@@ -77,7 +132,7 @@ void MessagesWidget::setupUI()
 
     // Header
     m_headerLabel = new QLabel("Select a channel or conversation");
-    m_headerLabel->setStyleSheet("font-size: 14px; font-weight: bold; padding: 8px; color: #1c1e21; background-color: #f0f2f5; border-radius: 4px;");
+    m_headerLabel->setStyleSheet("font-size: 14px; font-weight: bold; padding: 8px; border-radius: 4px;");
     rightLayout->addWidget(m_headerLabel);
 
     // Message list
@@ -86,8 +141,6 @@ void MessagesWidget::setupUI()
     m_messageList->setSpacing(4);
     m_messageList->setStyleSheet(R"(
         QListWidget {
-            background-color: #f5f5f5;
-            border: 1px solid #ddd;
             border-radius: 6px;
         }
         QListWidget::item {
@@ -95,10 +148,8 @@ void MessagesWidget::setupUI()
             border-radius: 10px;
             margin: 4px 8px;
         }
-        QListWidget::item:selected {
-            background-color: #d0e8ff;
-        }
     )");
+    m_messageList->setItemDelegate(new MessageItemDelegate(m_messageList));
     m_messageList->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_messageList, &QListWidget::customContextMenuRequested,
             this, &MessagesWidget::onMessageContextMenu);

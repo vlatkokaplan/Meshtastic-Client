@@ -526,6 +526,7 @@ QVariantMap MeshtasticProtocol::decodeUser(const QByteArray &data)
         fields["longName"] = QString::fromStdString(user.long_name());
         fields["shortName"] = QString::fromStdString(user.short_name());
         fields["hwModel"] = static_cast<int>(user.hw_model());
+        fields["role"] = static_cast<int>(user.role());
         if (user.is_licensed()) {
             fields["isLicensed"] = true;
         }

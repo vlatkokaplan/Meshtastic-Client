@@ -16,6 +16,7 @@ struct NodeInfo
     QString longName;
     QString shortName;
     QString hwModel;
+    int role = 0;  // Device role (0=Client, 1=ClientMute, 2=Router, etc.)
 
     double latitude = 0.0;
     double longitude = 0.0;
@@ -50,6 +51,7 @@ struct NodeInfo
         map["longName"] = longName;
         map["shortName"] = shortName;
         map["hwModel"] = hwModel;
+        map["role"] = role;
         map["latitude"] = latitude;
         map["longitude"] = longitude;
         map["altitude"] = altitude;
@@ -105,6 +107,9 @@ public:
     // For QML binding
     Q_INVOKABLE QVariantList getNodesForMap() const;
 
+    QString hwModelToString(int model);
+    QString roleToString(int role);
+
 signals:
     void nodeUpdated(uint32_t nodeNum);
     void nodePositionUpdated(uint32_t nodeNum, double latitude, double longitude);
@@ -121,7 +126,6 @@ private:
     void ensureNode(uint32_t nodeNum);
     void scheduleUpdate();
     void persistNode(uint32_t nodeNum);
-    QString hwModelToString(int model);
 };
 
 #endif // NODEMANAGER_H

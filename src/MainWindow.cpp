@@ -219,8 +219,8 @@ void MainWindow::setupMapTab()
 
     // Node table setup
     m_nodeTable = new QTableWidget;
-    m_nodeTable->setColumnCount(3);
-    m_nodeTable->setHorizontalHeaderLabels({"Node Name", "Last Heard", "Battery %"});
+    m_nodeTable->setColumnCount(4);
+    m_nodeTable->setHorizontalHeaderLabels({"Node Name", "Role", "Last Heard", "Battery %"});
     m_nodeTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_nodeTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_nodeTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -793,13 +793,21 @@ void MainWindow::updateNodeList()
             nameItem->setForeground(QBrush(Qt::gray));
         }
         m_nodeTable->setItem(row, 0, nameItem);
+        // Role
+        QTableWidgetItem *roleItem = new QTableWidgetItem(m_nodeManager->roleToString(node.role));
+        roleItem->setData(Qt::UserRole, node.nodeNum);
+        if (!node.hasPosition)
+        {
+            roleItem->setForeground(QBrush(Qt::gray));
+        }
+        m_nodeTable->setItem(row, 1, roleItem);
         // Last Heard
         QTableWidgetItem *heardItem = new QTableWidgetItem(node.lastHeard.toString("yyyy-MM-dd HH:mm:ss"));
         if (!node.hasPosition)
         {
             heardItem->setForeground(QBrush(Qt::gray));
         }
-        m_nodeTable->setItem(row, 1, heardItem);
+        m_nodeTable->setItem(row, 2, heardItem);
         // Battery icon and value
         QTableWidgetItem *batteryItem = new QTableWidgetItem;
         if (!node.hasPosition)
@@ -843,7 +851,7 @@ void MainWindow::updateNodeList()
         {
             batteryItem->setText("?");
         }
-        m_nodeTable->setItem(row, 2, batteryItem);
+        m_nodeTable->setItem(row, 3, batteryItem);
         row++;
     }
 }

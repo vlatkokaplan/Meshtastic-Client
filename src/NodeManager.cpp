@@ -59,6 +59,10 @@ void NodeManager::updateNodeFromPacket(const QVariantMap &fields)
         {
             node.hwModel = hwModelToString(fields["hwModel"].toInt());
         }
+        if (fields.contains("role"))
+        {
+            node.role = fields["role"].toInt();
+        }
         if (fields.contains("snr"))
         {
             node.snr = fields["snr"].toFloat();
@@ -460,5 +464,36 @@ QString NodeManager::hwModelToString(int model)
         return "Private/Custom";
     default:
         return QString("Unknown(%1)").arg(model);
+    }
+}
+
+QString NodeManager::roleToString(int role)
+{
+    switch (role)
+    {
+    case 0:
+        return "Client";
+    case 1:
+        return "Client Mute";
+    case 2:
+        return "Router";
+    case 3:
+        return "Router Client";
+    case 4:
+        return "Repeater";
+    case 5:
+        return "Tracker";
+    case 6:
+        return "Sensor";
+    case 7:
+        return "TAK";
+    case 8:
+        return "Client Hidden";
+    case 9:
+        return "Lost and Found";
+    case 10:
+        return "TAK Tracker";
+    default:
+        return QString("Unknown(%1)").arg(role);
     }
 }

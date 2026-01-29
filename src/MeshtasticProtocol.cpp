@@ -163,9 +163,9 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
         if (nodeInfo.has_user())
         {
             const auto &user = nodeInfo.user();
-            result.fields["userId"] = QString::fromStdString(user.id());
-            result.fields["longName"] = QString::fromStdString(user.long_name());
-            result.fields["shortName"] = QString::fromStdString(user.short_name());
+            result.fields["userId"] = QString::fromUtf8(user.id().c_str(), static_cast<int>(user.id().size()));
+            result.fields["longName"] = QString::fromUtf8(user.long_name().c_str(), static_cast<int>(user.long_name().size()));
+            result.fields["shortName"] = QString::fromUtf8(user.short_name().c_str(), static_cast<int>(user.short_name().size()));
             result.fields["hwModel"] = static_cast<int>(user.hw_model());
             result.fields["role"] = static_cast<int>(user.role());
         }
@@ -442,6 +442,11 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
 
                 // SNR values towards destination
                 QVariantList snrTowardsList;
+                // Add the received packet's SNR as first hop if available
+                if (packet.rx_snr() != 0)
+                {
+                    snrTowardsList.append(packet.rx_snr() / 4.0); // Convert from 0.25 dB units
+                }
                 for (const auto &snr : routeData.snr_towards())
                 {
                     snrTowardsList.append(snr / 4.0); // SNR is stored as int * 4
@@ -458,6 +463,11 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
 
                 // SNR values back
                 QVariantList snrBackList;
+                // Add the received packet's SNR as first hop if available
+                if (packet.rx_snr() != 0)
+                {
+                    snrBackList.append(packet.rx_snr() / 4.0); // Convert from 0.25 dB units
+                }
                 for (const auto &snr : routeData.snr_back())
                 {
                     snrBackList.append(snr / 4.0); // SNR is stored as int * 4
@@ -609,9 +619,9 @@ QVariantMap MeshtasticProtocol::decodeUser(const QByteArray &data)
 
     if (user.ParseFromArray(data.constData(), data.size()))
     {
-        fields["userId"] = QString::fromStdString(user.id());
-        fields["longName"] = QString::fromStdString(user.long_name());
-        fields["shortName"] = QString::fromStdString(user.short_name());
+        fields["userId"] = QString::fromUtf8(user.id().c_str(), static_cast<int>(user.id().size()));
+        fields["longName"] = QString::fromUtf8(user.long_name().c_str(), static_cast<int>(user.long_name().size()));
+        fields["shortName"] = QString::fromUtf8(user.short_name().c_str(), static_cast<int>(user.short_name().size()));
         fields["hwModel"] = static_cast<int>(user.hw_model());
         fields["role"] = static_cast<int>(user.role());
         if (user.is_licensed())

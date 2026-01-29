@@ -21,7 +21,9 @@ public:
         ColTime,
         ColType,
         ColFrom,
+        ColFromAddr,
         ColTo,
+        ColToAddr,
         ColPortNum,
         ColContent,
         ColCount
@@ -45,6 +47,7 @@ private:
     static const int MAX_PACKETS = 10000;
 
     QString formatNodeName(uint32_t nodeNum) const;
+    QString formatNodeId(uint32_t nodeNum) const;
     QString formatContent(const MeshtasticProtocol::DecodedPacket &packet) const;
 };
 

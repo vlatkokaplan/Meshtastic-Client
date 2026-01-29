@@ -60,11 +60,11 @@ jobs:
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2019_64'
-          modules: 'qtserialport qtwebchannel'
+          modules: 'qtserialport qtwebchannel qtwebengine'
 
       - name: Install dependencies
         run: |
-          choco install cmake -y
+          choco install cmake protoc -y
 
       - name: Configure for Windows
         run: |

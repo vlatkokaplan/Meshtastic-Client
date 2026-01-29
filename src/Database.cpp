@@ -162,11 +162,35 @@ bool Database::createTables()
         return false;
     }
 
+    // Traceroutes table
+    if (!query.exec(R"(
+        CREATE TABLE IF NOT EXISTS traceroutes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_node INTEGER,
+            to_node INTEGER,
+            route_to TEXT,
+            route_back TEXT,
+            snr_to TEXT,
+            snr_back TEXT,
+            timestamp INTEGER,
+            is_response INTEGER DEFAULT 0,
+            FOREIGN KEY (from_node) REFERENCES nodes(node_num),
+            FOREIGN KEY (to_node) REFERENCES nodes(node_num)
+        )
+    )"))
+    {
+        qWarning() << "Failed to create traceroutes table:" << query.lastError().text();
+        return false;
+    }
+
     // Indexes
     query.exec("CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_node)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_node)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_nodes_last_heard ON nodes(last_heard DESC)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_traceroutes_timestamp ON traceroutes(timestamp DESC)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_traceroutes_from ON traceroutes(from_node)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_traceroutes_to ON traceroutes(to_node)");
 
     return true;
 }
@@ -523,6 +547,86 @@ QList<Database::Message> Database::loadMessages(int limit, int offset)
     }
 
     return messages;
+}
+
+bool Database::saveTraceroute(const Traceroute &tr)
+{
+    QSqlQuery query(m_db);
+    query.prepare(R"(
+        INSERT INTO traceroutes (from_node, to_node, route_to, route_back, snr_to, snr_back, timestamp, is_response)
+        VALUES (:from_node, :to_node, :route_to, :route_back, :snr_to, :snr_back, :timestamp, :is_response)
+    )");
+
+    qint64 timestamp = tr.timestamp.isValid() ? tr.timestamp.toSecsSinceEpoch() : QDateTime::currentSecsSinceEpoch();
+
+    query.bindValue(":from_node", tr.fromNode);
+    query.bindValue(":to_node", tr.toNode);
+    query.bindValue(":route_to", tr.routeTo.join(";"));
+    query.bindValue(":route_back", tr.routeBack.join(";"));
+    query.bindValue(":snr_to", tr.snrTo.join(";"));
+    query.bindValue(":snr_back", tr.snrBack.join(";"));
+    query.bindValue(":timestamp", timestamp);
+    query.bindValue(":is_response", tr.isResponse ? 1 : 0);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to save traceroute:" << query.lastError().text();
+        return false;
+    }
+
+    return true;
+}
+
+QList<Database::Traceroute> Database::loadTraceroutes(int limit, int offset)
+{
+    QList<Traceroute> traceroutes;
+    QSqlQuery query(m_db);
+    query.prepare("SELECT * FROM traceroutes ORDER BY timestamp DESC LIMIT ? OFFSET ?");
+    query.addBindValue(limit);
+    query.addBindValue(offset);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to load traceroutes:" << query.lastError().text();
+        return traceroutes;
+    }
+
+    while (query.next())
+    {
+        Traceroute tr;
+        tr.id = query.value("id").toLongLong();
+        tr.fromNode = query.value("from_node").toUInt();
+        tr.toNode = query.value("to_node").toUInt();
+        tr.routeTo = query.value("route_to").toString().split(";", Qt::SkipEmptyParts);
+        tr.routeBack = query.value("route_back").toString().split(";", Qt::SkipEmptyParts);
+        tr.snrTo = query.value("snr_to").toString().split(";", Qt::SkipEmptyParts);
+        tr.snrBack = query.value("snr_back").toString().split(";", Qt::SkipEmptyParts);
+        tr.isResponse = query.value("is_response").toBool();
+        qint64 ts = query.value("timestamp").toLongLong();
+        if (ts > 0)
+        {
+            tr.timestamp = QDateTime::fromSecsSinceEpoch(ts);
+        }
+        traceroutes.append(tr);
+    }
+
+    return traceroutes;
+}
+
+bool Database::deleteTraceroutes(int daysOld)
+{
+    QSqlQuery query(m_db);
+    qint64 cutoffTime = QDateTime::currentSecsSinceEpoch() - (daysOld * 86400); // 86400 seconds per day
+    query.prepare("DELETE FROM traceroutes WHERE timestamp < ?");
+    query.addBindValue(cutoffTime);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to delete traceroutes:" << query.lastError().text();
+        return false;
+    }
+
+    return true;
 }
 
 QList<Database::Message> Database::loadMessagesForNode(uint32_t nodeNum, int limit)

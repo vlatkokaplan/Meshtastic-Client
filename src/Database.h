@@ -48,6 +48,24 @@ public:
 
     bool saveMessage(const Message &msg);
     QList<Message> loadMessages(int limit = 100, int offset = 0);
+
+    // Traceroute operations
+    struct Traceroute
+    {
+        qint64 id = 0;
+        uint32_t fromNode = 0;
+        uint32_t toNode = 0;
+        QStringList routeTo;
+        QStringList routeBack;
+        QStringList snrTo;
+        QStringList snrBack;
+        QDateTime timestamp;
+        bool isResponse = false; // true if this is a response, false if request sent
+    };
+
+    bool saveTraceroute(const Traceroute &tr);
+    QList<Traceroute> loadTraceroutes(int limit = 100, int offset = 0);
+    bool deleteTraceroutes(int daysOld = 30);
     QList<Message> loadMessagesForNode(uint32_t nodeNum, int limit = 100);
     bool markMessageRead(qint64 messageId);
     int unreadMessageCount();

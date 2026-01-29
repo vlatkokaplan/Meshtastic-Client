@@ -53,8 +53,12 @@ QVariant PacketTableModel::data(const QModelIndex &index, int role) const
             return packet.typeName;
         case ColFrom:
             return formatNodeName(packet.from);
+        case ColFromAddr:
+            return formatNodeId(packet.from);
         case ColTo:
             return formatNodeName(packet.to);
+        case ColToAddr:
+            return formatNodeId(packet.to);
         case ColPortNum:
             if (packet.type == MeshtasticProtocol::PacketType::PacketReceived)
             {
@@ -114,8 +118,12 @@ QVariant PacketTableModel::headerData(int section, Qt::Orientation orientation, 
         return "Type";
     case ColFrom:
         return "From";
+    case ColFromAddr:
+        return "From ID";
     case ColTo:
         return "To";
+    case ColToAddr:
+        return "To ID";
     case ColPortNum:
         return "Port";
     case ColContent:
@@ -180,6 +188,15 @@ QString PacketTableModel::formatNodeName(uint32_t nodeNum) const
         }
     }
 
+    return MeshtasticProtocol::nodeIdToString(nodeNum);
+}
+
+QString PacketTableModel::formatNodeId(uint32_t nodeNum) const
+{
+    if (nodeNum == 0)
+    {
+        return QString();
+    }
     return MeshtasticProtocol::nodeIdToString(nodeNum);
 }
 

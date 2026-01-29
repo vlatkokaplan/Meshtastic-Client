@@ -22,7 +22,11 @@ find_package(Qt6 REQUIRED COMPONENTS
 find_package(Qt6 COMPONENTS WebEngineWidgets)
 
 # Find Protobuf
-find_package(Protobuf REQUIRED)
+find_package(Protobuf REQUIRED MODULE)
+if(NOT Protobuf_FOUND)
+    # On Windows, try finding it in standard locations if MODULE mode fails
+    find_package(Protobuf REQUIRED CONFIG)
+endif()
 
 # Proto source directory
 set(PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/proto)
@@ -74,6 +78,7 @@ set(SOURCES
     src/main.cpp
     src/MainWindow.cpp
     src/PacketListWidget.cpp
+    src/TracerouteWidget.cpp
     src/SerialConnection.cpp
     src/MeshtasticProtocol.cpp
     src/NodeManager.cpp
@@ -94,6 +99,7 @@ set(SOURCES
 set(HEADERS
     src/MainWindow.h
     src/PacketListWidget.h
+    src/TracerouteWidget.h
     src/SerialConnection.h
     src/MeshtasticProtocol.h
     src/NodeManager.h

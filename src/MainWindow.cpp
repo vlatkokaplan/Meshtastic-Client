@@ -3,6 +3,7 @@
 #include "MeshtasticProtocol.h"
 #include "NodeManager.h"
 #include "PacketListWidget.h"
+#include "TracerouteWidget.h"
 #include "Database.h"
 #include "MessagesWidget.h"
 #include "ConfigWidget.h"
@@ -148,9 +149,25 @@ void MainWindow::setupUI()
     setupPacketTab();
     setupConfigTab();
 
-    // Status bar
+    // Traceroute tab
+    m_tracerouteWidget = new TracerouteWidget(m_nodeManager, m_database);
+    m_tabWidget->addTab(m_tracerouteWidget, "Traceroutes");
+
+    // Status bar with cooldown indicator
     m_statusLabel = new QLabel("Disconnected");
     statusBar()->addPermanentWidget(m_statusLabel);
+
+    // Traceroute cooldown text label (hidden by default)
+    m_tracerouteCooldownLabel = new QLabel;
+    m_tracerouteCooldownLabel->setStyleSheet("QLabel { color: #ff6f00; font-weight: bold; padding-right: 10px; }");
+    m_tracerouteCooldownLabel->setMaximumWidth(180);
+    m_tracerouteCooldownLabel->setVisible(false);
+    statusBar()->addPermanentWidget(m_tracerouteCooldownLabel);
+
+    // Traceroute cooldown timer
+    m_tracerouteCooldownTimer = new QTimer(this);
+    m_tracerouteCooldownTimer->setInterval(100); // Update every 100ms
+    connect(m_tracerouteCooldownTimer, &QTimer::timeout, this, &MainWindow::onTracerouteCooldownTick);
 }
 
 void MainWindow::setupToolbar()
@@ -552,6 +569,7 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             if (packet.fields.contains("route") || packet.fields.contains("routeBack"))
             {
                 showTracerouteResult(packet);
+                m_tracerouteWidget->addTraceroute(packet);
             }
             break;
 
@@ -746,6 +764,14 @@ void MainWindow::requestTraceroute(uint32_t nodeNum)
         return;
     }
 
+    // Check if cooldown is still active
+    if (m_tracerouteCooldownTimer->isActive())
+    {
+        int secondsRemaining = (m_tracerouteCooldownRemaining + 999) / 1000; // Round up
+        statusBar()->showMessage(QString("Traceroute on cooldown - %1s remaining").arg(secondsRemaining), 3000);
+        return;
+    }
+
     uint32_t myNode = m_nodeManager->myNodeNum();
     QByteArray packet = m_protocol->createTraceroutePacket(nodeNum, myNode);
     m_serial->sendData(packet);
@@ -753,6 +779,30 @@ void MainWindow::requestTraceroute(uint32_t nodeNum)
     NodeInfo node = m_nodeManager->getNode(nodeNum);
     QString name = node.longName.isEmpty() ? node.nodeId : node.longName;
     statusBar()->showMessage(QString("Traceroute request sent to %1...").arg(name), 5000);
+
+    // Start 30-second cooldown
+    m_tracerouteCooldownRemaining = TRACEROUTE_COOLDOWN_MS;
+    m_tracerouteCooldownLabel->setVisible(true);
+    m_tracerouteCooldownLabel->setText("🔄 Traceroute timeout: 30s");
+    m_tracerouteCooldownTimer->start();
+}
+
+void MainWindow::onTracerouteCooldownTick()
+{
+    m_tracerouteCooldownRemaining -= 100; // Timer interval is 100ms
+
+    if (m_tracerouteCooldownRemaining <= 0)
+    {
+        // Cooldown complete
+        m_tracerouteCooldownTimer->stop();
+        m_tracerouteCooldownLabel->setVisible(false);
+        statusBar()->showMessage("Traceroute ready", 2000);
+        return;
+    }
+
+    // Update text label with countdown
+    int secondsRemaining = (m_tracerouteCooldownRemaining + 999) / 1000; // Round up
+    m_tracerouteCooldownLabel->setText(QString("🔄 Traceroute timeout: %1s").arg(secondsRemaining));
 }
 
 void MainWindow::requestNodeInfo(uint32_t nodeNum)

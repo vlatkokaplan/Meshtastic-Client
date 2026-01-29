@@ -21,6 +21,7 @@ class PacketListWidget;
 class Database;
 class MessagesWidget;
 class ConfigWidget;
+class TracerouteWidget;
 
 class MapWidget;
 class DashboardStatsWidget;
@@ -49,6 +50,7 @@ private slots:
     void onNodeContextMenu(const QPoint &pos);
     void requestConfig();
     void requestTraceroute(uint32_t nodeNum);
+    void onTracerouteCooldownTick();
     void requestNodeInfo(uint32_t nodeNum);
     void requestTelemetry(uint32_t nodeNum);
     void requestPosition(uint32_t nodeNum);
@@ -71,6 +73,12 @@ private:
     uint32_t m_expectedConfigId = 0;
     QTimer *m_configHeartbeatTimer = nullptr;
 
+    // Traceroute cooldown state
+    QTimer *m_tracerouteCooldownTimer = nullptr;
+    QLabel *m_tracerouteCooldownLabel = nullptr;
+    int m_tracerouteCooldownRemaining = 0;
+    static const int TRACEROUTE_COOLDOWN_MS = 30000; // 30 seconds
+
     // Core components
     SerialConnection *m_serial;
     MeshtasticProtocol *m_protocol;
@@ -89,6 +97,7 @@ private:
     QLineEdit *m_nodeSearchEdit;
     MessagesWidget *m_messagesWidget;
     ConfigWidget *m_configWidget;
+    TracerouteWidget *m_tracerouteWidget;
 
     MapWidget *m_mapWidget;
     DashboardStatsWidget *m_dashboardStats;

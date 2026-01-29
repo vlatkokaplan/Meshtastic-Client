@@ -49,7 +49,6 @@ public:
     bool saveMessage(const Message &msg);
     QList<Message> loadMessages(int limit = 100, int offset = 0);
     QList<Message> loadMessagesForNode(uint32_t nodeNum, int limit = 100);
-    bool updateMessageStatusByPacketId(uint32_t packetId, int status);
     bool markMessageRead(qint64 messageId);
     int unreadMessageCount();
     bool deleteMessagesWithNode(uint32_t nodeNum);

@@ -15,10 +15,11 @@ find_package(Qt6 REQUIRED COMPONENTS
     Core
     Widgets
     SerialPort
-    WebEngineWidgets
     WebChannel
     Sql
 )
+
+find_package(Qt6 COMPONENTS WebEngineWidgets)
 
 # Find Protobuf
 find_package(Protobuf REQUIRED)
@@ -136,11 +137,18 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Core
     Qt6::Widgets
     Qt6::SerialPort
-    Qt6::WebEngineWidgets
     Qt6::WebChannel
     Qt6::Sql
     protobuf::libprotobuf
 )
+
+if(Qt6WebEngineWidgets_FOUND)
+    target_link_libraries(${PROJECT_NAME} PRIVATE Qt6::WebEngineWidgets)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_WEBENGINE=1)
+else()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_WEBENGINE=0)
+endif()
+
 
 # Copy resources to build directory
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

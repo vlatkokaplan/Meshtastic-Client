@@ -6,6 +6,7 @@ on:
     tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   build-linux:
@@ -46,36 +47,35 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install Qt6 with WebEngine
+      - name: Install Qt6 with SerialPort and WebChannel
         uses: jurplel/install-qt-action@v3
         with:
           version: '6.4.2'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2019_64'
-          modules: 'qtserialport qtwebengine'
+          modules: 'qtserialport qtwebchannel'
 
       - name: Install dependencies
         run: |
-          choco install cmake protobuf -y
+          choco install cmake -y
 
       - name: Configure for Windows
         run: |
           mkdir build-win
           cd build-win
-          cmake -G "Visual Studio 17 2022" -A x64 ..
+          cmake -G "Visual Studio 17 2022" -A x64 -DQt6_DIR="${Qt6_DIR}" ..
 
       - name: Build for Windows
         run: |
           cd build-win
-          cmake --build . --config Release -- -j%NUMBER_OF_PROCESSORS%
+          cmake --build . --config Release --verbose -- -j%NUMBER_OF_PROCESSORS%
 
       - name: Package Windows executable
         run: |

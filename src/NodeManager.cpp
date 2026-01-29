@@ -152,7 +152,19 @@ void NodeManager::updateNodeTelemetry(uint32_t nodeNum, const QVariantMap &telem
 
     if (telemetry.contains("batteryLevel"))
     {
-        node.batteryLevel = telemetry["batteryLevel"].toInt();
+        int level = telemetry["batteryLevel"].toInt();
+        // Battery level > 100 means external power (same as web client)
+        if (level > 100)
+        {
+            node.isExternalPower = true;
+            // Display as 100% when on external power
+            level = 100;
+        }
+        else
+        {
+            node.isExternalPower = false;
+        }
+        node.batteryLevel = level;
     }
     if (telemetry.contains("voltage"))
     {
@@ -166,13 +178,10 @@ void NodeManager::updateNodeTelemetry(uint32_t nodeNum, const QVariantMap &telem
     {
         node.airUtilTx = telemetry["airUtilTx"].toFloat();
     }
+    // Legacy support: explicit externalPower field (if provided)
     if (telemetry.contains("externalPower"))
     {
         node.isExternalPower = telemetry["externalPower"].toBool();
-    }
-    else
-    {
-        node.isExternalPower = false;
     }
 
     // Environment telemetry

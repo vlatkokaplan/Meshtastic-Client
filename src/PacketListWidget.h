@@ -16,7 +16,8 @@ class PacketTableModel : public QAbstractTableModel
     Q_OBJECT
 
 public:
-    enum Column {
+    enum Column
+    {
         ColTime,
         ColType,
         ColFrom,
@@ -77,12 +78,14 @@ public:
 
     void addPacket(const MeshtasticProtocol::DecodedPacket &packet);
     void clear();
+    void dumpPacketsToFile(const QString &filePath, int count);
 
 signals:
     void packetSelected(const MeshtasticProtocol::DecodedPacket &packet);
 
 private slots:
     void onRowSelected(const QModelIndex &current, const QModelIndex &previous);
+    void onDumpPackets();
 
 private:
     QTableView *m_tableView;

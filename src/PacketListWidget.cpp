@@ -7,6 +7,12 @@
 #include <QLabel>
 #include <QDateTime>
 #include <QScrollBar>
+#include <QPushButton>
+#include <QSpinBox>
+#include <QFileDialog>
+#include <QFile>
+#include <QTextStream>
+#include <QMessageBox>
 
 // PacketTableModel implementation
 PacketTableModel::PacketTableModel(NodeManager *nodeManager, QObject *parent)
@@ -417,6 +423,20 @@ void PacketListWidget::setupUI()
     filterLayout->addWidget(m_portNumFilter);
 
     filterLayout->addStretch();
+
+    // Export button
+    filterLayout->addWidget(new QLabel("Export last:"));
+    QSpinBox *countSpinBox = new QSpinBox;
+    countSpinBox->setRange(10, 10000);
+    countSpinBox->setValue(100);
+    countSpinBox->setSuffix(" packets");
+    countSpinBox->setObjectName("exportCountSpinBox");
+    filterLayout->addWidget(countSpinBox);
+
+    QPushButton *exportBtn = new QPushButton("Dump to File");
+    connect(exportBtn, &QPushButton::clicked, this, &PacketListWidget::onDumpPackets);
+    filterLayout->addWidget(exportBtn);
+
     layout->addLayout(filterLayout);
 
     // Table view
@@ -480,4 +500,80 @@ void PacketListWidget::onRowSelected(const QModelIndex &current, const QModelInd
     {
         emit packetSelected(m_model->packetAt(sourceIndex.row()));
     }
+}
+
+void PacketListWidget::onDumpPackets()
+{
+    QSpinBox *countSpinBox = findChild<QSpinBox *>("exportCountSpinBox");
+    if (!countSpinBox)
+        return;
+
+    int count = countSpinBox->value();
+
+    QString fileName = QFileDialog::getSaveFileName(
+        this,
+        tr("Export Packets to File"),
+        QString("packets_%1.txt").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss")),
+        tr("Text Files (*.txt);;All Files (*)"));
+
+    if (fileName.isEmpty())
+        return;
+
+    dumpPacketsToFile(fileName, count);
+}
+
+void PacketListWidget::dumpPacketsToFile(const QString &filePath, int count)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    {
+        QMessageBox::warning(this, tr("Export Failed"),
+                             tr("Could not open file for writing: %1").arg(filePath));
+        return;
+    }
+
+    QTextStream out(&file);
+    out << "Meshtastic Packet Dump\n";
+    out << "Generated: " << QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss") << "\n";
+    out << QString("=").repeated(80) << "\n\n";
+
+    int totalPackets = m_model->rowCount();
+    int startRow = qMax(0, totalPackets - count);
+    int exported = 0;
+
+    for (int i = startRow; i < totalPackets; ++i)
+    {
+        const auto &packet = m_model->packetAt(i);
+
+        out << "[" << QDateTime::fromMSecsSinceEpoch(packet.timestamp).toString("yyyy-MM-dd HH:mm:ss.zzz") << "] ";
+        out << packet.typeName << " ";
+        out << "From: " << packet.from << " ";
+        out << "To: " << packet.to << "\n";
+
+        if (packet.type == MeshtasticProtocol::PacketType::PacketReceived)
+        {
+            out << "  Port: " << MeshtasticProtocol::portNumToString(packet.portNum) << "\n";
+        }
+
+        // Raw fields
+        if (!packet.fields.isEmpty())
+        {
+            out << "  Fields:\n";
+            for (auto it = packet.fields.begin(); it != packet.fields.end(); ++it)
+            {
+                out << "    " << it.key() << ": " << it.value().toString() << "\n";
+            }
+        }
+
+        out << "\n";
+        exported++;
+    }
+
+    out << QString("=").repeated(80) << "\n";
+    out << QString("Exported %1 of %2 total packets\n").arg(exported).arg(totalPackets);
+
+    file.close();
+
+    QMessageBox::information(this, tr("Export Complete"),
+                             tr("Exported %1 packet(s) to:\n%2").arg(exported).arg(filePath));
 }

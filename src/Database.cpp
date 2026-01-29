@@ -7,7 +7,7 @@
 #include <QDebug>
 #include <QUuid>
 
-static const int SCHEMA_VERSION = 4;
+static const int SCHEMA_VERSION = 3;
 
 Database::Database(QObject *parent)
     : QObject(parent)
@@ -195,12 +195,6 @@ bool Database::migrateSchema(int fromVersion, int toVersion)
             query.exec("ALTER TABLE nodes ADD COLUMN barometric_pressure REAL DEFAULT 0");
             query.exec("ALTER TABLE nodes ADD COLUMN uptime_seconds INTEGER DEFAULT 0");
             qDebug() << "Database migrated to schema version 3";
-            break;
-        case 4:
-            // Add message status and packet id columns
-            query.exec("ALTER TABLE messages ADD COLUMN status INTEGER DEFAULT 0");
-            query.exec("ALTER TABLE messages ADD COLUMN packet_id INTEGER DEFAULT 0");
-            qDebug() << "Database migrated to schema version 4";
             break;
         }
     }

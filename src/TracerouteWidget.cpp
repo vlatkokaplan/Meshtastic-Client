@@ -187,6 +187,24 @@ void TracerouteTableModel::addTraceroute(const MeshtasticProtocol::DecodedPacket
     }
 }
 
+void TracerouteTableModel::addTracerouteFromDb(uint32_t from, uint32_t to, quint64 timestamp,
+                                               const QStringList &routeTo, const QStringList &routeBack,
+                                               const QStringList &snrTo, const QStringList &snrBack)
+{
+    Traceroute tr;
+    tr.timestamp = timestamp;
+    tr.from = from;
+    tr.to = to;
+    tr.routeTo = routeTo;
+    tr.routeBack = routeBack;
+    tr.snrTo = snrTo;
+    tr.snrBack = snrBack;
+
+    beginInsertRows(QModelIndex(), m_traceroutes.size(), m_traceroutes.size());
+    m_traceroutes.append(tr);
+    endInsertRows();
+}
+
 void TracerouteTableModel::clear()
 {
     beginResetModel();
@@ -292,6 +310,28 @@ void TracerouteWidget::addTraceroute(const MeshtasticProtocol::DecodedPacket &pa
         }
 
         m_database->saveTraceroute(dbTracer);
+    }
+}
+
+void TracerouteWidget::loadFromDatabase()
+{
+    if (!m_database)
+        return;
+
+    m_model->clear();
+
+    QList<Database::Traceroute> traceroutes = m_database->loadTraceroutes(100, 0);
+
+    // Load in reverse order so newest ends up at top
+    for (int i = traceroutes.size() - 1; i >= 0; i--)
+    {
+        const auto &tr = traceroutes[i];
+        m_model->addTracerouteFromDb(
+            tr.fromNode, tr.toNode,
+            tr.timestamp.toMSecsSinceEpoch(),
+            tr.routeTo, tr.routeBack,
+            tr.snrTo, tr.snrBack
+        );
     }
 }
 

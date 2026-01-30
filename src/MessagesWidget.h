@@ -10,6 +10,7 @@
 #include <QSplitter>
 #include <QDateTime>
 #include <QMap>
+#include <QHash>
 #include <QTreeWidget>
 
 class NodeManager;
@@ -72,6 +73,7 @@ public:
 signals:
     void sendMessage(const QString &text, uint32_t toNode, int channel);
     void sendReaction(const QString &emoji, uint32_t toNode, int channel, uint32_t replyId);
+    void nodeClicked(uint32_t nodeNum);  // Emitted when user clicks a node name in messages
 
 private slots:
     void onConversationSelected(QTreeWidgetItem *item, int column);
@@ -101,6 +103,7 @@ private:
 
     // Data
     QList<ChatMessage> m_messages;
+    QHash<uint32_t, int> m_packetIdIndex;  // packetId -> index in m_messages for O(1) lookup
     QMap<int, ChannelInfo> m_channels;
 
     // Current selection

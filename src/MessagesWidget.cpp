@@ -19,13 +19,64 @@
 #include <QHelpEvent>
 #include <QShortcut>
 #include <QKeySequence>
+#include <QMouseEvent>
+#include <algorithm>
 #include "AppSettings.h"
 
-// Custom delegate to paint message items with their explicit colors and show tooltips
+// Custom roles for message data
+enum MessageRoles {
+    SenderRole = Qt::UserRole + 10,
+    MessageTextRole,
+    TimeRole,
+    StatusRole,
+    IsOutgoingRole,
+    FromNodeRole
+};
+
+// Modern chat bubble delegate with click detection
 class MessageItemDelegate : public QStyledItemDelegate
 {
 public:
-    using QStyledItemDelegate::QStyledItemDelegate;
+    explicit MessageItemDelegate(QObject *parent = nullptr) : QStyledItemDelegate(parent) {}
+
+    // Store sender rect for click detection
+    mutable QHash<int, QRect> m_senderRects;
+
+    bool editorEvent(QEvent *event, QAbstractItemModel *model, const QStyleOptionViewItem &option, const QModelIndex &index) override
+    {
+        if (event->type() == QEvent::MouseButtonRelease)
+        {
+            QMouseEvent *mouseEvent = static_cast<QMouseEvent *>(event);
+            if (mouseEvent->button() == Qt::LeftButton)
+            {
+                bool isOutgoing = index.data(IsOutgoingRole).toBool();
+                if (!isOutgoing && m_senderRects.contains(index.row()))
+                {
+                    QRect senderRect = m_senderRects[index.row()];
+                    if (senderRect.contains(mouseEvent->pos()))
+                    {
+                        uint32_t nodeNum = index.data(FromNodeRole).toUInt();
+                        if (nodeNum != 0)
+                        {
+                            // Find parent MessagesWidget and emit signal
+                            QObject *p = parent();
+                            while (p)
+                            {
+                                MessagesWidget *mw = qobject_cast<MessagesWidget *>(p);
+                                if (mw)
+                                {
+                                    emit mw->nodeClicked(nodeNum);
+                                    return true;
+                                }
+                                p = p->parent();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return QStyledItemDelegate::editorEvent(event, model, option, index);
+    }
 
     bool helpEvent(QHelpEvent *event, QAbstractItemView *view, const QStyleOptionViewItem &option, const QModelIndex &index) override
     {
@@ -44,59 +95,155 @@ public:
     void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override
     {
         painter->save();
+        painter->setRenderHint(QPainter::Antialiasing, true);
 
-        // Get the item's background and foreground colors
-        QVariant bgVar = index.data(Qt::BackgroundRole);
-        QVariant fgVar = index.data(Qt::ForegroundRole);
+        bool isOutgoing = index.data(IsOutgoingRole).toBool();
+        QString sender = index.data(SenderRole).toString();
+        QString messageText = index.data(MessageTextRole).toString();
+        QString timeStr = index.data(TimeRole).toString();
+        QString statusStr = index.data(StatusRole).toString();
 
-        QRect rect = option.rect;
+        QRect fullRect = option.rect;
+        int bubbleMaxWidth = qMax(200, static_cast<int>(fullRect.width() * 0.70));
+        int hPadding = 10;
+        int vPadding = 6;
+        int bubbleRadius = 10;
+        int margin = 6;
 
-        // Draw background
-        if (bgVar.isValid())
-        {
-            QBrush bgBrush = bgVar.value<QBrush>();
-            painter->fillRect(rect, bgBrush);
-        }
+        // Use cached font metrics for performance
+        QFont senderFont = option.font;
+        senderFont.setBold(true);
+        QFontMetrics senderFm(senderFont);
 
-        // Draw selection overlay if selected
+        QFontMetrics messageFm(option.font);
+
+        QFont metaFont = option.font;
+        metaFont.setPointSizeF(option.font.pointSizeF() * 0.85);
+        QFontMetrics metaFm(metaFont);
+
+        // Calculate content widths
+        int senderWidth = isOutgoing ? 0 : senderFm.horizontalAdvance(sender);
+        QString meta = statusStr.isEmpty() ? timeStr : timeStr + "  " + statusStr;
+        int metaWidth = metaFm.horizontalAdvance(meta);
+
+        int textWidth = bubbleMaxWidth - 2 * hPadding;
+        QRect msgBound = messageFm.boundingRect(0, 0, textWidth, 10000, Qt::TextWordWrap, messageText);
+
+        // Calculate bubble width - must fit sender, message, and meta
+        int contentWidth = std::max({msgBound.width(), senderWidth, metaWidth});
+        int bubbleWidth = qMin(bubbleMaxWidth, contentWidth + 2 * hPadding);
+
+        // Recalculate message bounds with actual bubble width
+        textWidth = bubbleWidth - 2 * hPadding;
+        msgBound = messageFm.boundingRect(0, 0, textWidth, 10000, Qt::TextWordWrap, messageText);
+
+        // Calculate heights
+        int senderHeight = isOutgoing ? 0 : senderFm.height() + 2;
+        int metaHeight = metaFm.height();
+        int bubbleHeight = senderHeight + msgBound.height() + metaHeight + 2 * vPadding + 2;
+
+        // Position bubble
+        int bubbleX = isOutgoing ? fullRect.right() - bubbleWidth - margin : fullRect.left() + margin;
+        int bubbleY = fullRect.top() + margin / 2;
+
+        QRect bubbleRect(bubbleX, bubbleY, bubbleWidth, bubbleHeight);
+
+        // Draw bubble shadow (subtle)
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(0, 0, 0, 15));
+        painter->drawRoundedRect(bubbleRect.adjusted(1, 1, 1, 1), bubbleRadius, bubbleRadius);
+
+        // Draw bubble background
+        QColor bubbleColor = isOutgoing ? QColor("#0084ff") : QColor("#e9ecef");
+        painter->setBrush(bubbleColor);
+        painter->drawRoundedRect(bubbleRect, bubbleRadius, bubbleRadius);
+
+        // Selection highlight
         if (option.state & QStyle::State_Selected)
         {
-            painter->fillRect(rect, QColor(0, 0, 0, 40));
+            painter->setBrush(QColor(0, 0, 0, 25));
+            painter->drawRoundedRect(bubbleRect, bubbleRadius, bubbleRadius);
         }
 
-        // Draw text with explicit foreground color
-        if (fgVar.isValid())
+        // Text colors
+        QColor textColor = isOutgoing ? QColor("#ffffff") : QColor("#212529");
+        QColor metaColor = isOutgoing ? QColor(255, 255, 255, 180) : QColor("#6c757d");
+
+        int textX = bubbleRect.left() + hPadding;
+        int textY = bubbleRect.top() + vPadding;
+
+        // Draw sender name (incoming only) - clickable
+        if (!isOutgoing)
         {
-            painter->setPen(fgVar.value<QBrush>().color());
-        }
-        else
-        {
-            painter->setPen(option.palette.text().color());
+            painter->setFont(senderFont);
+            painter->setPen(QColor("#0066cc"));
+            QRect senderRect(textX, textY, senderWidth, senderFm.height());
+            painter->drawText(textX, textY + senderFm.ascent(), sender);
+
+            // Draw underline on hover hint
+            painter->drawLine(textX, textY + senderFm.ascent() + 1,
+                            textX + senderWidth, textY + senderFm.ascent() + 1);
+
+            // Store for click detection
+            m_senderRects[index.row()] = senderRect;
+            textY += senderHeight;
         }
 
-        // Use the font from the option (which includes widget's font)
+        // Draw message text
         painter->setFont(option.font);
+        painter->setPen(textColor);
+        QRect msgRect(textX, textY, textWidth, msgBound.height());
+        painter->drawText(msgRect, Qt::TextWordWrap, messageText);
+        textY += msgBound.height() + 2;
 
-        QString text = index.data(Qt::DisplayRole).toString();
-        QRect textRect = rect.adjusted(4, 4, -4, -4);
-
-        // Check alignment
-        int alignment = index.data(Qt::TextAlignmentRole).toInt();
-        if (alignment == 0)
-            alignment = Qt::AlignLeft | Qt::AlignVCenter;
-
-        painter->drawText(textRect, alignment | Qt::TextWordWrap, text);
+        // Draw time and status (bottom right)
+        painter->setFont(metaFont);
+        painter->setPen(metaColor);
+        painter->drawText(bubbleRect.right() - hPadding - metaWidth, textY + metaFm.ascent(), meta);
 
         painter->restore();
     }
 
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
     {
-        QString text = index.data(Qt::DisplayRole).toString();
-        QFontMetrics fm(option.font);
-        int width = option.rect.width() > 0 ? option.rect.width() - 8 : 300;
-        QRect bound = fm.boundingRect(0, 0, width, 10000, Qt::TextWordWrap, text);
-        return QSize(width, bound.height() + 16);
+        bool isOutgoing = index.data(IsOutgoingRole).toBool();
+        QString sender = index.data(SenderRole).toString();
+        QString messageText = index.data(MessageTextRole).toString();
+        QString timeStr = index.data(TimeRole).toString();
+        QString statusStr = index.data(StatusRole).toString();
+
+        int bubbleMaxWidth = 350;
+        int hPadding = 10;
+        int vPadding = 6;
+        int margin = 6;
+
+        QFont senderFont = option.font;
+        senderFont.setBold(true);
+        QFontMetrics senderFm(senderFont);
+        QFontMetrics messageFm(option.font);
+
+        QFont metaFont = option.font;
+        metaFont.setPointSizeF(option.font.pointSizeF() * 0.85);
+        QFontMetrics metaFm(metaFont);
+
+        // Calculate widths needed
+        int senderWidth = isOutgoing ? 0 : senderFm.horizontalAdvance(sender);
+        QString meta = statusStr.isEmpty() ? timeStr : timeStr + "  " + statusStr;
+        int metaWidth = metaFm.horizontalAdvance(meta);
+
+        int textWidth = bubbleMaxWidth - 2 * hPadding;
+        QRect msgBound = messageFm.boundingRect(0, 0, textWidth, 10000, Qt::TextWordWrap, messageText);
+
+        int contentWidth = std::max({msgBound.width(), senderWidth, metaWidth});
+        int bubbleWidth = qMin(bubbleMaxWidth, contentWidth + 2 * hPadding);
+        textWidth = bubbleWidth - 2 * hPadding;
+        msgBound = messageFm.boundingRect(0, 0, textWidth, 10000, Qt::TextWordWrap, messageText);
+
+        int senderHeight = isOutgoing ? 0 : senderFm.height() + 2;
+        int metaHeight = metaFm.height();
+        int totalHeight = senderHeight + msgBound.height() + metaHeight + 2 * vPadding + margin + 2;
+
+        return QSize(option.rect.width(), totalHeight);
     }
 };
 
@@ -191,7 +338,10 @@ void MessagesWidget::setupUI()
             margin: 4px 8px;
         }
     )");
-    m_messageList->setItemDelegate(new MessageItemDelegate(m_messageList));
+    m_messageList->setItemDelegate(new MessageItemDelegate(this));
+    m_messageList->setMouseTracking(true);  // Enable for click detection
+    m_messageList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);  // Smoother scrolling
+    m_messageList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_messageList->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_messageList, &QListWidget::customContextMenuRequested,
             this, &MessagesWidget::onMessageContextMenu);
@@ -276,7 +426,14 @@ void MessagesWidget::addMessage(const ChatMessage &msg)
         return;
     }
 
+    int index = m_messages.size();
     m_messages.append(msg);
+
+    // Index by packetId for O(1) status lookups
+    if (msg.packetId != 0)
+    {
+        m_packetIdIndex[msg.packetId] = index;
+    }
 
     // Save to database
     if (m_database)
@@ -313,59 +470,75 @@ void MessagesWidget::updateMessageStatus(uint32_t packetId, int errorReason)
 
     qDebug() << "[MessagesWidget] Updating status for packet" << packetId << "with error reason" << errorReason;
 
-    for (ChatMessage &msg : m_messages)
+    // O(1) lookup using hash index
+    auto it = m_packetIdIndex.find(packetId);
+    if (it == m_packetIdIndex.end())
     {
-        if (msg.packetId == packetId)
-        {
-            qDebug() << "[MessagesWidget] Found message with matching packetId, updating from status" << static_cast<int>(msg.status);
-            // Map Routing_Error enum to MessageStatus
-            switch (errorReason)
-            {
-            case 0: // NONE
-                // Keep Delivered if we've already confirmed delivery
-                if (msg.status != MessageStatus::Delivered)
-                {
-                    msg.status = MessageStatus::Sent;
-                }
-                break;
-            case 1: // NO_ROUTE
-                msg.status = MessageStatus::NoRoute;
-                break;
-            case 2: // GOT_NAK
-                msg.status = MessageStatus::GotNak;
-                break;
-            case 3: // TIMEOUT
-                msg.status = MessageStatus::Timeout;
-                break;
-            case 5: // MAX_RETRANSMIT
-                msg.status = MessageStatus::MaxRetransmit;
-                break;
-            case 8: // NO_RESPONSE
-                msg.status = MessageStatus::NoResponse;
-                break;
-            default:
-                msg.status = MessageStatus::Failed;
-                break;
-            }
-
-            qDebug() << "[MessagesWidget] Status updated to" << static_cast<int>(msg.status);
-
-            // Update display if this conversation is currently visible
-            if ((m_currentType == ConversationType::DirectMessage &&
-                 (msg.fromNode == m_currentDmNode || msg.toNode == m_currentDmNode)) ||
-                (m_currentType == ConversationType::Channel && msg.channelIndex == m_currentChannel))
-            {
-                qDebug() << "[MessagesWidget] Refreshing message display";
-                updateMessageDisplay();
-            }
-            else
-            {
-                qDebug() << "[MessagesWidget] Message not in current view, skipping display update";
-            }
-            return;
-        }
+        qDebug() << "[MessagesWidget] No message found with packetId" << packetId;
+        return;
     }
-    qDebug() << "[MessagesWidget] No message found with packetId" << packetId;
+
+    int index = it.value();
+    if (index < 0 || index >= m_messages.size())
+    {
+        qWarning() << "[MessagesWidget] Invalid index in packetId lookup:" << index;
+        m_packetIdIndex.remove(packetId);
+        return;
+    }
+
+    ChatMessage &msg = m_messages[index];
+    qDebug() << "[MessagesWidget] Found message with matching packetId, updating from status" << static_cast<int>(msg.status);
+
+    // Map Routing_Error enum to MessageStatus
+    switch (errorReason)
+    {
+    case 0: // NONE
+        // Keep Delivered if we've already confirmed delivery
+        if (msg.status != MessageStatus::Delivered)
+        {
+            msg.status = MessageStatus::Sent;
+        }
+        break;
+    case 1: // NO_ROUTE
+        msg.status = MessageStatus::NoRoute;
+        break;
+    case 2: // GOT_NAK
+        msg.status = MessageStatus::GotNak;
+        break;
+    case 3: // TIMEOUT
+        msg.status = MessageStatus::Timeout;
+        break;
+    case 5: // MAX_RETRANSMIT
+        msg.status = MessageStatus::MaxRetransmit;
+        break;
+    case 8: // NO_RESPONSE
+        msg.status = MessageStatus::NoResponse;
+        break;
+    default:
+        msg.status = MessageStatus::Failed;
+        break;
+    }
+
+    qDebug() << "[MessagesWidget] Status updated to" << static_cast<int>(msg.status);
+
+    // Persist status to database
+    if (m_database)
+    {
+        m_database->updateMessageStatus(packetId, static_cast<int>(msg.status));
+    }
+
+    // Update display if this conversation is currently visible
+    if ((m_currentType == ConversationType::DirectMessage &&
+         (msg.fromNode == m_currentDmNode || msg.toNode == m_currentDmNode)) ||
+        (m_currentType == ConversationType::Channel && msg.channelIndex == m_currentChannel))
+    {
+        qDebug() << "[MessagesWidget] Refreshing message display";
+        updateMessageDisplay();
+    }
+    else
+    {
+        qDebug() << "[MessagesWidget] Message not in current view, skipping display update";
+    }
 }
 
 void MessagesWidget::updateMessageDelivered(uint32_t packetId, uint32_t fromNode)
@@ -375,33 +548,49 @@ void MessagesWidget::updateMessageDelivered(uint32_t packetId, uint32_t fromNode
 
     qDebug() << "[MessagesWidget] Marking delivery confirmation for packet" << packetId;
 
-    for (ChatMessage &msg : m_messages)
+    // O(1) lookup using hash index
+    auto it = m_packetIdIndex.find(packetId);
+    if (it == m_packetIdIndex.end())
     {
-        if (msg.packetId == packetId)
+        qDebug() << "[MessagesWidget] No message found with packetId" << packetId;
+        return;
+    }
+
+    int index = it.value();
+    if (index < 0 || index >= m_messages.size())
+    {
+        qWarning() << "[MessagesWidget] Invalid index in packetId lookup:" << index;
+        m_packetIdIndex.remove(packetId);
+        return;
+    }
+
+    ChatMessage &msg = m_messages[index];
+
+    // Only mark as delivered if it's a private message and currently at "Sending" or "Sent" status
+    bool isPrivateMessage = (msg.toNode != 0xFFFFFFFF && msg.toNode != 0);
+    // If fromNode is provided, validate it's from the destination (not an intermediate relay)
+    bool isFromDestination = (fromNode == 0 || msg.toNode == fromNode);
+
+    if (isPrivateMessage && (msg.status == MessageStatus::Sent || msg.status == MessageStatus::Sending) && isFromDestination)
+    {
+        msg.status = MessageStatus::Delivered;
+        qDebug() << "[MessagesWidget] Message marked as delivered";
+
+        // Persist status to database
+        if (m_database)
         {
-            // Only mark as delivered if it's a private message and currently at "Sending" or "Sent" status
-            bool isPrivateMessage = (msg.toNode != 0xFFFFFFFF && msg.toNode != 0);
-            // If fromNode is provided, validate it's from the destination (not an intermediate relay)
-            bool isFromDestination = (fromNode == 0 || msg.toNode == fromNode);
+            m_database->updateMessageStatus(packetId, static_cast<int>(msg.status));
+        }
 
-            if (isPrivateMessage && (msg.status == MessageStatus::Sent || msg.status == MessageStatus::Sending) && isFromDestination)
-            {
-                msg.status = MessageStatus::Delivered;
-                qDebug() << "[MessagesWidget] Message marked as delivered";
-
-                // Update display if this conversation is currently visible
-                if ((m_currentType == ConversationType::DirectMessage &&
-                     (msg.fromNode == m_currentDmNode || msg.toNode == m_currentDmNode)) ||
-                    (m_currentType == ConversationType::Channel && msg.channelIndex == m_currentChannel))
-                {
-                    qDebug() << "[MessagesWidget] Refreshing message display for delivery";
-                    updateMessageDisplay();
-                }
-            }
-            return;
+        // Update display if this conversation is currently visible
+        if ((m_currentType == ConversationType::DirectMessage &&
+             (msg.fromNode == m_currentDmNode || msg.toNode == m_currentDmNode)) ||
+            (m_currentType == ConversationType::Channel && msg.channelIndex == m_currentChannel))
+        {
+            qDebug() << "[MessagesWidget] Refreshing message display for delivery";
+            updateMessageDisplay();
         }
     }
-    qDebug() << "[MessagesWidget] No message found with packetId" << packetId;
 }
 
 void MessagesWidget::loadFromDatabase()
@@ -410,6 +599,7 @@ void MessagesWidget::loadFromDatabase()
         return;
 
     m_messages.clear();
+    m_packetIdIndex.clear();
 
     QList<Database::Message> dbMessages = m_database->loadMessages(1000, 0);
     qDebug() << "[MessagesWidget] Retrieved" << dbMessages.size() << "messages from database";
@@ -437,6 +627,15 @@ void MessagesWidget::loadFromDatabase()
     std::sort(m_messages.begin(), m_messages.end(), [](const ChatMessage &a, const ChatMessage &b)
               { return a.timestamp < b.timestamp; });
 
+    // Rebuild packetId index after sort (indices changed)
+    for (int i = 0; i < m_messages.size(); ++i)
+    {
+        if (m_messages[i].packetId != 0)
+        {
+            m_packetIdIndex[m_messages[i].packetId] = i;
+        }
+    }
+
     qDebug() << "[MessagesWidget] Loaded" << m_messages.size() << "text messages (portNum=1) for display";
 
     updateConversationList();
@@ -449,6 +648,7 @@ void MessagesWidget::loadFromDatabase()
 void MessagesWidget::clear()
 {
     m_messages.clear();
+    m_packetIdIndex.clear();
     m_messageList->clear();
     m_currentType = ConversationType::None;
     m_currentChannel = -1;
@@ -625,60 +825,96 @@ void MessagesWidget::updateMessageDisplay()
         if (!show)
             continue;
 
-        QListWidgetItem *item = new QListWidgetItem;
-        item->setData(Qt::UserRole, QVariant::fromValue(msg.packetId)); // Store packet ID for reactions
-        item->setData(Qt::UserRole + 1, QVariant::fromValue(msg.fromNode));
-        item->setText(formatMessage(msg));
+        bool isOutgoing = (msg.fromNode == myNode);
+        QString sender = getNodeName(msg.fromNode);
 
-        // Add tooltip for message status (DMs only)
-        if (msg.toNode != 0xFFFFFFFF && msg.isOutgoing)
+        // Format time
+        QString timeStr;
+        if (msg.timestamp.date() == QDate::currentDate())
+            timeStr = msg.timestamp.toString("hh:mm");
+        else
+            timeStr = msg.timestamp.toString("MMM d, hh:mm");
+
+        // Format status indicator
+        QString statusStr;
+        if (msg.isOutgoing)
         {
-            QString tooltip;
             switch (msg.status)
             {
             case MessageStatus::Sending:
-                tooltip = "Sending - waiting for response";
+                statusStr = "○";  // Empty circle - pending
                 break;
             case MessageStatus::Sent:
-                tooltip = "Sent - delivered successfully";
+                statusStr = "✓";  // Single check - sent
+                break;
+            case MessageStatus::Delivered:
+                statusStr = "✓✓"; // Double check - delivered
                 break;
             case MessageStatus::NoRoute:
-                tooltip = "Failed - no route to destination";
-                break;
             case MessageStatus::GotNak:
-                tooltip = "Failed - received negative acknowledgment";
-                break;
             case MessageStatus::Timeout:
-                tooltip = "Failed - message timed out";
-                break;
             case MessageStatus::MaxRetransmit:
-                tooltip = "Failed - maximum retransmissions reached";
-                break;
             case MessageStatus::NoResponse:
-                tooltip = "Failed - no response from recipient";
-                break;
             case MessageStatus::Failed:
-                tooltip = "Failed - delivery error";
+                statusStr = "!";  // Error indicator
                 break;
             }
-            item->setToolTip(tooltip);
         }
 
-        bool isOutgoing = (msg.fromNode == myNode);
+        QListWidgetItem *item = new QListWidgetItem;
 
-        // Use explicit brush colors that override any theme/stylesheet
-        if (isOutgoing)
+        // Store data for reactions/context menu
+        item->setData(Qt::UserRole, QVariant::fromValue(msg.packetId));
+        item->setData(Qt::UserRole + 1, QVariant::fromValue(msg.fromNode));
+
+        // Store data for modern bubble rendering
+        item->setData(SenderRole, sender);
+        item->setData(MessageTextRole, msg.text);
+        item->setData(TimeRole, timeStr);
+        item->setData(StatusRole, statusStr);
+        item->setData(IsOutgoingRole, isOutgoing);
+        item->setData(FromNodeRole, msg.fromNode);
+
+        // Tooltip with full status info
+        QString tooltip;
+        if (msg.isOutgoing)
         {
-            item->setBackground(QBrush(QColor("#0084ff")));
-            item->setForeground(QBrush(QColor(255, 255, 255))); // White text
-            item->setTextAlignment(Qt::AlignRight);
+            switch (msg.status)
+            {
+            case MessageStatus::Sending:
+                tooltip = "Status: Sending\nWaiting for mesh acknowledgment...";
+                break;
+            case MessageStatus::Sent:
+                tooltip = "Status: Sent\nMessage delivered to mesh network";
+                break;
+            case MessageStatus::Delivered:
+                tooltip = "Status: Delivered\nMessage confirmed received by recipient";
+                break;
+            case MessageStatus::NoRoute:
+                tooltip = "Status: Failed\nNo route to destination node";
+                break;
+            case MessageStatus::GotNak:
+                tooltip = "Status: Failed\nReceived negative acknowledgment";
+                break;
+            case MessageStatus::Timeout:
+                tooltip = "Status: Failed\nMessage timed out waiting for response";
+                break;
+            case MessageStatus::MaxRetransmit:
+                tooltip = "Status: Failed\nMax retransmission attempts reached";
+                break;
+            case MessageStatus::NoResponse:
+                tooltip = "Status: Failed\nNo response from recipient";
+                break;
+            case MessageStatus::Failed:
+                tooltip = "Status: Failed\nDelivery error occurred";
+                break;
+            }
         }
         else
         {
-            item->setBackground(QBrush(QColor("#e4e6eb")));
-            item->setForeground(QBrush(QColor(28, 30, 33))); // Dark text #1c1e21
-            item->setTextAlignment(Qt::AlignLeft);
+            tooltip = QString("From: %1\nReceived: %2").arg(sender, msg.timestamp.toString("yyyy-MM-dd hh:mm:ss"));
         }
+        item->setToolTip(tooltip);
 
         m_messageList->addItem(item);
     }

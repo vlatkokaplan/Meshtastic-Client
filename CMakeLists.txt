@@ -22,11 +22,7 @@ find_package(Qt6 REQUIRED COMPONENTS
 find_package(Qt6 COMPONENTS WebEngineWidgets)
 
 # Find Protobuf
-find_package(Protobuf REQUIRED MODULE)
-if(NOT Protobuf_FOUND)
-    # On Windows, try finding it in standard locations if MODULE mode fails
-    find_package(Protobuf REQUIRED CONFIG)
-endif()
+find_package(Protobuf REQUIRED)
 
 # Proto source directory
 set(PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/proto)

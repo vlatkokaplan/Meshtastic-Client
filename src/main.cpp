@@ -45,6 +45,10 @@ int main(int argc, char *argv[])
                                           "Enable experimental features (packet flow visualization)");
     parser.addOption(experimentalOption);
 
+    QCommandLineOption testOption(QStringList() << "test",
+                                  "Enable test mode (testing features)");
+    parser.addOption(testOption);
+
     parser.process(app);
 
     // Set debug mode based on command line flag
@@ -62,9 +66,15 @@ int main(int argc, char *argv[])
         qDebug() << "Experimental features enabled";
     }
 
+    bool testMode = parser.isSet(testOption);
+    if (testMode)
+    {
+        qDebug() << "Test mode enabled";
+    }
+
     app.setWindowIcon(QIcon(":/icon.svg"));
 
-    MainWindow window(experimentalMode);
+    MainWindow window(experimentalMode, testMode);
     window.show();
 
     return app.exec();

@@ -35,6 +35,8 @@ private slots:
     void onNodeBlinkEnabledChanged(bool checked);
     void onNodeBlinkDurationChanged(int value);
     void onDarkThemeChanged(bool checked);
+    void onAutoPingResponseChanged(bool checked);
+    void onShowPacketFlowLinesChanged(bool checked);
 
 private:
     // Connection settings
@@ -49,6 +51,10 @@ private:
     QLineEdit *m_customTileServerEdit;
     QCheckBox *m_nodeBlinkCheck;
     QSpinBox *m_nodeBlinkDurationSpin;
+    QCheckBox *m_showPacketFlowLinesCheck;
+
+    // Message settings
+    QCheckBox *m_autoPingResponseCheck;
 
     // Notification settings
     QCheckBox *m_notificationsCheck;

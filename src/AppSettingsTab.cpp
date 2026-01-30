@@ -83,7 +83,23 @@ void AppSettingsTab::setupUI()
             this, &AppSettingsTab::onNodeBlinkDurationChanged);
     mapLayout->addRow("Blink duration:", m_nodeBlinkDurationSpin);
 
+    m_showPacketFlowLinesCheck = new QCheckBox("Show packet flow lines on map");
+    m_showPacketFlowLinesCheck->setToolTip("Draw animated lines showing packet paths between nodes");
+    connect(m_showPacketFlowLinesCheck, &QCheckBox::toggled, this, &AppSettingsTab::onShowPacketFlowLinesChanged);
+    mapLayout->addRow(m_showPacketFlowLinesCheck);
+
     mainLayout->addWidget(mapGroup);
+
+    // Messages Settings Group
+    QGroupBox *messagesGroup = new QGroupBox("Messages");
+    QVBoxLayout *messagesLayout = new QVBoxLayout(messagesGroup);
+
+    m_autoPingResponseCheck = new QCheckBox("Auto-respond to 'ping' direct messages with 'pong'");
+    m_autoPingResponseCheck->setToolTip("When someone sends you a direct message containing just 'ping', automatically reply with 'pong'");
+    connect(m_autoPingResponseCheck, &QCheckBox::toggled, this, &AppSettingsTab::onAutoPingResponseChanged);
+    messagesLayout->addWidget(m_autoPingResponseCheck);
+
+    mainLayout->addWidget(messagesGroup);
 
     // Notification Settings Group
     QGroupBox *notifyGroup = new QGroupBox("Notifications");
@@ -180,6 +196,8 @@ void AppSettingsTab::loadSettings()
     m_hideLocalDevicePacketsCheck->setChecked(settings->hideLocalDevicePackets());
     m_nodeBlinkCheck->setChecked(settings->mapNodeBlinkEnabled());
     m_nodeBlinkDurationSpin->setValue(settings->mapNodeBlinkDuration());
+    m_showPacketFlowLinesCheck->setChecked(settings->showPacketFlowLines());
+    m_autoPingResponseCheck->setChecked(settings->autoPingResponse());
     m_darkThemeCheck->setChecked(settings->darkTheme());
     applyTheme(settings->darkTheme());
 
@@ -265,6 +283,16 @@ void AppSettingsTab::onDarkThemeChanged(bool checked)
 {
     AppSettings::instance()->setDarkTheme(checked);
     applyTheme(checked);
+}
+
+void AppSettingsTab::onAutoPingResponseChanged(bool checked)
+{
+    AppSettings::instance()->setAutoPingResponse(checked);
+}
+
+void AppSettingsTab::onShowPacketFlowLinesChanged(bool checked)
+{
+    AppSettings::instance()->setShowPacketFlowLines(checked);
 }
 
 void AppSettingsTab::onExportNodesCsv()

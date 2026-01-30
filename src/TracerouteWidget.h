@@ -35,6 +35,9 @@ public:
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
 
     void addTraceroute(const MeshtasticProtocol::DecodedPacket &packet);
+    void addTracerouteFromDb(uint32_t from, uint32_t to, quint64 timestamp,
+                             const QStringList &routeTo, const QStringList &routeBack,
+                             const QStringList &snrTo, const QStringList &snrBack);
     void clear();
 
 private:
@@ -64,6 +67,7 @@ public:
     explicit TracerouteWidget(NodeManager *nodeManager, Database *database, QWidget *parent = nullptr);
 
     void addTraceroute(const MeshtasticProtocol::DecodedPacket &packet);
+    void loadFromDatabase();
     void clear();
 
 private:

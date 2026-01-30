@@ -255,3 +255,23 @@ void AppSettings::setMessageFontSize(int size)
 {
     setValue("messages/font_size", size);
 }
+
+bool AppSettings::autoPingResponse() const
+{
+    return value("messages/auto_ping_response", false).toBool();
+}
+
+void AppSettings::setAutoPingResponse(bool enabled)
+{
+    setValue("messages/auto_ping_response", enabled);
+}
+
+bool AppSettings::showPacketFlowLines() const
+{
+    return value("map/show_packet_flow_lines", false).toBool();
+}
+
+void AppSettings::setShowPacketFlowLines(bool enabled)
+{
+    setValue("map/show_packet_flow_lines", enabled);
+}

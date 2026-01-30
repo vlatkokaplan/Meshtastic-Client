@@ -6,6 +6,7 @@
 #include <QVariantMap>
 #include <QDateTime>
 #include <QTimer>
+#include <QRecursiveMutex>
 
 class Database;
 
@@ -117,15 +118,16 @@ signals:
     void nodesChanged();
 
 private:
+    mutable QRecursiveMutex m_mutex;  // Protects m_nodes access (recursive for signal/slot reentrancy)
     QMap<uint32_t, NodeInfo> m_nodes;
     uint32_t m_myNodeNum = 0;
     Database *m_database = nullptr;
     QTimer *m_updateTimer = nullptr;
     bool m_pendingUpdate = false;
 
-    void ensureNode(uint32_t nodeNum);
+    void ensureNode(uint32_t nodeNum);  // Must be called with m_mutex held
     void scheduleUpdate();
-    void persistNode(uint32_t nodeNum);
+    void persistNode(uint32_t nodeNum);  // Must be called with m_mutex held
 };
 
 #endif // NODEMANAGER_H

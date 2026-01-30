@@ -60,6 +60,12 @@ public:
     int messageFontSize() const;
     void setMessageFontSize(int size);
 
+    bool autoPingResponse() const;
+    void setAutoPingResponse(bool enabled);
+
+    bool showPacketFlowLines() const;
+    void setShowPacketFlowLines(bool enabled);
+
 signals:
     void settingChanged(const QString &key, const QVariant &value);
 

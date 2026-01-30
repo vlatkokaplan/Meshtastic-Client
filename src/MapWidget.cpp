@@ -85,9 +85,13 @@ void MapWidget::setupUI()
 
 void MapWidget::runJavaScript(const QString &script)
 {
-    if (m_webView && m_webView->page())
+    if (!m_webView)
+        return;
+
+    QWebEnginePage *page = m_webView->page();
+    if (page)
     {
-        m_webView->page()->runJavaScript(script);
+        page->runJavaScript(script);
     }
 }
 

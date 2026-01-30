@@ -31,7 +31,7 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit MainWindow(bool experimentalMode = false, QWidget *parent = nullptr);
+    explicit MainWindow(bool experimentalMode = false, bool testMode = false, QWidget *parent = nullptr);
     ~MainWindow();
 
 private slots:
@@ -68,6 +68,12 @@ private slots:
     void onExportNodes(const QString &format);
     void onExportMessages(const QString &format);
 
+    // Test features
+    void drawTestNodeLines();
+
+    // Navigation
+    void navigateToNode(uint32_t nodeNum);
+
 private:
     // Config loading state
     uint32_t m_expectedConfigId = 0;
@@ -81,6 +87,7 @@ private:
 
     // Experimental features
     bool m_experimentalMode = false;
+    bool m_testMode = false;
 
     // Core components
     SerialConnection *m_serial;

@@ -32,9 +32,11 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <algorithm>
+#include <cstdlib>
+#include <ctime>
 
-MainWindow::MainWindow(bool experimentalMode, QWidget *parent)
-    : QMainWindow(parent), m_experimentalMode(experimentalMode)
+MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
+    : QMainWindow(parent), m_experimentalMode(experimentalMode), m_testMode(testMode)
 {
     // Initialize app settings
     AppSettings::instance()->open();
@@ -147,11 +149,12 @@ void MainWindow::setupUI()
     setupMapTab();
     setupMessagesTab();
     setupPacketTab();
-    setupConfigTab();
 
-    // Traceroute tab
+    // Traceroute tab (before Config)
     m_tracerouteWidget = new TracerouteWidget(m_nodeManager, m_database);
     m_tabWidget->addTab(m_tracerouteWidget, "Traceroutes");
+
+    setupConfigTab();
 
     // Status bar with cooldown indicator
     m_statusLabel = new QLabel("Disconnected");
@@ -274,6 +277,10 @@ void MainWindow::setupMessagesTab()
     // Connect send reaction signal
     connect(m_messagesWidget, &MessagesWidget::sendReaction,
             this, &MainWindow::onSendReaction);
+
+    // Connect node click to navigate to that node
+    connect(m_messagesWidget, &MessagesWidget::nodeClicked,
+            this, &MainWindow::navigateToNode);
 }
 
 void MainWindow::setupPacketTab()
@@ -483,8 +490,9 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
 
     case MeshtasticProtocol::PacketType::PacketReceived:
     {
-        // Experimental: Visualize packet flow on map
-        if (m_experimentalMode && m_mapWidget)
+        // Visualize packet flow on map (if enabled in settings or experimental mode)
+        bool showLines = m_experimentalMode || AppSettings::instance()->showPacketFlowLines();
+        if (showLines && m_mapWidget)
         {
             uint32_t fromNode = packet.from;
             uint32_t toNode = packet.to;
@@ -590,6 +598,21 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
                 msg.timestamp = QDateTime::currentDateTime();
                 msg.packetId = packet.fields.value("packetId", 0).toUInt();
                 m_messagesWidget->addMessage(msg);
+
+                // Auto-respond to ping if enabled (DMs only, not from self)
+                uint32_t myNode = m_nodeManager->myNodeNum();
+                bool isDM = (packet.to == myNode && packet.to != 0xFFFFFFFF);
+                bool isFromOther = (packet.from != myNode);
+                bool isPing = msg.text.trimmed().compare("ping", Qt::CaseInsensitive) == 0;
+
+                if (isDM && isFromOther && isPing && AppSettings::instance()->autoPingResponse())
+                {
+                    qDebug() << "[MainWindow] Auto-responding to ping from" << QString::number(packet.from, 16);
+                    // Respond with "pong" after a short delay
+                    QTimer::singleShot(500, this, [this, fromNode = packet.from]() {
+                        onSendMessage("pong", fromNode, 0);
+                    });
+                }
 
                 // Show notification for incoming messages (not from ourselves)
                 if (packet.from != m_nodeManager->myNodeNum())
@@ -716,6 +739,33 @@ void MainWindow::onNodeSelected(QTableWidgetItem *item)
     }
 }
 
+void MainWindow::navigateToNode(uint32_t nodeNum)
+{
+    // Switch to Map tab (index 0)
+    m_tabWidget->setCurrentIndex(0);
+
+    // Find and select the node in the table
+    for (int row = 0; row < m_nodeTable->rowCount(); ++row)
+    {
+        QTableWidgetItem *item = m_nodeTable->item(row, 0);
+        if (item && item->data(Qt::UserRole).toUInt() == nodeNum)
+        {
+            m_nodeTable->selectRow(row);
+            m_nodeTable->scrollToItem(item);
+
+            // Also center map on node if it has position
+            NodeInfo node = m_nodeManager->getNode(nodeNum);
+            if (node.hasPosition && m_mapWidget)
+            {
+                m_mapWidget->centerOnLocation(node.latitude, node.longitude);
+                m_mapWidget->setZoomLevel(14);
+                m_mapWidget->selectNode(nodeNum);
+            }
+            break;
+        }
+    }
+}
+
 void MainWindow::onNodeContextMenu(const QPoint &pos)
 {
     QTableWidgetItem *item = m_nodeTable->itemAt(pos);
@@ -818,10 +868,22 @@ void MainWindow::requestTraceroute(uint32_t nodeNum)
     QString name = node.longName.isEmpty() ? node.nodeId : node.longName;
     statusBar()->showMessage(QString("Traceroute request sent to %1...").arg(name), 5000);
 
+    // Log the outgoing traceroute request (without response yet)
+    if (m_database && m_tracerouteWidget)
+    {
+        Database::Traceroute tr;
+        tr.fromNode = myNode;
+        tr.toNode = nodeNum;
+        tr.timestamp = QDateTime::currentDateTime();
+        tr.isResponse = false;  // This is a request, not a response
+        m_database->saveTraceroute(tr);
+        m_tracerouteWidget->loadFromDatabase();  // Refresh the list
+    }
+
     // Start 30-second cooldown
     m_tracerouteCooldownRemaining = TRACEROUTE_COOLDOWN_MS;
     m_tracerouteCooldownLabel->setVisible(true);
-    m_tracerouteCooldownLabel->setText("🔄 Traceroute timeout: 30s");
+    m_tracerouteCooldownLabel->setText("Traceroute timeout: 30s");
     m_tracerouteCooldownTimer->start();
 }
 
@@ -1012,6 +1074,12 @@ void MainWindow::updateNodeList()
         hopsItem->setTextAlignment(Qt::AlignCenter);
         m_nodeTable->setItem(row, 4, hopsItem);
         row++;
+    }
+
+    // Draw test lines if test mode is enabled
+    if (m_testMode && m_mapWidget)
+    {
+        drawTestNodeLines();
     }
 }
 
@@ -1699,5 +1767,56 @@ void MainWindow::onConfigCompleteIdReceived(uint32_t configId)
     else
     {
         qWarning() << "[MainWindow] Mismatched Config ID. Expected:" << m_expectedConfigId << "Got:" << configId;
+    }
+}
+
+void MainWindow::drawTestNodeLines()
+{
+    if (!m_mapWidget)
+        return;
+
+    QList<NodeInfo> allNodes = m_nodeManager->allNodes();
+
+    // Filter nodes with positions
+    QList<NodeInfo> nodesWithPos;
+    for (const NodeInfo &node : allNodes)
+    {
+        if (node.hasPosition)
+        {
+            nodesWithPos.append(node);
+        }
+    }
+
+    if (nodesWithPos.size() < 2)
+    {
+        qDebug() << "[Test] Not enough nodes with positions to draw test lines";
+        return;
+    }
+
+    // Use fewer nodes if we have less than 10
+    int numNodesToConnect = qMin(10, nodesWithPos.size());
+
+    qDebug() << "[Test] Drawing lines between" << numNodesToConnect << "random nodes";
+
+    // Seed random generator
+    srand(time(nullptr));
+
+    // Draw lines between random pairs
+    for (int i = 0; i < numNodesToConnect - 1; i++)
+    {
+        int idx1 = rand() % nodesWithPos.size();
+        int idx2 = rand() % nodesWithPos.size();
+
+        // Make sure we don't draw from same node to itself
+        while (idx2 == idx1)
+        {
+            idx2 = rand() % nodesWithPos.size();
+        }
+
+        const NodeInfo &from = nodesWithPos[idx1];
+        const NodeInfo &to = nodesWithPos[idx2];
+
+        qDebug() << "[Test] Drawing line from" << from.shortName << "to" << to.shortName;
+        m_mapWidget->drawPacketFlow(from.nodeNum, to.nodeNum, from.latitude, from.longitude, to.latitude, to.longitude);
     }
 }

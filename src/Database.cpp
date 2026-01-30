@@ -66,7 +66,11 @@ bool Database::open(const QString &path)
         setSchemaVersion(SCHEMA_VERSION);
     }
 
-    prepareStatements();
+    if (!prepareStatements())
+    {
+        qWarning() << "Failed to prepare database statements";
+        return false;
+    }
 
     qDebug() << "Database opened successfully, schema version:" << SCHEMA_VERSION;
     return true;
@@ -213,17 +217,36 @@ bool Database::migrateSchema(int fromVersion, int toVersion)
             qDebug() << "Database migrated to schema version 2";
             break;
         case 3:
-            // Add environment telemetry columns
-            if (!query.exec("ALTER TABLE nodes ADD COLUMN temperature REAL DEFAULT 0"))
-                qDebug() << "temperature column already exists or error:" << query.lastError().text();
-            if (!query.exec("ALTER TABLE nodes ADD COLUMN relative_humidity REAL DEFAULT 0"))
-                qDebug() << "relative_humidity column already exists or error:" << query.lastError().text();
-            if (!query.exec("ALTER TABLE nodes ADD COLUMN barometric_pressure REAL DEFAULT 0"))
-                qDebug() << "barometric_pressure column already exists or error:" << query.lastError().text();
-            if (!query.exec("ALTER TABLE nodes ADD COLUMN uptime_seconds INTEGER DEFAULT 0"))
-                qDebug() << "uptime_seconds column already exists or error:" << query.lastError().text();
+        {
+            // Add environment telemetry columns (ignore "duplicate column" errors)
+            auto addColumnIfNotExists = [&](const QString &sql, const QString &colName) -> bool {
+                if (!query.exec(sql))
+                {
+                    QString err = query.lastError().text().toLower();
+                    // SQLite returns "duplicate column name" if column exists
+                    if (err.contains("duplicate column"))
+                    {
+                        qDebug() << colName << "column already exists, skipping";
+                        return true;
+                    }
+                    qWarning() << "Failed to add" << colName << "column:" << query.lastError().text();
+                    return false;
+                }
+                return true;
+            };
+
+            if (!addColumnIfNotExists("ALTER TABLE nodes ADD COLUMN temperature REAL DEFAULT 0", "temperature"))
+                return false;
+            if (!addColumnIfNotExists("ALTER TABLE nodes ADD COLUMN relative_humidity REAL DEFAULT 0", "relative_humidity"))
+                return false;
+            if (!addColumnIfNotExists("ALTER TABLE nodes ADD COLUMN barometric_pressure REAL DEFAULT 0", "barometric_pressure"))
+                return false;
+            if (!addColumnIfNotExists("ALTER TABLE nodes ADD COLUMN uptime_seconds INTEGER DEFAULT 0", "uptime_seconds"))
+                return false;
+
             qDebug() << "Database migrated to schema version 3";
             break;
+        }
         case 4:
             // Add message status and packet_id columns - these are CRITICAL for v4
             qDebug() << "Migrating to schema version 4 - adding message columns";
@@ -265,10 +288,10 @@ void Database::setSchemaVersion(int version)
     query.exec();
 }
 
-void Database::prepareStatements()
+bool Database::prepareStatements()
 {
     m_saveNodeStmt = new QSqlQuery(m_db);
-    m_saveNodeStmt->prepare(R"(
+    if (!m_saveNodeStmt->prepare(R"(
         INSERT OR REPLACE INTO nodes (
             node_num, node_id, long_name, short_name, hw_model,
             latitude, longitude, altitude, has_position,
@@ -286,13 +309,25 @@ void Database::prepareStatements()
             COALESCE((SELECT first_seen FROM nodes WHERE node_num = :node_num2), :now),
             :updated_at
         )
-    )");
+    )"))
+    {
+        qWarning() << "Failed to prepare saveNode statement:" << m_saveNodeStmt->lastError().text();
+        cleanupStatements();
+        return false;
+    }
 
     m_saveMessageStmt = new QSqlQuery(m_db);
-    m_saveMessageStmt->prepare(R"(
+    if (!m_saveMessageStmt->prepare(R"(
         INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at, status, packet_id)
         VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at, :status, :packet_id)
-    )");
+    )"))
+    {
+        qWarning() << "Failed to prepare saveMessage statement:" << m_saveMessageStmt->lastError().text();
+        cleanupStatements();
+        return false;
+    }
+
+    return true;
 }
 
 void Database::cleanupStatements()
@@ -307,6 +342,12 @@ bool Database::saveNode(const NodeInfo &node)
 {
     if (node.nodeNum == 0)
         return false;
+
+    if (!m_db.isOpen())
+    {
+        qWarning() << "Database not open in saveNode";
+        return false;
+    }
 
     QSqlQuery *query = m_saveNodeStmt;
     QSqlQuery fallback(m_db);
@@ -374,7 +415,21 @@ bool Database::saveNode(const NodeInfo &node)
 
 bool Database::saveNodes(const QList<NodeInfo> &nodes)
 {
-    m_db.transaction();
+    if (nodes.isEmpty())
+        return true;  // Nothing to save
+
+    if (!m_db.isOpen())
+    {
+        qWarning() << "Database not open in saveNodes";
+        return false;
+    }
+
+    if (!m_db.transaction())
+    {
+        qWarning() << "Failed to start transaction:" << m_db.lastError().text();
+        return false;
+    }
+
     for (const NodeInfo &node : nodes)
     {
         if (!saveNode(node))
@@ -389,6 +444,12 @@ bool Database::saveNodes(const QList<NodeInfo> &nodes)
 NodeInfo Database::loadNode(uint32_t nodeNum)
 {
     NodeInfo node;
+    if (!m_db.isOpen())
+    {
+        qWarning() << "Database not open in loadNode";
+        return node;
+    }
+
     QSqlQuery query(m_db);
     query.prepare("SELECT * FROM nodes WHERE node_num = ?");
     query.addBindValue(nodeNum);
@@ -430,6 +491,12 @@ NodeInfo Database::loadNode(uint32_t nodeNum)
 QList<NodeInfo> Database::loadAllNodes()
 {
     QList<NodeInfo> nodes;
+    if (!m_db.isOpen())
+    {
+        qWarning() << "Database not open in loadAllNodes";
+        return nodes;
+    }
+
     QSqlQuery query(m_db);
 
     if (!query.exec("SELECT * FROM nodes ORDER BY last_heard DESC"))
@@ -497,6 +564,12 @@ int Database::nodeCount()
 
 bool Database::saveMessage(const Message &msg)
 {
+    if (!m_db.isOpen())
+    {
+        qWarning() << "Database not open in saveMessage";
+        return false;
+    }
+
     QSqlQuery query(m_db);
 
     if (!query.prepare(R"(
@@ -535,6 +608,12 @@ bool Database::saveMessage(const Message &msg)
 QList<Database::Message> Database::loadMessages(int limit, int offset)
 {
     QList<Message> messages;
+    if (!m_db.isOpen())
+    {
+        qWarning() << "Database not open in loadMessages";
+        return messages;
+    }
+
     QSqlQuery query(m_db);
     query.prepare("SELECT * FROM messages ORDER BY timestamp DESC LIMIT ? OFFSET ?");
     query.addBindValue(limit);
@@ -693,6 +772,31 @@ bool Database::markMessageRead(qint64 messageId)
     query.prepare("UPDATE messages SET read = 1 WHERE id = ?");
     query.addBindValue(messageId);
     return query.exec();
+}
+
+bool Database::updateMessageStatus(uint32_t packetId, int status)
+{
+    if (packetId == 0)
+        return false;
+
+    if (!m_db.isOpen())
+    {
+        qWarning() << "Database not open in updateMessageStatus";
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE messages SET status = ? WHERE packet_id = ?");
+    query.addBindValue(status);
+    query.addBindValue(packetId);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to update message status:" << query.lastError().text();
+        return false;
+    }
+
+    return query.numRowsAffected() > 0;
 }
 
 int Database::unreadMessageCount()

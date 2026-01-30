@@ -2,6 +2,7 @@
 #include "MeshtasticProtocol.h"
 #include "Database.h"
 #include <QDebug>
+#include <QMutexLocker>
 
 NodeManager::NodeManager(QObject *parent)
     : QObject(parent)
@@ -39,6 +40,7 @@ void NodeManager::updateNodeFromPacket(const QVariantMap &fields)
     // Handle NodeInfo packets
     if (fields.contains("nodeNum"))
     {
+        QMutexLocker locker(&m_mutex);
         uint32_t nodeNum = fields["nodeNum"].toUInt();
         ensureNode(nodeNum);
 
@@ -108,6 +110,7 @@ void NodeManager::updateNodePosition(uint32_t nodeNum, double lat, double lon, i
         return;
     }
 
+    QMutexLocker locker(&m_mutex);
     ensureNode(nodeNum);
     NodeInfo &node = m_nodes[nodeNum];
 
@@ -127,6 +130,7 @@ void NodeManager::updateNodeUser(uint32_t nodeNum, const QString &longName,
                                  const QString &shortName, const QString &userId,
                                  const QString &hwModel)
 {
+    QMutexLocker locker(&m_mutex);
     ensureNode(nodeNum);
     NodeInfo &node = m_nodes[nodeNum];
 
@@ -147,6 +151,7 @@ void NodeManager::updateNodeUser(uint32_t nodeNum, const QString &longName,
 
 void NodeManager::updateNodeTelemetry(uint32_t nodeNum, const QVariantMap &telemetry)
 {
+    QMutexLocker locker(&m_mutex);
     ensureNode(nodeNum);
     NodeInfo &node = m_nodes[nodeNum];
 
@@ -214,6 +219,7 @@ void NodeManager::updateNodeTelemetry(uint32_t nodeNum, const QVariantMap &telem
 
 void NodeManager::updateNodeSignal(uint32_t nodeNum, float snr, int rssi, int hopsAway)
 {
+    QMutexLocker locker(&m_mutex);
     ensureNode(nodeNum);
     NodeInfo &node = m_nodes[nodeNum];
 
@@ -232,6 +238,7 @@ void NodeManager::updateNodeSignal(uint32_t nodeNum, float snr, int rssi, int ho
 
 void NodeManager::setNodeFavorite(uint32_t nodeNum, bool favorite)
 {
+    QMutexLocker locker(&m_mutex);
     if (m_nodes.contains(nodeNum))
     {
         NodeInfo &node = m_nodes[nodeNum];
@@ -247,16 +254,19 @@ void NodeManager::setNodeFavorite(uint32_t nodeNum, bool favorite)
 
 NodeInfo NodeManager::getNode(uint32_t nodeNum) const
 {
+    QMutexLocker locker(&m_mutex);
     return m_nodes.value(nodeNum);
 }
 
 QList<NodeInfo> NodeManager::allNodes() const
 {
+    QMutexLocker locker(&m_mutex);
     return m_nodes.values();
 }
 
 QList<NodeInfo> NodeManager::nodesWithPosition() const
 {
+    QMutexLocker locker(&m_mutex);
     QList<NodeInfo> result;
     for (const NodeInfo &node : m_nodes)
     {
@@ -270,19 +280,23 @@ QList<NodeInfo> NodeManager::nodesWithPosition() const
 
 bool NodeManager::hasNode(uint32_t nodeNum) const
 {
+    QMutexLocker locker(&m_mutex);
     return m_nodes.contains(nodeNum);
 }
 
 void NodeManager::clear()
 {
+    QMutexLocker locker(&m_mutex);
     m_nodes.clear();
     m_updateTimer->stop();
     m_pendingUpdate = false;
+    locker.unlock();  // Unlock before emitting to avoid deadlock
     emit nodesChanged(); // Immediate emit for clear
 }
 
 QVariantList NodeManager::getNodesForMap() const
 {
+    QMutexLocker locker(&m_mutex);
     QVariantList list;
     for (const NodeInfo &node : m_nodes)
     {
@@ -324,11 +338,14 @@ void NodeManager::loadFromDatabase()
         return;
 
     QList<NodeInfo> nodes = m_database->loadAllNodes();
-    for (const NodeInfo &node : nodes)
     {
-        if (node.nodeNum != 0)
+        QMutexLocker locker(&m_mutex);
+        for (const NodeInfo &node : nodes)
         {
-            m_nodes[node.nodeNum] = node;
+            if (node.nodeNum != 0)
+            {
+                m_nodes[node.nodeNum] = node;
+            }
         }
     }
 
@@ -345,8 +362,13 @@ void NodeManager::saveToDatabase()
     if (!m_database)
         return;
 
-    m_database->saveNodes(m_nodes.values());
-    qDebug() << "Saved" << m_nodes.size() << "nodes to database";
+    QList<NodeInfo> nodesCopy;
+    {
+        QMutexLocker locker(&m_mutex);
+        nodesCopy = m_nodes.values();
+    }
+    m_database->saveNodes(nodesCopy);
+    qDebug() << "Saved" << nodesCopy.size() << "nodes to database";
 }
 
 QString NodeManager::hwModelToString(int model)

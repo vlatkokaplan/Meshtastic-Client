@@ -60,29 +60,30 @@ jobs:
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2019_64'
-          modules: 'qtserialport qtwebchannel qtwebengine'
+          modules: 'qtserialport qtwebchannel qtwebengine qtpositioning'
 
       - name: Install dependencies
         run: |
-          choco install cmake protoc -y
+          choco install cmake -y
+          vcpkg install protobuf:x64-windows
 
       - name: Configure for Windows
         run: |
           mkdir build-win
           cd build-win
-          cmake -G "Visual Studio 17 2022" -A x64 -DQt6_DIR="${Qt6_DIR}" ..
+          cmake -G "Visual Studio 17 2022" -A x64 -DQt6_DIR="${Qt6_DIR}" -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" ..
 
       - name: Build for Windows
         run: |
           cd build-win
-          cmake --build . --config Release --verbose -- -j%NUMBER_OF_PROCESSORS%
+          cmake --build . --config Release
 
       - name: Package Windows executable
         run: |
           cd build-win
           mkdir meshtastic-vibe-client-win
-          copy meshtastic-vibe-client.exe meshtastic-vibe-client-win\
-          xcopy resources meshtastic-vibe-client-win\resources /E /I
+          copy Release\meshtastic-vibe-client.exe meshtastic-vibe-client-win\
+          xcopy ..\resources meshtastic-vibe-client-win\resources /E /I
           7z a meshtastic-vibe-client-windows.zip meshtastic-vibe-client-win
 
       - name: Upload Windows Artifacts

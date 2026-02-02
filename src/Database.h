@@ -66,6 +66,28 @@ public:
     bool saveTraceroute(const Traceroute &tr);
     QList<Traceroute> loadTraceroutes(int limit = 100, int offset = 0);
     bool deleteTraceroutes(int daysOld = 30);
+
+    // Telemetry history operations
+    struct TelemetryRecord
+    {
+        qint64 id = 0;
+        uint32_t nodeNum = 0;
+        QDateTime timestamp;
+        float temperature = 0.0f;
+        float humidity = 0.0f;
+        float pressure = 0.0f;
+        int batteryLevel = 0;
+        float voltage = 0.0f;
+        float snr = 0.0f;
+        int rssi = 0;
+        float channelUtil = 0.0f;
+        float airUtilTx = 0.0f;
+    };
+
+    bool saveTelemetryRecord(const TelemetryRecord &record);
+    QList<TelemetryRecord> loadTelemetryHistory(uint32_t nodeNum, int hours = 24);
+    QList<uint32_t> getNodesWithTelemetry();
+    bool deleteTelemetryHistory(int daysOld = 7);
     QList<Message> loadMessagesForNode(uint32_t nodeNum, int limit = 100);
     bool markMessageRead(qint64 messageId);
     bool updateMessageStatus(uint32_t packetId, int status);

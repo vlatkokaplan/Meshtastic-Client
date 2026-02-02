@@ -213,11 +213,31 @@ QString TracerouteTableModel::formatNodeName(uint32_t nodeNum) const
     return MeshtasticProtocol::nodeIdToString(nodeNum);
 }
 
+TracerouteTableModel::TracerouteData TracerouteTableModel::getTraceroute(int row) const
+{
+    TracerouteData data;
+    if (row >= 0 && row < m_traceroutes.size())
+    {
+        const auto &tr = m_traceroutes[row];
+        data.from = tr.from;
+        data.to = tr.to;
+        data.routeTo = tr.routeTo;
+        data.routeBack = tr.routeBack;
+        data.snrTo = tr.snrTo;
+        data.snrBack = tr.snrBack;
+    }
+    return data;
+}
+
 // TracerouteWidget implementation
 TracerouteWidget::TracerouteWidget(NodeManager *nodeManager, Database *database, QWidget *parent)
     : QWidget(parent), m_nodeManager(nodeManager), m_database(database)
 {
     setupUI();
+
+    // Connect selection change
+    connect(m_tableView->selectionModel(), &QItemSelectionModel::selectionChanged,
+            this, &TracerouteWidget::onSelectionChanged);
 }
 
 void TracerouteWidget::setupUI()
@@ -324,4 +344,67 @@ void TracerouteWidget::loadFromDatabase()
 void TracerouteWidget::clear()
 {
     m_model->clear();
+}
+
+void TracerouteWidget::onSelectionChanged()
+{
+    QModelIndexList selected = m_tableView->selectionModel()->selectedRows();
+    if (selected.isEmpty())
+        return;
+
+    int row = selected.first().row();
+    auto data = m_model->getTraceroute(row);
+
+    emit tracerouteSelected(data.from, data.to);
+}
+
+QList<TracerouteWidget::RouteNode> TracerouteWidget::getSelectedRoute() const
+{
+    QList<RouteNode> route;
+
+    QModelIndexList selected = m_tableView->selectionModel()->selectedRows();
+    if (selected.isEmpty())
+        return route;
+
+    int row = selected.first().row();
+    auto data = m_model->getTraceroute(row);
+
+    // Build route: From -> [hops] -> To
+    // Add starting node
+    RouteNode startNode;
+    startNode.nodeNum = data.from;
+    startNode.name = m_nodeManager->hasNode(data.from) ?
+        (m_nodeManager->getNode(data.from).shortName.isEmpty() ?
+         m_nodeManager->getNode(data.from).longName :
+         m_nodeManager->getNode(data.from).shortName) :
+        MeshtasticProtocol::nodeIdToString(data.from);
+    startNode.snr = 0;
+    route.append(startNode);
+
+    // Add intermediate hops
+    for (int i = 0; i < data.routeTo.size(); i++)
+    {
+        RouteNode hopNode;
+        hopNode.nodeNum = MeshtasticProtocol::nodeIdFromString(data.routeTo[i]);
+        hopNode.name = m_nodeManager->hasNode(hopNode.nodeNum) ?
+            (m_nodeManager->getNode(hopNode.nodeNum).shortName.isEmpty() ?
+             m_nodeManager->getNode(hopNode.nodeNum).longName :
+             m_nodeManager->getNode(hopNode.nodeNum).shortName) :
+            data.routeTo[i];
+        hopNode.snr = (i < data.snrTo.size()) ? data.snrTo[i].toFloat() : 0;
+        route.append(hopNode);
+    }
+
+    // Add destination node
+    RouteNode endNode;
+    endNode.nodeNum = data.to;
+    endNode.name = m_nodeManager->hasNode(data.to) ?
+        (m_nodeManager->getNode(data.to).shortName.isEmpty() ?
+         m_nodeManager->getNode(data.to).longName :
+         m_nodeManager->getNode(data.to).shortName) :
+        MeshtasticProtocol::nodeIdToString(data.to);
+    endNode.snr = 0;
+    route.append(endNode);
+
+    return route;
 }

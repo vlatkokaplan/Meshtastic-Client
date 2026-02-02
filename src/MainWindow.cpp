@@ -4,6 +4,8 @@
 #include "NodeManager.h"
 #include "PacketListWidget.h"
 #include "TracerouteWidget.h"
+#include "SignalScannerWidget.h"
+#include "TelemetryGraphWidget.h"
 #include "Database.h"
 #include "MessagesWidget.h"
 #include "ConfigWidget.h"
@@ -156,7 +158,26 @@ void MainWindow::setupUI()
     m_tracerouteWidget = new TracerouteWidget(m_nodeManager, m_database);
     m_tabWidget->addTab(m_tracerouteWidget, "Traceroutes");
 
+    // Signal Scanner tab (experimental only)
+    if (m_experimentalMode)
+    {
+        m_signalScannerWidget = new SignalScannerWidget(m_nodeManager);
+        m_tabWidget->addTab(m_signalScannerWidget, "Signal Scanner");
+    }
+    else
+    {
+        m_signalScannerWidget = nullptr;
+    }
+
+    // Telemetry Graph tab
+    m_telemetryGraphWidget = new TelemetryGraphWidget(m_nodeManager, m_database);
+    m_tabWidget->addTab(m_telemetryGraphWidget, "Telemetry Graph");
+
     setupConfigTab();
+
+    // Connect traceroute selection to map visualization
+    connect(m_tracerouteWidget, &TracerouteWidget::tracerouteSelected,
+            this, &MainWindow::onTracerouteSelected);
 
     // Status bar with cooldown indicator
     m_statusLabel = new QLabel("Disconnected");
@@ -625,6 +646,29 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             if (!(isFromLocalNode && hideLocal))
             {
                 m_nodeManager->updateNodeTelemetry(packet.from, packet.fields);
+
+                // Save telemetry to history
+                if (m_database)
+                {
+                    NodeInfo node = m_nodeManager->getNode(packet.from);
+                    Database::TelemetryRecord rec;
+                    rec.nodeNum = packet.from;
+                    rec.timestamp = QDateTime::currentDateTime();
+                    rec.temperature = node.temperature;
+                    rec.humidity = node.relativeHumidity;
+                    rec.pressure = node.barometricPressure;
+                    rec.batteryLevel = node.batteryLevel;
+                    rec.voltage = node.voltage;
+                    rec.snr = node.snr;
+                    rec.rssi = node.rssi;
+                    rec.channelUtil = node.channelUtilization;
+                    rec.airUtilTx = node.airUtilTx;
+                    m_database->saveTelemetryRecord(rec);
+
+                    // Notify telemetry graph widget
+                    if (m_telemetryGraphWidget)
+                        m_telemetryGraphWidget->onTelemetryReceived(packet.from);
+                }
             }
             break;
 
@@ -811,6 +855,54 @@ void MainWindow::navigateToNode(uint32_t nodeNum)
             }
             break;
         }
+    }
+}
+
+void MainWindow::onTracerouteSelected(uint32_t fromNode, uint32_t toNode)
+{
+    Q_UNUSED(fromNode);
+    Q_UNUSED(toNode);
+
+    if (!m_mapWidget || !m_tracerouteWidget)
+        return;
+
+    // Get the selected route from the traceroute widget
+    auto routeNodes = m_tracerouteWidget->getSelectedRoute();
+
+    if (routeNodes.isEmpty())
+    {
+        m_mapWidget->clearTraceroute();
+        return;
+    }
+
+    // Build route points with positions
+    QList<MapWidget::RoutePoint> routePoints;
+    for (const auto &node : routeNodes)
+    {
+        if (!m_nodeManager->hasNode(node.nodeNum))
+            continue;
+
+        NodeInfo nodeInfo = m_nodeManager->getNode(node.nodeNum);
+        if (!nodeInfo.hasPosition)
+            continue;
+
+        MapWidget::RoutePoint pt;
+        pt.lat = nodeInfo.latitude;
+        pt.lon = nodeInfo.longitude;
+        pt.name = node.name;
+        pt.snr = node.snr;
+        routePoints.append(pt);
+    }
+
+    if (routePoints.size() >= 2)
+    {
+        m_mapWidget->drawTraceroute(routePoints);
+        // Switch to Map tab
+        m_tabWidget->setCurrentIndex(0);
+    }
+    else
+    {
+        m_mapWidget->clearTraceroute();
     }
 }
 

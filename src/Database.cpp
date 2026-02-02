@@ -7,7 +7,7 @@
 #include <QDebug>
 #include <QUuid>
 
-static const int SCHEMA_VERSION = 4;
+static const int SCHEMA_VERSION = 5;
 
 Database::Database(QObject *parent)
     : QObject(parent)
@@ -190,6 +190,29 @@ bool Database::createTables()
         return false;
     }
 
+    // Telemetry history table
+    if (!query.exec(R"(
+        CREATE TABLE IF NOT EXISTS telemetry_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_num INTEGER,
+            timestamp INTEGER,
+            temperature REAL DEFAULT 0,
+            humidity REAL DEFAULT 0,
+            pressure REAL DEFAULT 0,
+            battery_level INTEGER DEFAULT 0,
+            voltage REAL DEFAULT 0,
+            snr REAL DEFAULT 0,
+            rssi INTEGER DEFAULT 0,
+            channel_util REAL DEFAULT 0,
+            air_util_tx REAL DEFAULT 0,
+            FOREIGN KEY (node_num) REFERENCES nodes(node_num)
+        )
+    )"))
+    {
+        qWarning() << "Failed to create telemetry_history table:" << query.lastError().text();
+        return false;
+    }
+
     // Indexes
     query.exec("CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_node)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_node)");
@@ -198,6 +221,8 @@ bool Database::createTables()
     query.exec("CREATE INDEX IF NOT EXISTS idx_traceroutes_timestamp ON traceroutes(timestamp DESC)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_traceroutes_from ON traceroutes(from_node)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_traceroutes_to ON traceroutes(to_node)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_telemetry_node ON telemetry_history(node_num)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_telemetry_timestamp ON telemetry_history(timestamp DESC)");
 
     return true;
 }
@@ -266,6 +291,34 @@ bool Database::migrateSchema(int fromVersion, int toVersion)
                     qWarning() << "Still failed to add packet_id column:" << query.lastError().text();
             }
             qDebug() << "Database migrated to schema version 4";
+            break;
+        case 5:
+            // Add telemetry history table
+            qDebug() << "Migrating to schema version 5 - adding telemetry_history table";
+            if (!query.exec(R"(
+                CREATE TABLE IF NOT EXISTS telemetry_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    node_num INTEGER,
+                    timestamp INTEGER,
+                    temperature REAL DEFAULT 0,
+                    humidity REAL DEFAULT 0,
+                    pressure REAL DEFAULT 0,
+                    battery_level INTEGER DEFAULT 0,
+                    voltage REAL DEFAULT 0,
+                    snr REAL DEFAULT 0,
+                    rssi INTEGER DEFAULT 0,
+                    channel_util REAL DEFAULT 0,
+                    air_util_tx REAL DEFAULT 0,
+                    FOREIGN KEY (node_num) REFERENCES nodes(node_num)
+                )
+            )"))
+            {
+                qWarning() << "Migration to v5 failed:" << query.lastError().text();
+                return false;
+            }
+            query.exec("CREATE INDEX IF NOT EXISTS idx_telemetry_node ON telemetry_history(node_num)");
+            query.exec("CREATE INDEX IF NOT EXISTS idx_telemetry_timestamp ON telemetry_history(timestamp DESC)");
+            qDebug() << "Database migrated to schema version 5";
             break;
         }
     }
@@ -865,4 +918,131 @@ QList<ChatMessage> Database::getAllMessages()
     }
 
     return messages;
+}
+
+// Telemetry history operations
+
+bool Database::saveTelemetryRecord(const TelemetryRecord &record)
+{
+    if (!m_db.isOpen() || record.nodeNum == 0)
+        return false;
+
+    QSqlQuery query(m_db);
+    query.prepare(R"(
+        INSERT INTO telemetry_history (
+            node_num, timestamp, temperature, humidity, pressure,
+            battery_level, voltage, snr, rssi, channel_util, air_util_tx
+        ) VALUES (
+            :node_num, :timestamp, :temperature, :humidity, :pressure,
+            :battery_level, :voltage, :snr, :rssi, :channel_util, :air_util_tx
+        )
+    )");
+
+    qint64 timestamp = record.timestamp.isValid() ? record.timestamp.toSecsSinceEpoch() : QDateTime::currentSecsSinceEpoch();
+
+    query.bindValue(":node_num", record.nodeNum);
+    query.bindValue(":timestamp", timestamp);
+    query.bindValue(":temperature", record.temperature);
+    query.bindValue(":humidity", record.humidity);
+    query.bindValue(":pressure", record.pressure);
+    query.bindValue(":battery_level", record.batteryLevel);
+    query.bindValue(":voltage", record.voltage);
+    query.bindValue(":snr", record.snr);
+    query.bindValue(":rssi", record.rssi);
+    query.bindValue(":channel_util", record.channelUtil);
+    query.bindValue(":air_util_tx", record.airUtilTx);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to save telemetry record:" << query.lastError().text();
+        return false;
+    }
+
+    return true;
+}
+
+QList<Database::TelemetryRecord> Database::loadTelemetryHistory(uint32_t nodeNum, int hours)
+{
+    QList<TelemetryRecord> records;
+    if (!m_db.isOpen())
+        return records;
+
+    QSqlQuery query(m_db);
+    qint64 cutoff = QDateTime::currentSecsSinceEpoch() - (hours * 3600);
+
+    query.prepare(R"(
+        SELECT * FROM telemetry_history
+        WHERE node_num = ? AND timestamp >= ?
+        ORDER BY timestamp ASC
+    )");
+    query.addBindValue(nodeNum);
+    query.addBindValue(cutoff);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to load telemetry history:" << query.lastError().text();
+        return records;
+    }
+
+    while (query.next())
+    {
+        TelemetryRecord rec;
+        rec.id = query.value("id").toLongLong();
+        rec.nodeNum = query.value("node_num").toUInt();
+        rec.temperature = query.value("temperature").toFloat();
+        rec.humidity = query.value("humidity").toFloat();
+        rec.pressure = query.value("pressure").toFloat();
+        rec.batteryLevel = query.value("battery_level").toInt();
+        rec.voltage = query.value("voltage").toFloat();
+        rec.snr = query.value("snr").toFloat();
+        rec.rssi = query.value("rssi").toInt();
+        rec.channelUtil = query.value("channel_util").toFloat();
+        rec.airUtilTx = query.value("air_util_tx").toFloat();
+        qint64 ts = query.value("timestamp").toLongLong();
+        if (ts > 0)
+            rec.timestamp = QDateTime::fromSecsSinceEpoch(ts);
+        records.append(rec);
+    }
+
+    return records;
+}
+
+QList<uint32_t> Database::getNodesWithTelemetry()
+{
+    QList<uint32_t> nodes;
+    if (!m_db.isOpen())
+        return nodes;
+
+    QSqlQuery query(m_db);
+    if (!query.exec("SELECT DISTINCT node_num FROM telemetry_history ORDER BY node_num"))
+    {
+        qWarning() << "Failed to get nodes with telemetry:" << query.lastError().text();
+        return nodes;
+    }
+
+    while (query.next())
+    {
+        nodes.append(query.value(0).toUInt());
+    }
+
+    return nodes;
+}
+
+bool Database::deleteTelemetryHistory(int daysOld)
+{
+    if (!m_db.isOpen())
+        return false;
+
+    QSqlQuery query(m_db);
+    qint64 cutoff = QDateTime::currentSecsSinceEpoch() - (daysOld * 86400);
+    query.prepare("DELETE FROM telemetry_history WHERE timestamp < ?");
+    query.addBindValue(cutoff);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to delete old telemetry history:" << query.lastError().text();
+        return false;
+    }
+
+    return true;
 }

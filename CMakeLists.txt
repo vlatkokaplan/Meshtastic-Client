@@ -75,6 +75,8 @@ set(SOURCES
     src/MainWindow.cpp
     src/PacketListWidget.cpp
     src/TracerouteWidget.cpp
+    src/SignalScannerWidget.cpp
+    src/TelemetryGraphWidget.cpp
     src/SerialConnection.cpp
     src/MeshtasticProtocol.cpp
     src/NodeManager.cpp
@@ -96,6 +98,8 @@ set(HEADERS
     src/MainWindow.h
     src/PacketListWidget.h
     src/TracerouteWidget.h
+    src/SignalScannerWidget.h
+    src/TelemetryGraphWidget.h
     src/SerialConnection.h
     src/MeshtasticProtocol.h
     src/NodeManager.h

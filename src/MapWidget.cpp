@@ -263,3 +263,35 @@ void MapWidget::drawPacketFlow(uint32_t fromNode, uint32_t toNode, double fromLa
                          .arg(toLon, 0, 'f', 6);
     runJavaScript(script);
 }
+
+void MapWidget::drawTraceroute(const QList<RoutePoint> &routePoints)
+{
+    if (!m_mapReady || routePoints.size() < 2)
+        return;
+
+    // Build JSON array of route points
+    QJsonArray jsonArray;
+    for (const auto &pt : routePoints)
+    {
+        QJsonObject obj;
+        obj["lat"] = pt.lat;
+        obj["lon"] = pt.lon;
+        obj["name"] = pt.name;
+        obj["snr"] = pt.snr;
+        jsonArray.append(obj);
+    }
+
+    QJsonDocument doc(jsonArray);
+    QString jsonStr = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
+
+    QString script = QString("window.mapAPI.drawTraceroute(%1);").arg(jsonStr);
+    runJavaScript(script);
+}
+
+void MapWidget::clearTraceroute()
+{
+    if (!m_mapReady)
+        return;
+
+    runJavaScript("window.mapAPI.clearTraceroute();");
+}

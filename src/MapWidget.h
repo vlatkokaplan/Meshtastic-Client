@@ -39,6 +39,16 @@ public:
     void setTileServer(const QString &url);
     void drawPacketFlow(uint32_t fromNode, uint32_t toNode, double fromLat, double fromLon, double toLat, double toLon);
 
+    // Traceroute visualization
+    struct RoutePoint {
+        double lat;
+        double lon;
+        QString name;
+        float snr;
+    };
+    void drawTraceroute(const QList<RoutePoint> &routePoints);
+    void clearTraceroute();
+
 signals:
     void nodeClicked(uint32_t nodeNum);
 

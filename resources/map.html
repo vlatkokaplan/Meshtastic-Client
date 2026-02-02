@@ -127,6 +127,10 @@
         var packetFlows = [];
         var maxFlowLines = 100; // Keep only last 100 lines
 
+        // Store traceroute line
+        var tracerouteLine = null;
+        var tracerouteMarkers = [];
+
         // Color palette for nodes
         var colors = ["#4A90D9", "#D94A4A", "#4AD94A", "#D9D94A", "#D94AD9", "#4AD9D9"];
 
@@ -324,6 +328,83 @@
                     var oldLine = packetFlows.shift();
                     map.removeLayer(oldLine);
                 }
+            },
+
+            // Draw a traceroute path (persistent until cleared)
+            // routePoints is an array of {lat, lon, name, snr} objects
+            drawTraceroute: function (routePoints) {
+                // Clear existing traceroute
+                this.clearTraceroute();
+
+                if (!routePoints || routePoints.length < 2) return;
+
+                // Build path coordinates
+                var latlngs = [];
+                for (var i = 0; i < routePoints.length; i++) {
+                    latlngs.push([routePoints[i].lat, routePoints[i].lon]);
+                }
+
+                // Draw the route line
+                tracerouteLine = L.polyline(latlngs, {
+                    color: '#00BFFF',  // Deep sky blue
+                    weight: 4,
+                    opacity: 0.9,
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                }).addTo(map);
+
+                // Add numbered markers for each hop
+                for (var i = 0; i < routePoints.length; i++) {
+                    var pt = routePoints[i];
+                    var isEndpoint = (i === 0 || i === routePoints.length - 1);
+
+                    var markerHtml = '<div style="' +
+                        'background: ' + (isEndpoint ? '#00BFFF' : '#4A90D9') + ';' +
+                        'color: white;' +
+                        'border: 2px solid white;' +
+                        'border-radius: 50%;' +
+                        'width: ' + (isEndpoint ? '28px' : '22px') + ';' +
+                        'height: ' + (isEndpoint ? '28px' : '22px') + ';' +
+                        'display: flex;' +
+                        'align-items: center;' +
+                        'justify-content: center;' +
+                        'font-weight: bold;' +
+                        'font-size: ' + (isEndpoint ? '14px' : '11px') + ';' +
+                        'box-shadow: 0 2px 6px rgba(0,0,0,0.4);' +
+                        '">' + (i + 1) + '</div>';
+
+                    var icon = L.divIcon({
+                        html: markerHtml,
+                        className: '',
+                        iconSize: isEndpoint ? [28, 28] : [22, 22],
+                        iconAnchor: isEndpoint ? [14, 14] : [11, 11]
+                    });
+
+                    var tooltip = pt.name;
+                    if (pt.snr !== undefined && pt.snr !== null) {
+                        tooltip += '\nSNR: ' + pt.snr + ' dB';
+                    }
+
+                    var marker = L.marker([pt.lat, pt.lon], { icon: icon })
+                        .bindTooltip(tooltip, { className: 'node-tooltip' })
+                        .addTo(map);
+
+                    tracerouteMarkers.push(marker);
+                }
+
+                // Fit map to show entire route
+                map.fitBounds(latlngs, { padding: [50, 50], maxZoom: 14 });
+            },
+
+            clearTraceroute: function () {
+                if (tracerouteLine) {
+                    map.removeLayer(tracerouteLine);
+                    tracerouteLine = null;
+                }
+                for (var i = 0; i < tracerouteMarkers.length; i++) {
+                    map.removeLayer(tracerouteMarkers[i]);
+                }
+                tracerouteMarkers = [];
             },
 
             // Called when map is ready

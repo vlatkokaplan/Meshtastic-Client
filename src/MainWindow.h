@@ -23,6 +23,8 @@ class Database;
 class MessagesWidget;
 class ConfigWidget;
 class TracerouteWidget;
+class SignalScannerWidget;
+class TelemetryGraphWidget;
 
 class MapWidget;
 class DashboardStatsWidget;
@@ -76,6 +78,9 @@ private slots:
     // Navigation
     void navigateToNode(uint32_t nodeNum);
 
+    // Traceroute visualization
+    void onTracerouteSelected(uint32_t fromNode, uint32_t toNode);
+
 private:
     // Config loading state
     uint32_t m_expectedConfigId = 0;
@@ -115,6 +120,8 @@ private:
     MessagesWidget *m_messagesWidget;
     ConfigWidget *m_configWidget;
     TracerouteWidget *m_tracerouteWidget;
+    SignalScannerWidget *m_signalScannerWidget;
+    TelemetryGraphWidget *m_telemetryGraphWidget;
 
     MapWidget *m_mapWidget;
     DashboardStatsWidget *m_dashboardStats;

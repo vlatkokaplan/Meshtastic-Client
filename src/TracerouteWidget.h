@@ -40,6 +40,18 @@ public:
                              const QStringList &snrTo, const QStringList &snrBack);
     void clear();
 
+    // Access to stored traceroute data
+    struct TracerouteData {
+        uint32_t from;
+        uint32_t to;
+        QStringList routeTo;
+        QStringList routeBack;
+        QStringList snrTo;
+        QStringList snrBack;
+    };
+    TracerouteData getTraceroute(int row) const;
+    int tracerouteCount() const { return m_traceroutes.size(); }
+
 private:
     struct Traceroute
     {
@@ -69,6 +81,20 @@ public:
     void addTraceroute(const MeshtasticProtocol::DecodedPacket &packet);
     void loadFromDatabase();
     void clear();
+
+    // Get route data for selected traceroute (for map visualization)
+    struct RouteNode {
+        uint32_t nodeNum;
+        QString name;
+        float snr;
+    };
+    QList<RouteNode> getSelectedRoute() const;
+
+signals:
+    void tracerouteSelected(uint32_t fromNode, uint32_t toNode);
+
+private slots:
+    void onSelectionChanged();
 
 private:
     QTableView *m_tableView;

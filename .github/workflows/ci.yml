@@ -84,6 +84,13 @@ jobs:
           mkdir meshtastic-vibe-client-win
           copy Release\meshtastic-vibe-client.exe meshtastic-vibe-client-win\
           xcopy ..\resources meshtastic-vibe-client-win\resources /E /I
+
+          # Deploy Qt DLLs and dependencies
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw meshtastic-vibe-client-win\meshtastic-vibe-client.exe
+
+          # Copy protobuf DLL from vcpkg
+          copy C:\vcpkg\installed\x64-windows\bin\libprotobuf.dll meshtastic-vibe-client-win\
+
           7z a meshtastic-vibe-client-windows.zip meshtastic-vibe-client-win
 
       - name: Upload Windows Artifacts

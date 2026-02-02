@@ -10,6 +10,71 @@
 #include "meshtastic/channel.pb.h"
 #include "meshtastic/admin.pb.h"
 
+// Constants
+static constexpr double SNR_SCALE_FACTOR = 4.0;  // SNR is stored as int * 4 in protocol
+
+// Helper function to wrap serialized protobuf in frame with sync bytes and length
+static QByteArray wrapInFrame(const std::string &serialized)
+{
+    QByteArray frame;
+    frame.append(static_cast<char>(MeshtasticProtocol::SYNC_BYTE_1));
+    frame.append(static_cast<char>(MeshtasticProtocol::SYNC_BYTE_2));
+    frame.append(static_cast<char>((serialized.size() >> 8) & 0xFF));
+    frame.append(static_cast<char>(serialized.size() & 0xFF));
+    frame.append(QByteArray::fromStdString(serialized));
+    return frame;
+}
+
+// Helper functions to map config fields to QVariantMap (avoids duplication)
+static void mapDeviceConfig(const meshtastic::Config_DeviceConfig &dev, QVariantMap &fields)
+{
+    fields["configType"] = "device";
+    fields["role"] = static_cast<int>(dev.role());
+    fields["serialEnabled"] = dev.serial_enabled();
+    fields["debugLogEnabled"] = dev.debug_log_enabled();
+    fields["buttonGpio"] = dev.button_gpio();
+    fields["buzzerGpio"] = dev.buzzer_gpio();
+    fields["rebroadcastMode"] = static_cast<int>(dev.rebroadcast_mode());
+    fields["nodeInfoBroadcastSecs"] = dev.node_info_broadcast_secs();
+    fields["doubleTapAsButtonPress"] = dev.double_tap_as_button_press();
+    fields["isManaged"] = dev.is_managed();
+    fields["disableTripleClick"] = dev.disable_triple_click();
+    fields["tzdef"] = QString::fromStdString(dev.tzdef());
+    fields["ledHeartbeatDisabled"] = dev.led_heartbeat_disabled();
+}
+
+static void mapPositionConfig(const meshtastic::Config_PositionConfig &pos, QVariantMap &fields)
+{
+    fields["configType"] = "position";
+    fields["positionBroadcastSecs"] = pos.position_broadcast_secs();
+    fields["smartPositionEnabled"] = pos.position_broadcast_smart_enabled();
+    fields["fixedPosition"] = pos.fixed_position();
+    fields["gpsEnabled"] = pos.gps_enabled();
+    fields["gpsUpdateInterval"] = pos.gps_update_interval();
+    fields["gpsAttemptTime"] = pos.gps_attempt_time();
+    fields["positionFlags"] = pos.position_flags();
+    fields["broadcastSmartMinDistance"] = pos.broadcast_smart_minimum_distance();
+    fields["broadcastSmartMinIntervalSecs"] = pos.broadcast_smart_minimum_interval_secs();
+    fields["gpsMode"] = static_cast<int>(pos.gps_mode());
+}
+
+static void mapLoraConfig(const meshtastic::Config_LoRaConfig &lora, QVariantMap &fields)
+{
+    fields["configType"] = "lora";
+    fields["usePreset"] = lora.use_preset();
+    fields["modemPreset"] = static_cast<int>(lora.modem_preset());
+    fields["bandwidth"] = lora.bandwidth();
+    fields["spreadFactor"] = lora.spread_factor();
+    fields["codingRate"] = lora.coding_rate();
+    fields["frequencyOffset"] = lora.frequency_offset();
+    fields["region"] = static_cast<int>(lora.region());
+    fields["hopLimit"] = lora.hop_limit();
+    fields["txEnabled"] = lora.tx_enabled();
+    fields["txPower"] = lora.tx_power();
+    fields["channelNum"] = lora.channel_num();
+    fields["overrideDutyCycle"] = lora.override_duty_cycle();
+}
+
 MeshtasticProtocol::MeshtasticProtocol(QObject *parent)
     : QObject(parent), m_parseState(ParseState::WaitingForSync1), m_expectedLength(0)
 {
@@ -213,57 +278,14 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
         switch (config.payload_variant_case())
         {
         case meshtastic::Config::kDevice:
-        {
-            result.fields["configType"] = "device";
-            const auto &dev = config.device();
-            result.fields["role"] = static_cast<int>(dev.role());
-            result.fields["serialEnabled"] = dev.serial_enabled();
-            result.fields["debugLogEnabled"] = dev.debug_log_enabled();
-            result.fields["buttonGpio"] = dev.button_gpio();
-            result.fields["buzzerGpio"] = dev.buzzer_gpio();
-            result.fields["rebroadcastMode"] = static_cast<int>(dev.rebroadcast_mode());
-            result.fields["nodeInfoBroadcastSecs"] = dev.node_info_broadcast_secs();
-            result.fields["doubleTapAsButtonPress"] = dev.double_tap_as_button_press();
-            result.fields["isManaged"] = dev.is_managed();
-            result.fields["disableTripleClick"] = dev.disable_triple_click();
-            result.fields["tzdef"] = QString::fromStdString(dev.tzdef());
-            result.fields["ledHeartbeatDisabled"] = dev.led_heartbeat_disabled();
+            mapDeviceConfig(config.device(), result.fields);
             break;
-        }
         case meshtastic::Config::kPosition:
-        {
-            result.fields["configType"] = "position";
-            const auto &pos = config.position();
-            result.fields["positionBroadcastSecs"] = pos.position_broadcast_secs();
-            result.fields["smartPositionEnabled"] = pos.position_broadcast_smart_enabled();
-            result.fields["fixedPosition"] = pos.fixed_position();
-            result.fields["gpsEnabled"] = pos.gps_enabled();
-            result.fields["gpsUpdateInterval"] = pos.gps_update_interval();
-            result.fields["gpsAttemptTime"] = pos.gps_attempt_time();
-            result.fields["positionFlags"] = pos.position_flags();
-            result.fields["broadcastSmartMinDistance"] = pos.broadcast_smart_minimum_distance();
-            result.fields["broadcastSmartMinIntervalSecs"] = pos.broadcast_smart_minimum_interval_secs();
-            result.fields["gpsMode"] = static_cast<int>(pos.gps_mode());
+            mapPositionConfig(config.position(), result.fields);
             break;
-        }
         case meshtastic::Config::kLora:
-        {
-            result.fields["configType"] = "lora";
-            const auto &lora = config.lora();
-            result.fields["usePreset"] = lora.use_preset();
-            result.fields["modemPreset"] = static_cast<int>(lora.modem_preset());
-            result.fields["bandwidth"] = lora.bandwidth();
-            result.fields["spreadFactor"] = lora.spread_factor();
-            result.fields["codingRate"] = lora.coding_rate();
-            result.fields["frequencyOffset"] = lora.frequency_offset();
-            result.fields["region"] = static_cast<int>(lora.region());
-            result.fields["hopLimit"] = lora.hop_limit();
-            result.fields["txEnabled"] = lora.tx_enabled();
-            result.fields["txPower"] = lora.tx_power();
-            result.fields["channelNum"] = lora.channel_num();
-            result.fields["overrideDutyCycle"] = lora.override_duty_cycle();
+            mapLoraConfig(config.lora(), result.fields);
             break;
-        }
         case meshtastic::Config::kPower:
         {
             result.fields["configType"] = "power";
@@ -411,12 +433,14 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
         case PortNum::Routing:
         {
             meshtastic::Routing routing;
-            if (routing.ParseFromArray(payloadData.constData(), payloadData.size()))
+            if (!routing.ParseFromArray(payloadData.constData(), payloadData.size()))
             {
-                if (routing.has_error_reason())
-                {
-                    fields["errorReason"] = static_cast<int>(routing.error_reason());
-                }
+                qWarning() << "[Protocol] Failed to parse Routing message";
+                break;
+            }
+            if (routing.has_error_reason())
+            {
+                fields["errorReason"] = static_cast<int>(routing.error_reason());
             }
 
             // For routing packets, the request_id in the Data message tells us which packet this is responding to
@@ -430,122 +454,85 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
         case PortNum::Traceroute:
         {
             meshtastic::RouteDiscovery routeData;
-            if (routeData.ParseFromArray(payloadData.constData(), payloadData.size()))
+            if (!routeData.ParseFromArray(payloadData.constData(), payloadData.size()))
             {
-                // Route towards destination
-                QVariantList routeList;
-                for (const auto &node : routeData.route())
-                {
-                    routeList.append(nodeIdToString(node));
-                }
-                fields["route"] = routeList;
-
-                // SNR values towards destination
-                QVariantList snrTowardsList;
-                // Add the received packet's SNR as first hop if available
-                if (packet.rx_snr() != 0)
-                {
-                    snrTowardsList.append(packet.rx_snr() / 4.0); // Convert from 0.25 dB units
-                }
-                for (const auto &snr : routeData.snr_towards())
-                {
-                    snrTowardsList.append(snr / 4.0); // SNR is stored as int * 4
-                }
-                fields["snrTowards"] = snrTowardsList;
-
-                // Route back
-                QVariantList routeBackList;
-                for (const auto &node : routeData.route_back())
-                {
-                    routeBackList.append(nodeIdToString(node));
-                }
-                fields["routeBack"] = routeBackList;
-
-                // SNR values back
-                QVariantList snrBackList;
-                // Add the received packet's SNR as first hop if available
-                if (packet.rx_snr() != 0)
-                {
-                    snrBackList.append(packet.rx_snr() / 4.0); // Convert from 0.25 dB units
-                }
-                for (const auto &snr : routeData.snr_back())
-                {
-                    snrBackList.append(snr / 4.0); // SNR is stored as int * 4
-                }
-                fields["snrBack"] = snrBackList;
+                qWarning() << "[Protocol] Failed to parse RouteDiscovery message";
+                break;
             }
+
+            // Route towards destination
+            QVariantList routeList;
+            for (const auto &node : routeData.route())
+            {
+                routeList.append(nodeIdToString(node));
+            }
+            fields["route"] = routeList;
+
+            // SNR values towards destination
+            QVariantList snrTowardsList;
+            // Add the received packet's SNR as first hop if available
+            if (packet.rx_snr() != 0)
+            {
+                snrTowardsList.append(packet.rx_snr() / SNR_SCALE_FACTOR);
+            }
+            for (const auto &snr : routeData.snr_towards())
+            {
+                snrTowardsList.append(snr / SNR_SCALE_FACTOR);
+            }
+            fields["snrTowards"] = snrTowardsList;
+
+            // Route back
+            QVariantList routeBackList;
+            for (const auto &node : routeData.route_back())
+            {
+                routeBackList.append(nodeIdToString(node));
+            }
+            fields["routeBack"] = routeBackList;
+
+            // SNR values back
+            QVariantList snrBackList;
+            // Add the received packet's SNR as first hop if available
+            if (packet.rx_snr() != 0)
+            {
+                snrBackList.append(packet.rx_snr() / SNR_SCALE_FACTOR);
+            }
+            for (const auto &snr : routeData.snr_back())
+            {
+                snrBackList.append(snr / SNR_SCALE_FACTOR);
+            }
+            fields["snrBack"] = snrBackList;
             break;
         }
 
         case PortNum::Admin:
         {
             meshtastic::AdminMessage admin;
-            if (admin.ParseFromArray(payloadData.constData(), payloadData.size()))
+            if (!admin.ParseFromArray(payloadData.constData(), payloadData.size()))
             {
-                fields["adminType"] = "response";
+                qWarning() << "[Protocol] Failed to parse AdminMessage";
+                break;
+            }
 
-                // Handle get_config_response
-                if (admin.has_get_config_response())
+            fields["adminType"] = "response";
+
+            // Handle get_config_response
+            if (admin.has_get_config_response())
+            {
+                const auto &config = admin.get_config_response();
+                switch (config.payload_variant_case())
                 {
-                    const auto &config = admin.get_config_response();
-                    switch (config.payload_variant_case())
-                    {
-                    case meshtastic::Config::kDevice:
-                    {
-                        fields["configType"] = "device";
-                        const auto &dev = config.device();
-                        fields["role"] = static_cast<int>(dev.role());
-                        fields["serialEnabled"] = dev.serial_enabled();
-                        fields["debugLogEnabled"] = dev.debug_log_enabled();
-                        fields["buttonGpio"] = dev.button_gpio();
-                        fields["buzzerGpio"] = dev.buzzer_gpio();
-                        fields["rebroadcastMode"] = static_cast<int>(dev.rebroadcast_mode());
-                        fields["nodeInfoBroadcastSecs"] = dev.node_info_broadcast_secs();
-                        fields["doubleTapAsButtonPress"] = dev.double_tap_as_button_press();
-                        fields["isManaged"] = dev.is_managed();
-                        fields["disableTripleClick"] = dev.disable_triple_click();
-                        fields["tzdef"] = QString::fromStdString(dev.tzdef());
-                        fields["ledHeartbeatDisabled"] = dev.led_heartbeat_disabled();
-                        break;
-                    }
-                    case meshtastic::Config::kPosition:
-                    {
-                        fields["configType"] = "position";
-                        const auto &pos = config.position();
-                        fields["positionBroadcastSecs"] = pos.position_broadcast_secs();
-                        fields["smartPositionEnabled"] = pos.position_broadcast_smart_enabled();
-                        fields["fixedPosition"] = pos.fixed_position();
-                        fields["gpsEnabled"] = pos.gps_enabled();
-                        fields["gpsUpdateInterval"] = pos.gps_update_interval();
-                        fields["gpsAttemptTime"] = pos.gps_attempt_time();
-                        fields["positionFlags"] = pos.position_flags();
-                        fields["broadcastSmartMinDistance"] = pos.broadcast_smart_minimum_distance();
-                        fields["broadcastSmartMinIntervalSecs"] = pos.broadcast_smart_minimum_interval_secs();
-                        fields["gpsMode"] = static_cast<int>(pos.gps_mode());
-                        break;
-                    }
-                    case meshtastic::Config::kLora:
-                    {
-                        fields["configType"] = "lora";
-                        const auto &lora = config.lora();
-                        fields["usePreset"] = lora.use_preset();
-                        fields["modemPreset"] = static_cast<int>(lora.modem_preset());
-                        fields["bandwidth"] = lora.bandwidth();
-                        fields["spreadFactor"] = lora.spread_factor();
-                        fields["codingRate"] = lora.coding_rate();
-                        fields["frequencyOffset"] = lora.frequency_offset();
-                        fields["region"] = static_cast<int>(lora.region());
-                        fields["hopLimit"] = lora.hop_limit();
-                        fields["txEnabled"] = lora.tx_enabled();
-                        fields["txPower"] = lora.tx_power();
-                        fields["channelNum"] = lora.channel_num();
-                        fields["overrideDutyCycle"] = lora.override_duty_cycle();
-                        break;
-                    }
-                    default:
-                        fields["configType"] = "unknown";
-                        break;
-                    }
+                case meshtastic::Config::kDevice:
+                    mapDeviceConfig(config.device(), fields);
+                    break;
+                case meshtastic::Config::kPosition:
+                    mapPositionConfig(config.position(), fields);
+                    break;
+                case meshtastic::Config::kLora:
+                    mapLoraConfig(config.lora(), fields);
+                    break;
+                default:
+                    fields["configType"] = "unknown";
+                    break;
                 }
             }
             break;
@@ -729,15 +716,7 @@ QByteArray MeshtasticProtocol::createWantConfigPacket(uint32_t configId)
 
     std::string serialized;
     toRadio.SerializeToString(&serialized);
-
-    QByteArray frame;
-    frame.append(static_cast<char>(SYNC_BYTE_1));
-    frame.append(static_cast<char>(SYNC_BYTE_2));
-    frame.append(static_cast<char>((serialized.size() >> 8) & 0xFF));
-    frame.append(static_cast<char>(serialized.size() & 0xFF));
-    frame.append(QByteArray::fromStdString(serialized));
-
-    return frame;
+    return wrapInFrame(serialized);
 }
 
 QString MeshtasticProtocol::nodeIdToString(uint32_t nodeId)
@@ -875,15 +854,7 @@ QByteArray MeshtasticProtocol::createTraceroutePacket(uint32_t destNode, uint32_
 
     std::string serialized;
     toRadio.SerializeToString(&serialized);
-
-    QByteArray frame;
-    frame.append(static_cast<char>(SYNC_BYTE_1));
-    frame.append(static_cast<char>(SYNC_BYTE_2));
-    frame.append(static_cast<char>((serialized.size() >> 8) & 0xFF));
-    frame.append(static_cast<char>(serialized.size() & 0xFF));
-    frame.append(QByteArray::fromStdString(serialized));
-
-    return frame;
+    return wrapInFrame(serialized);
 }
 
 QByteArray MeshtasticProtocol::createPositionRequestPacket(uint32_t destNode, uint32_t myNode)
@@ -906,15 +877,7 @@ QByteArray MeshtasticProtocol::createPositionRequestPacket(uint32_t destNode, ui
 
     std::string serialized;
     toRadio.SerializeToString(&serialized);
-
-    QByteArray frame;
-    frame.append(static_cast<char>(SYNC_BYTE_1));
-    frame.append(static_cast<char>(SYNC_BYTE_2));
-    frame.append(static_cast<char>((serialized.size() >> 8) & 0xFF));
-    frame.append(static_cast<char>(serialized.size() & 0xFF));
-    frame.append(QByteArray::fromStdString(serialized));
-
-    return frame;
+    return wrapInFrame(serialized);
 }
 
 QByteArray MeshtasticProtocol::createTelemetryRequestPacket(uint32_t destNode, uint32_t myNode)
@@ -937,15 +900,7 @@ QByteArray MeshtasticProtocol::createTelemetryRequestPacket(uint32_t destNode, u
 
     std::string serialized;
     toRadio.SerializeToString(&serialized);
-
-    QByteArray frame;
-    frame.append(static_cast<char>(SYNC_BYTE_1));
-    frame.append(static_cast<char>(SYNC_BYTE_2));
-    frame.append(static_cast<char>((serialized.size() >> 8) & 0xFF));
-    frame.append(static_cast<char>(serialized.size() & 0xFF));
-    frame.append(QByteArray::fromStdString(serialized));
-
-    return frame;
+    return wrapInFrame(serialized);
 }
 
 QByteArray MeshtasticProtocol::createNodeInfoRequestPacket(uint32_t destNode, uint32_t myNode)
@@ -968,15 +923,7 @@ QByteArray MeshtasticProtocol::createNodeInfoRequestPacket(uint32_t destNode, ui
 
     std::string serialized;
     toRadio.SerializeToString(&serialized);
-
-    QByteArray frame;
-    frame.append(static_cast<char>(SYNC_BYTE_1));
-    frame.append(static_cast<char>(SYNC_BYTE_2));
-    frame.append(static_cast<char>((serialized.size() >> 8) & 0xFF));
-    frame.append(static_cast<char>(serialized.size() & 0xFF));
-    frame.append(QByteArray::fromStdString(serialized));
-
-    return frame;
+    return wrapInFrame(serialized);
 }
 
 QByteArray MeshtasticProtocol::createTextMessagePacket(const QString &text, uint32_t destNode, uint32_t myNode, int channel, uint32_t replyId, uint32_t *outPacketId)
@@ -1011,15 +958,7 @@ QByteArray MeshtasticProtocol::createTextMessagePacket(const QString &text, uint
 
     std::string serialized;
     toRadio.SerializeToString(&serialized);
-
-    QByteArray frame;
-    frame.append(static_cast<char>(SYNC_BYTE_1));
-    frame.append(static_cast<char>(SYNC_BYTE_2));
-    frame.append(static_cast<char>((serialized.size() >> 8) & 0xFF));
-    frame.append(static_cast<char>(serialized.size() & 0xFF));
-    frame.append(QByteArray::fromStdString(serialized));
-
-    return frame;
+    return wrapInFrame(serialized);
 }
 
 // Helper to create admin message frame
@@ -1039,15 +978,7 @@ static QByteArray createAdminFrame(uint32_t destNode, uint32_t myNode, const std
 
     std::string serialized;
     toRadio.SerializeToString(&serialized);
-
-    QByteArray frame;
-    frame.append(static_cast<char>(0x94)); // SYNC_BYTE_1
-    frame.append(static_cast<char>(0xC3)); // SYNC_BYTE_2
-    frame.append(static_cast<char>((serialized.size() >> 8) & 0xFF));
-    frame.append(static_cast<char>(serialized.size() & 0xFF));
-    frame.append(QByteArray::fromStdString(serialized));
-
-    return frame;
+    return wrapInFrame(serialized);
 }
 
 QByteArray MeshtasticProtocol::createGetConfigRequestPacket(uint32_t destNode, uint32_t myNode, int configType)
@@ -1142,4 +1073,22 @@ QByteArray MeshtasticProtocol::createChannelConfigPacket(uint32_t destNode, uint
     settings->set_downlink_enabled(config.value("downlinkEnabled", false).toBool());
 
     return createAdminFrame(destNode, myNode, admin.SerializeAsString());
+}
+
+QByteArray MeshtasticProtocol::createRebootPacket(uint32_t destNode, uint32_t myNode, int delaySeconds)
+{
+    meshtastic::AdminMessage admin;
+    admin.set_reboot_seconds(delaySeconds);
+
+    return createAdminFrame(destNode, myNode, admin.SerializeAsString());
+}
+
+QByteArray MeshtasticProtocol::createHeartbeatPacket()
+{
+    meshtastic::ToRadio toRadio;
+    toRadio.set_heartbeat(true);
+
+    std::string serialized;
+    toRadio.SerializeToString(&serialized);
+    return wrapInFrame(serialized);
 }

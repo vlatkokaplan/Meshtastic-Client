@@ -37,59 +37,43 @@ QVariant TracerouteTableModel::data(const QModelIndex &index, int role) const
         switch (index.column())
         {
         case ColTime:
-            return QDateTime::fromMSecsSinceEpoch(tr.timestamp).toString("HH:mm:ss.zzz");
+            return QDateTime::fromMSecsSinceEpoch(tr.timestamp).toString("HH:mm:ss");
         case ColFrom:
             return formatNodeName(tr.from);
         case ColTo:
             return formatNodeName(tr.to);
         case ColRouteTo:
-            return tr.routeTo.join(" → ");
+        {
+            // Build complete path: From → [hops] → To
+            QStringList fullPath;
+            fullPath.append(formatNodeName(tr.from));
+            for (const QString &hop : tr.routeTo)
+            {
+                // Convert node ID string to name if possible
+                uint32_t nodeNum = MeshtasticProtocol::nodeIdFromString(hop);
+                fullPath.append(formatNodeName(nodeNum));
+            }
+            fullPath.append(formatNodeName(tr.to));
+            return fullPath.join(" → ");
+        }
         case ColRouteBack:
-            return tr.routeBack.join(" → ");
+        {
+            // Build complete return path: To → [hops] → From
+            QStringList fullPath;
+            fullPath.append(formatNodeName(tr.to));
+            for (const QString &hop : tr.routeBack)
+            {
+                uint32_t nodeNum = MeshtasticProtocol::nodeIdFromString(hop);
+                fullPath.append(formatNodeName(nodeNum));
+            }
+            fullPath.append(formatNodeName(tr.from));
+            return fullPath.join(" → ");
+        }
         case ColSnrTo:
-        {
-            // Format SNR with first and last node signals properly
-            QString result;
-            if (!tr.snrTo.isEmpty())
-            {
-                // First SNR is signal from origin to first hop
-                result += "From: " + tr.snrTo.first();
-                if (tr.snrTo.size() > 1)
-                {
-                    // Last SNR is signal from last hop to destination
-                    result += ", To: " + tr.snrTo.last();
-                }
-                // If only one hop (direct), show it as the signal
-                if (tr.snrTo.size() > 2)
-                {
-                    // Multiple hops, show all
-                    result += " [" + tr.snrTo.join(", ") + "]";
-                }
-            }
-            return result;
-        }
+            // Simple SNR display - values correspond to each hop
+            return tr.snrTo.join(" → ");
         case ColSnrBack:
-        {
-            // Format SNR with first and last node signals properly
-            QString result;
-            if (!tr.snrBack.isEmpty())
-            {
-                // First SNR is signal from destination to first hop (back)
-                result += "From: " + tr.snrBack.first();
-                if (tr.snrBack.size() > 1)
-                {
-                    // Last SNR is signal from last hop to origin
-                    result += ", To: " + tr.snrBack.last();
-                }
-                // If only one hop (direct), show it as the signal
-                if (tr.snrBack.size() > 2)
-                {
-                    // Multiple hops, show all
-                    result += " [" + tr.snrBack.join(", ") + "]";
-                }
-            }
-            return result;
-        }
+            return tr.snrBack.join(" → ");
         }
     }
 
@@ -249,12 +233,14 @@ void TracerouteWidget::setupUI()
     m_tableView->setSelectionMode(QAbstractItemView::SingleSelection);
     m_tableView->setAlternatingRowColors(true);
     m_tableView->setSortingEnabled(false);
-    m_tableView->horizontalHeader()->setStretchLastSection(true);
+    m_tableView->setWordWrap(false);
+
+    // All columns resize to fit their content
     m_tableView->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    m_tableView->horizontalHeader()->setSectionResizeMode(TracerouteTableModel::ColRouteTo, QHeaderView::Stretch);
-    m_tableView->horizontalHeader()->setSectionResizeMode(TracerouteTableModel::ColRouteBack, QHeaderView::Stretch);
+    m_tableView->horizontalHeader()->setStretchLastSection(false);
+
     m_tableView->verticalHeader()->setVisible(false);
-    m_tableView->verticalHeader()->setDefaultSectionSize(20);
+    m_tableView->verticalHeader()->setDefaultSectionSize(24);
 
     layout->addWidget(m_tableView);
 }

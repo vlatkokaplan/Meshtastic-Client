@@ -43,7 +43,10 @@ bool Database::open(const QString &path)
 
     // Enable foreign keys
     QSqlQuery query(m_db);
-    query.exec("PRAGMA foreign_keys = ON");
+    if (!query.exec("PRAGMA foreign_keys = ON"))
+    {
+        qWarning() << "Failed to enable foreign keys:" << query.lastError().text();
+    }
 
     // Create or migrate tables
     int version = getSchemaVersion();
@@ -282,10 +285,16 @@ int Database::getSchemaVersion()
 void Database::setSchemaVersion(int version)
 {
     QSqlQuery query(m_db);
-    query.exec("DELETE FROM schema_version");
+    if (!query.exec("DELETE FROM schema_version"))
+    {
+        qWarning() << "Failed to clear schema_version:" << query.lastError().text();
+    }
     query.prepare("INSERT INTO schema_version (version) VALUES (?)");
     query.addBindValue(version);
-    query.exec();
+    if (!query.exec())
+    {
+        qWarning() << "Failed to set schema version:" << query.lastError().text();
+    }
 }
 
 bool Database::prepareStatements()

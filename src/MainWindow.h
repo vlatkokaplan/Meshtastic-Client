@@ -13,6 +13,7 @@
 #include <QLineEdit>
 
 #include "MeshtasticProtocol.h" // Need full include for nested type
+#include "NodeManager.h"        // For NodeInfo
 
 class QTimer;
 class SerialConnection;
@@ -38,6 +39,7 @@ private slots:
     void refreshPorts();
     void connectToSelected();
     void disconnect();
+    void rebootDevice();
     void onConnected();
     void onDisconnected();
     void onDataReceived(const QByteArray &data);
@@ -89,6 +91,10 @@ private:
     bool m_experimentalMode = false;
     bool m_testMode = false;
 
+    // Node list caching
+    QList<NodeInfo> m_sortedNodes;
+    bool m_nodesSortNeeded = true;
+
     // Core components
     SerialConnection *m_serial;
     MeshtasticProtocol *m_protocol;
@@ -100,6 +106,7 @@ private:
     QComboBox *m_portCombo;
     QPushButton *m_connectButton;
     QPushButton *m_disconnectButton;
+    QPushButton *m_rebootButton;
     QPushButton *m_refreshButton;
     QLabel *m_statusLabel;
     PacketListWidget *m_packetList;
@@ -111,6 +118,7 @@ private:
 
     MapWidget *m_mapWidget;
     DashboardStatsWidget *m_dashboardStats;
+    QSplitter *m_mapSplitter;
     QString m_firmwareVersion;
     QSystemTrayIcon *m_trayIcon;
 
@@ -126,6 +134,11 @@ private:
     void updateStatusLabel();
     void openDatabaseForNode(uint32_t nodeNum);
     void closeDatabase();
+    void saveWindowState();
+    void restoreWindowState();
+
+protected:
+    void closeEvent(QCloseEvent *event) override;
 };
 
 #endif // MAINWINDOW_H

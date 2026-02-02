@@ -112,11 +112,21 @@ public:
     QByteArray createPositionConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config);
     QByteArray createChannelConfigPacket(uint32_t destNode, uint32_t myNode, int channelIndex, const QVariantMap &config);
 
+    // Create admin packets for device actions
+    QByteArray createRebootPacket(uint32_t destNode, uint32_t myNode, int delaySeconds = 5);
+
+    // Create heartbeat packet to keep connection alive
+    QByteArray createHeartbeatPacket();
+
     // Decode helpers
     static QString nodeIdToString(uint32_t nodeId);
     static uint32_t nodeIdFromString(const QString &nodeId);
     static QString portNumToString(PortNum portNum);
     static QString packetTypeToString(PacketType type);
+
+    // Frame sync bytes (public for helper functions)
+    static const uint8_t SYNC_BYTE_1 = 0x94;
+    static const uint8_t SYNC_BYTE_2 = 0xC3;
 
 signals:
     void packetReceived(const DecodedPacket &packet);
@@ -124,8 +134,6 @@ signals:
 
 private:
     // Frame parsing
-    static const uint8_t SYNC_BYTE_1 = 0x94;
-    static const uint8_t SYNC_BYTE_2 = 0xC3;
     static const int MAX_PACKET_SIZE = 512;
 
     enum class ParseState

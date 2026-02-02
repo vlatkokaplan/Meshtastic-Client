@@ -31,6 +31,8 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QCloseEvent>
+#include <QSettings>
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
@@ -70,14 +72,8 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
             {
         if (m_serial->isConnected()) {
             qDebug() << "[MainWindow] Sending config heartbeat";
-            // Send heartbeat (empty ToRadio with heartbeat variant would be ideal, 
-            // but for now we can just send a keepalive or rely on the fact we are spamming want_config if needed,
-            // actually web client sends explicit heartbeat packet. 
-            // For C++ client, let's replicate web client heartbeat: ToRadio variant 7 (heartbeat)
-            // But we need to check if we support that in MeshtasticProtocol.
-            // If not, we can assume standard traffic keeps it alive or implement heartbeat packet creation.
-            // Checking MeshtasticProtocol.h... ToRadio has heartbeat=7.
-            // Let's implement createHeartbeatPacket in Protocol first if missing.
+            QByteArray heartbeat = m_protocol->createHeartbeatPacket();
+            m_serial->sendData(heartbeat);
         } });
 
     // Connect signals
@@ -99,7 +95,10 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
             });
 
     connect(m_nodeManager, &NodeManager::nodesChanged,
-            this, &MainWindow::updateNodeList);
+            this, [this]() {
+                m_nodesSortNeeded = true;
+                updateNodeList();
+            });
 
     // Initial refresh
     refreshPorts();
@@ -127,6 +126,9 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
     // Listen for settings changes
     connect(AppSettings::instance(), &AppSettings::settingChanged,
             this, &MainWindow::onSettingChanged);
+
+    // Restore window state (geometry, splitter sizes)
+    restoreWindowState();
 }
 
 MainWindow::~MainWindow()
@@ -201,6 +203,12 @@ void MainWindow::setupToolbar()
     connect(m_disconnectButton, &QPushButton::clicked, this, &MainWindow::disconnect);
     toolbar->addWidget(m_disconnectButton);
 
+    m_rebootButton = new QPushButton("Reboot Device");
+    m_rebootButton->setEnabled(false);
+    m_rebootButton->setToolTip("Reboot the connected Meshtastic device");
+    connect(m_rebootButton, &QPushButton::clicked, this, &MainWindow::rebootDevice);
+    toolbar->addWidget(m_rebootButton);
+
     toolbar->addSeparator();
 
     QPushButton *configButton = new QPushButton("Request Config");
@@ -214,11 +222,11 @@ void MainWindow::setupMapTab()
     QHBoxLayout *layout = new QHBoxLayout(mapTab);
 
     // Splitter for map and node list
-    QSplitter *splitter = new QSplitter(Qt::Horizontal);
+    m_mapSplitter = new QSplitter(Qt::Horizontal);
 
     // Map widget
     m_mapWidget = new MapWidget(m_nodeManager);
-    splitter->addWidget(m_mapWidget);
+    m_mapSplitter->addWidget(m_mapWidget);
 
     // Node list sidebar
     QWidget *sidebar = new QWidget;
@@ -252,10 +260,10 @@ void MainWindow::setupMapTab()
     m_nodeTable->setContextMenuPolicy(Qt::CustomContextMenu);
     sidebarLayout->addWidget(m_nodeTable);
 
-    splitter->addWidget(sidebar);
-    splitter->setSizes({800, 200});
+    m_mapSplitter->addWidget(sidebar);
+    m_mapSplitter->setSizes({800, 200});
 
-    layout->addWidget(splitter);
+    layout->addWidget(m_mapSplitter);
     m_tabWidget->addTab(mapTab, "Map");
 
     // Connect node table signals
@@ -380,10 +388,42 @@ void MainWindow::disconnect()
     m_serial->disconnect();
 }
 
+void MainWindow::rebootDevice()
+{
+    if (!m_serial->isConnected())
+    {
+        statusBar()->showMessage("Not connected", 3000);
+        return;
+    }
+
+    uint32_t myNode = m_nodeManager->myNodeNum();
+    if (myNode == 0)
+    {
+        statusBar()->showMessage("Node info not available yet", 3000);
+        return;
+    }
+
+    // Ask for confirmation
+    QMessageBox::StandardButton reply = QMessageBox::question(
+        this, "Reboot Device",
+        "Are you sure you want to reboot the connected device?",
+        QMessageBox::Yes | QMessageBox::No);
+
+    if (reply != QMessageBox::Yes)
+        return;
+
+    // Send reboot command (5 second delay)
+    QByteArray packet = m_protocol->createRebootPacket(myNode, myNode, 5);
+    m_serial->sendData(packet);
+
+    statusBar()->showMessage("Reboot command sent. Device will restart in 5 seconds...", 5000);
+}
+
 void MainWindow::onConnected()
 {
     m_connectButton->setEnabled(false);
     m_disconnectButton->setEnabled(true);
+    m_rebootButton->setEnabled(true);
     m_portCombo->setEnabled(false);
     m_refreshButton->setEnabled(false);
 
@@ -401,6 +441,7 @@ void MainWindow::onDisconnected()
 {
     m_connectButton->setEnabled(true);
     m_disconnectButton->setEnabled(false);
+    m_rebootButton->setEnabled(false);
     m_portCombo->setEnabled(true);
     m_refreshButton->setEnabled(true);
 
@@ -708,6 +749,13 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
         }
         break;
 
+    case MeshtasticProtocol::PacketType::ConfigCompleteId:
+        if (packet.fields.contains("configId"))
+        {
+            onConfigCompleteIdReceived(packet.fields["configId"].toUInt());
+        }
+        break;
+
     default:
         break;
     }
@@ -902,7 +950,7 @@ void MainWindow::onTracerouteCooldownTick()
 
     // Update text label with countdown
     int secondsRemaining = (m_tracerouteCooldownRemaining + 999) / 1000; // Round up
-    m_tracerouteCooldownLabel->setText(QString("🔄 Traceroute timeout: %1s").arg(secondsRemaining));
+    m_tracerouteCooldownLabel->setText(QString("Traceroute timeout: %1s").arg(secondsRemaining));
 }
 
 void MainWindow::requestNodeInfo(uint32_t nodeNum)
@@ -953,9 +1001,16 @@ void MainWindow::requestPosition(uint32_t nodeNum)
 void MainWindow::updateNodeList()
 {
     m_nodeTable->setRowCount(0);
-    QList<NodeInfo> nodes = m_nodeManager->allNodes();
-    std::sort(nodes.begin(), nodes.end(), [](const NodeInfo &a, const NodeInfo &b)
-              { return a.lastHeard > b.lastHeard; });
+
+    // Only re-sort when node data has changed, not just filter changes
+    if (m_nodesSortNeeded)
+    {
+        m_sortedNodes = m_nodeManager->allNodes();
+        std::sort(m_sortedNodes.begin(), m_sortedNodes.end(), [](const NodeInfo &a, const NodeInfo &b)
+                  { return a.lastHeard > b.lastHeard; });
+        m_nodesSortNeeded = false;
+    }
+    const QList<NodeInfo> &nodes = m_sortedNodes;
 
     // Get offline filter settings
     bool showOffline = AppSettings::instance()->showOfflineNodes();
@@ -989,7 +1044,7 @@ void MainWindow::updateNodeList()
         QString name = node.longName.isEmpty() ? node.nodeId : node.longName;
         if (node.isFavorite)
         {
-            name = "⭐ " + name;
+            name = "[*] " + name;
         }
         QTableWidgetItem *nameItem = new QTableWidgetItem(name);
         nameItem->setData(Qt::UserRole, node.nodeNum);
@@ -1819,4 +1874,46 @@ void MainWindow::drawTestNodeLines()
         qDebug() << "[Test] Drawing line from" << from.shortName << "to" << to.shortName;
         m_mapWidget->drawPacketFlow(from.nodeNum, to.nodeNum, from.latitude, from.longitude, to.latitude, to.longitude);
     }
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    saveWindowState();
+    QMainWindow::closeEvent(event);
+}
+
+void MainWindow::saveWindowState()
+{
+    QSettings settings;
+    settings.beginGroup("MainWindow");
+    settings.setValue("geometry", saveGeometry());
+    settings.setValue("windowState", saveState());
+    if (m_mapSplitter)
+    {
+        settings.setValue("mapSplitterSizes", QVariant::fromValue(m_mapSplitter->sizes()));
+    }
+    settings.endGroup();
+}
+
+void MainWindow::restoreWindowState()
+{
+    QSettings settings;
+    settings.beginGroup("MainWindow");
+    if (settings.contains("geometry"))
+    {
+        restoreGeometry(settings.value("geometry").toByteArray());
+    }
+    if (settings.contains("windowState"))
+    {
+        restoreState(settings.value("windowState").toByteArray());
+    }
+    if (settings.contains("mapSplitterSizes") && m_mapSplitter)
+    {
+        QList<int> sizes = settings.value("mapSplitterSizes").value<QList<int>>();
+        if (!sizes.isEmpty())
+        {
+            m_mapSplitter->setSizes(sizes);
+        }
+    }
+    settings.endGroup();
 }

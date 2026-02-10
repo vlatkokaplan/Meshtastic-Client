@@ -7,7 +7,7 @@
 #include <QDebug>
 #include <QUuid>
 
-static const int SCHEMA_VERSION = 5;
+static const int SCHEMA_VERSION = 7;
 
 Database::Database(QObject *parent)
     : QObject(parent)
@@ -213,6 +213,43 @@ bool Database::createTables()
         return false;
     }
 
+    // Position history table
+    if (!query.exec(R"(
+        CREATE TABLE IF NOT EXISTS position_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_num INTEGER,
+            latitude REAL,
+            longitude REAL,
+            altitude INTEGER,
+            timestamp INTEGER,
+            FOREIGN KEY (node_num) REFERENCES nodes(node_num)
+        )
+    )"))
+    {
+        qWarning() << "Failed to create position_history table:" << query.lastError().text();
+        return false;
+    }
+
+    // Raw packets table (for long-running sessions)
+    if (!query.exec(R"(
+        CREATE TABLE IF NOT EXISTS packets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp INTEGER,
+            packet_type INTEGER,
+            from_node INTEGER,
+            to_node INTEGER,
+            port_num INTEGER,
+            channel INTEGER,
+            type_name TEXT,
+            raw_data BLOB,
+            fields_json TEXT
+        )
+    )"))
+    {
+        qWarning() << "Failed to create packets table:" << query.lastError().text();
+        return false;
+    }
+
     // Indexes
     query.exec("CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_node)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_node)");
@@ -223,6 +260,11 @@ bool Database::createTables()
     query.exec("CREATE INDEX IF NOT EXISTS idx_traceroutes_to ON traceroutes(to_node)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_telemetry_node ON telemetry_history(node_num)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_telemetry_timestamp ON telemetry_history(timestamp DESC)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_position_node ON position_history(node_num)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_position_timestamp ON position_history(timestamp DESC)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_packets_timestamp ON packets(timestamp DESC)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_packets_from ON packets(from_node)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_packets_type ON packets(packet_type)");
 
     return true;
 }
@@ -319,6 +361,55 @@ bool Database::migrateSchema(int fromVersion, int toVersion)
             query.exec("CREATE INDEX IF NOT EXISTS idx_telemetry_node ON telemetry_history(node_num)");
             query.exec("CREATE INDEX IF NOT EXISTS idx_telemetry_timestamp ON telemetry_history(timestamp DESC)");
             qDebug() << "Database migrated to schema version 5";
+            break;
+        case 6:
+            // Add position history table
+            qDebug() << "Migrating to schema version 6 - adding position_history table";
+            if (!query.exec(R"(
+                CREATE TABLE IF NOT EXISTS position_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    node_num INTEGER,
+                    latitude REAL,
+                    longitude REAL,
+                    altitude INTEGER,
+                    timestamp INTEGER,
+                    FOREIGN KEY (node_num) REFERENCES nodes(node_num)
+                )
+            )"))
+            {
+                qWarning() << "Migration to v6 failed:" << query.lastError().text();
+                return false;
+            }
+            query.exec("CREATE INDEX IF NOT EXISTS idx_position_node ON position_history(node_num)");
+            query.exec("CREATE INDEX IF NOT EXISTS idx_position_timestamp ON position_history(timestamp DESC)");
+            qDebug() << "Database migrated to schema version 6";
+            break;
+
+        case 7:
+            // Add packets table for long-running sessions
+            qDebug() << "Migrating to schema version 7 - adding packets table";
+            if (!query.exec(R"(
+                CREATE TABLE IF NOT EXISTS packets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER,
+                    packet_type INTEGER,
+                    from_node INTEGER,
+                    to_node INTEGER,
+                    port_num INTEGER,
+                    channel INTEGER,
+                    type_name TEXT,
+                    raw_data BLOB,
+                    fields_json TEXT
+                )
+            )"))
+            {
+                qWarning() << "Migration to v7 failed:" << query.lastError().text();
+                return false;
+            }
+            query.exec("CREATE INDEX IF NOT EXISTS idx_packets_timestamp ON packets(timestamp DESC)");
+            query.exec("CREATE INDEX IF NOT EXISTS idx_packets_from ON packets(from_node)");
+            query.exec("CREATE INDEX IF NOT EXISTS idx_packets_type ON packets(packet_type)");
+            qDebug() << "Database migrated to schema version 7";
             break;
         }
     }
@@ -1043,6 +1134,165 @@ bool Database::deleteTelemetryHistory(int daysOld)
         qWarning() << "Failed to delete old telemetry history:" << query.lastError().text();
         return false;
     }
+
+    return true;
+}
+
+// Position history operations
+
+bool Database::savePosition(const PositionRecord &record)
+{
+    if (!m_db.isOpen() || record.nodeNum == 0)
+        return false;
+
+    QSqlQuery query(m_db);
+    query.prepare(R"(
+        INSERT INTO position_history (
+            node_num, latitude, longitude, altitude, timestamp
+        ) VALUES (
+            :node_num, :latitude, :longitude, :altitude, :timestamp
+        )
+    )");
+
+    qint64 timestamp = record.timestamp.isValid() ? record.timestamp.toSecsSinceEpoch() : QDateTime::currentSecsSinceEpoch();
+
+    query.bindValue(":node_num", record.nodeNum);
+    query.bindValue(":latitude", record.latitude);
+    query.bindValue(":longitude", record.longitude);
+    query.bindValue(":altitude", record.altitude);
+    query.bindValue(":timestamp", timestamp);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to save position record:" << query.lastError().text();
+        return false;
+    }
+
+    return true;
+}
+
+Database::PositionRecord Database::loadPositionAt(uint32_t nodeNum, qint64 timestamp)
+{
+    PositionRecord rec;
+    rec.nodeNum = nodeNum;
+
+    if (!m_db.isOpen())
+        return rec;
+
+    QSqlQuery query(m_db);
+    // Find the record closest in time to the requested timestamp
+    query.prepare(R"(
+        SELECT * FROM position_history
+        WHERE node_num = ?
+        ORDER BY ABS(timestamp - ?) ASC
+        LIMIT 1
+    )");
+    query.addBindValue(nodeNum);
+    query.addBindValue(timestamp);
+
+    if (query.exec() && query.next())
+    {
+        rec.latitude = query.value("latitude").toDouble();
+        rec.longitude = query.value("longitude").toDouble();
+        rec.altitude = query.value("altitude").toInt();
+        qint64 ts = query.value("timestamp").toLongLong();
+        if (ts > 0)
+            rec.timestamp = QDateTime::fromSecsSinceEpoch(ts);
+    }
+
+    return rec;
+}
+
+bool Database::savePacket(const PacketRecord &record)
+{
+    if (!m_db.isOpen())
+        return false;
+
+    QSqlQuery query(m_db);
+    query.prepare(R"(
+        INSERT INTO packets (
+            timestamp, packet_type, from_node, to_node, port_num, channel,
+            type_name, raw_data, fields_json
+        ) VALUES (
+            :timestamp, :packet_type, :from_node, :to_node, :port_num, :channel,
+            :type_name, :raw_data, :fields_json
+        )
+    )");
+
+    query.bindValue(":timestamp", record.timestamp);
+    query.bindValue(":packet_type", record.packetType);
+    query.bindValue(":from_node", record.fromNode);
+    query.bindValue(":to_node", record.toNode);
+    query.bindValue(":port_num", record.portNum);
+    query.bindValue(":channel", record.channel);
+    query.bindValue(":type_name", record.typeName);
+    query.bindValue(":raw_data", record.rawData);
+    query.bindValue(":fields_json", record.fieldsJson);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to save packet:" << query.lastError().text();
+        return false;
+    }
+
+    return true;
+}
+
+QList<Database::PacketRecord> Database::loadPackets(int limit, int offset)
+{
+    QList<PacketRecord> packets;
+    if (!m_db.isOpen())
+        return packets;
+
+    QSqlQuery query(m_db);
+    query.prepare("SELECT * FROM packets ORDER BY timestamp DESC LIMIT ? OFFSET ?");
+    query.addBindValue(limit);
+    query.addBindValue(offset);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to load packets:" << query.lastError().text();
+        return packets;
+    }
+
+    while (query.next())
+    {
+        PacketRecord rec;
+        rec.id = query.value("id").toLongLong();
+        rec.timestamp = query.value("timestamp").toLongLong();
+        rec.packetType = query.value("packet_type").toInt();
+        rec.fromNode = query.value("from_node").toUInt();
+        rec.toNode = query.value("to_node").toUInt();
+        rec.portNum = query.value("port_num").toInt();
+        rec.channel = query.value("channel").toInt();
+        rec.typeName = query.value("type_name").toString();
+        rec.rawData = query.value("raw_data").toByteArray();
+        rec.fieldsJson = query.value("fields_json").toString();
+        packets.append(rec);
+    }
+
+    return packets;
+}
+
+bool Database::deleteOldPackets(int daysOld)
+{
+    if (!m_db.isOpen())
+        return false;
+
+    QSqlQuery query(m_db);
+    qint64 cutoffTime = QDateTime::currentMSecsSinceEpoch() - (static_cast<qint64>(daysOld) * 86400 * 1000);
+    query.prepare("DELETE FROM packets WHERE timestamp < ?");
+    query.addBindValue(cutoffTime);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to delete old packets:" << query.lastError().text();
+        return false;
+    }
+
+    int deleted = query.numRowsAffected();
+    if (deleted > 0)
+        qDebug() << "Deleted" << deleted << "old packets";
 
     return true;
 }

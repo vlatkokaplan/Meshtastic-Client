@@ -24,6 +24,9 @@ find_package(Qt6 COMPONENTS WebEngineWidgets)
 # Find Protobuf
 find_package(Protobuf REQUIRED)
 
+# Find OpenSSL for packet decryption
+find_package(OpenSSL REQUIRED)
+
 # Proto source directory
 set(PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/proto)
 
@@ -146,6 +149,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::WebChannel
     Qt6::Sql
     protobuf::libprotobuf
+    OpenSSL::Crypto
 )
 
 if(Qt6WebEngineWidgets_FOUND)

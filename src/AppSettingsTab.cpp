@@ -127,6 +127,14 @@ void AppSettingsTab::setupUI()
             this, &AppSettingsTab::onHideLocalDevicePacketsChanged);
     packetsLayout->addWidget(m_hideLocalDevicePacketsCheck);
 
+    m_savePacketsToDbCheck = new QCheckBox("Save packets to database (for long sessions)");
+    m_savePacketsToDbCheck->setToolTip(
+        "When enabled, all received packets are saved to the database.\n"
+        "Useful for multi-day listening sessions. Old packets are auto-deleted after 7 days.");
+    connect(m_savePacketsToDbCheck, &QCheckBox::toggled,
+            this, &AppSettingsTab::onSavePacketsToDbChanged);
+    packetsLayout->addWidget(m_savePacketsToDbCheck);
+
     mainLayout->addWidget(packetsGroup);
 
     // Appearance Settings Group
@@ -194,6 +202,7 @@ void AppSettingsTab::loadSettings()
     m_notificationsCheck->setChecked(settings->notificationsEnabled());
     m_soundCheck->setChecked(settings->soundEnabled());
     m_hideLocalDevicePacketsCheck->setChecked(settings->hideLocalDevicePackets());
+    m_savePacketsToDbCheck->setChecked(settings->savePacketsToDb());
     m_nodeBlinkCheck->setChecked(settings->mapNodeBlinkEnabled());
     m_nodeBlinkDurationSpin->setValue(settings->mapNodeBlinkDuration());
     m_showPacketFlowLinesCheck->setChecked(settings->showPacketFlowLines());
@@ -293,6 +302,11 @@ void AppSettingsTab::onAutoPingResponseChanged(bool checked)
 void AppSettingsTab::onShowPacketFlowLinesChanged(bool checked)
 {
     AppSettings::instance()->setShowPacketFlowLines(checked);
+}
+
+void AppSettingsTab::onSavePacketsToDbChanged(bool checked)
+{
+    AppSettings::instance()->setSavePacketsToDb(checked);
 }
 
 void AppSettingsTab::onExportNodesCsv()

@@ -65,6 +65,22 @@ QList<QSerialPortInfo> SerialConnection::availablePorts()
     return QSerialPortInfo::availablePorts();
 }
 
+QString SerialConnection::deviceDescription(const QSerialPortInfo &info)
+{
+    quint16 vid = info.vendorIdentifier();
+    quint16 pid = info.productIdentifier();
+
+    for (const DeviceId *dev = KNOWN_DEVICES; dev->vid != 0; ++dev)
+    {
+        if (vid == dev->vid && pid == dev->pid)
+        {
+            return QString(dev->name);
+        }
+    }
+
+    return info.description();
+}
+
 bool SerialConnection::connectToPort(const QString &portName)
 {
     if (m_serialPort->isOpen())

@@ -418,6 +418,13 @@ void TelemetryGraphWidget::onTelemetryReceived(uint32_t nodeNum)
         updateChart();
 }
 
+void TelemetryGraphWidget::setDatabase(Database *database)
+{
+    m_database = database;
+    refreshNodeList();
+    updateChart();
+}
+
 void TelemetryGraphWidget::updateChart()
 {
     if (m_currentNode == 0 || !m_database)

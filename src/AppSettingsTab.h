@@ -37,6 +37,7 @@ private slots:
     void onDarkThemeChanged(bool checked);
     void onAutoPingResponseChanged(bool checked);
     void onShowPacketFlowLinesChanged(bool checked);
+    void onSavePacketsToDbChanged(bool checked);
 
 private:
     // Connection settings
@@ -62,6 +63,7 @@ private:
 
     // Packet display settings
     QCheckBox *m_hideLocalDevicePacketsCheck;
+    QCheckBox *m_savePacketsToDbCheck;
 
     // Appearance settings
     QCheckBox *m_darkThemeCheck;

@@ -88,6 +88,18 @@ void NodeManager::updateNodeFromPacket(const QVariantMap &fields)
                 {
                     node.altitude = fields["altitude"].toInt();
                 }
+
+                if (m_database)
+                {
+                    Database::PositionRecord rec;
+                    rec.nodeNum = nodeNum;
+                    rec.latitude = lat;
+                    rec.longitude = lon;
+                    rec.altitude = node.altitude;
+                    rec.timestamp = node.lastHeard.isValid() ? node.lastHeard : QDateTime::currentDateTime();
+                    m_database->savePosition(rec);
+                }
+
                 emit nodePositionUpdated(nodeNum, lat, lon);
             }
         }
@@ -119,6 +131,17 @@ void NodeManager::updateNodePosition(uint32_t nodeNum, double lat, double lon, i
     node.altitude = altitude;
     node.hasPosition = true;
     node.lastHeard = QDateTime::currentDateTime();
+
+    if (m_database)
+    {
+        Database::PositionRecord rec;
+        rec.nodeNum = nodeNum;
+        rec.latitude = lat;
+        rec.longitude = lon;
+        rec.altitude = altitude;
+        rec.timestamp = node.lastHeard;
+        m_database->savePosition(rec);
+    }
 
     persistNode(nodeNum);
     emit nodeUpdated(nodeNum);
@@ -373,6 +396,7 @@ void NodeManager::saveToDatabase()
 
 QString NodeManager::hwModelToString(int model)
 {
+    qDebug() << "[NodeManager] Converting hwModel ID:" << model;
     // Common hardware models from Meshtastic
     switch (model)
     {

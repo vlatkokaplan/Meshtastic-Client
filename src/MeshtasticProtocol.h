@@ -6,6 +6,8 @@
 #include <QVariantMap>
 #include <memory>
 
+class DeviceConfig;
+
 // Forward declarations for protobuf types
 namespace meshtastic
 {
@@ -84,6 +86,7 @@ public:
         uint32_t from;
         uint32_t to;
         PortNum portNum;
+        int channelIndex = 0;
         QString typeName;
         QVariantMap fields;
         QByteArray rawData;
@@ -105,6 +108,15 @@ public:
 
     // Create admin packets for config requests
     QByteArray createGetConfigRequestPacket(uint32_t destNode, uint32_t myNode, int configType);
+    QByteArray createSessionKeyRequestPacket();  // Request session key for admin ops
+
+    // Session key management
+    void setSessionKey(const QByteArray &key) { m_sessionKey = key; }
+    QByteArray sessionKey() const { return m_sessionKey; }
+    bool hasSessionKey() const { return !m_sessionKey.isEmpty(); }
+
+    // Device config for packet decryption
+    void setDeviceConfig(DeviceConfig *config) { m_deviceConfig = config; }
 
     // Create admin packets for config updates
     QByteArray createLoRaConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config);
@@ -156,6 +168,20 @@ private:
     QVariantMap decodeUser(const QByteArray &data);
     QVariantMap decodeTelemetry(const QByteArray &data);
     QVariantMap decodeTextMessage(const QByteArray &data);
+
+    // Session key for admin operations
+    QByteArray m_sessionKey;
+
+    // Device config for decryption keys
+    DeviceConfig *m_deviceConfig = nullptr;
+
+    // Decrypt encrypted packet payload
+    QByteArray decryptPayload(const QByteArray &encrypted, uint32_t packetId, uint32_t fromNode, int channel, int *foundKeyByte = nullptr);
+
+    // Helpers for decryption
+    QByteArray tryDecryptWithKey(const QByteArray &encrypted, uint32_t packetId, uint32_t fromNode, const QByteArray &key);
+    static QByteArray expandSimpleKey(uint8_t keyByte);
+    bool isValidDecryptedData(const QByteArray &decrypted);
 };
 
 #endif // MESHTASTICPROTOCOL_H

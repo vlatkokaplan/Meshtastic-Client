@@ -10,6 +10,11 @@ import "meshtastic/module_config.proto";
 import "meshtastic/channel.proto";
 
 message AdminMessage {
+    // Session passkey for admin operations - required for state-changing commands
+    // The node generates this key and sends it with any get_x_response packets.
+    // The client MUST include the same key with any set_x commands.
+    bytes session_passkey = 101;
+
     oneof payload_variant {
         // Get commands
         uint32 get_channel_request = 1;

@@ -6,6 +6,7 @@
 #include <QHBoxLayout>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QMessageBox>
 
 DeviceConfigTab::DeviceConfigTab(DeviceConfig *config, QWidget *parent)
     : QWidget(parent)
@@ -102,6 +103,24 @@ void DeviceConfigTab::setupUI()
 
     mainLayout->addWidget(tzGroup);
 
+    // Device Actions group
+    QGroupBox *actionsGroup = new QGroupBox("Device Actions");
+    QHBoxLayout *actionsLayout = new QHBoxLayout(actionsGroup);
+
+    m_rebootButton = new QPushButton("Reboot Device");
+    m_rebootButton->setToolTip("Reboot the device (5 second delay)");
+    connect(m_rebootButton, &QPushButton::clicked, this, &DeviceConfigTab::onRebootClicked);
+    actionsLayout->addWidget(m_rebootButton);
+
+    m_factoryResetButton = new QPushButton("Factory Reset");
+    m_factoryResetButton->setToolTip("Reset device to factory defaults (WARNING: erases all settings!)");
+    m_factoryResetButton->setStyleSheet("background-color: #ffcccc;");
+    connect(m_factoryResetButton, &QPushButton::clicked, this, &DeviceConfigTab::onFactoryResetClicked);
+    actionsLayout->addWidget(m_factoryResetButton);
+
+    actionsLayout->addStretch();
+    mainLayout->addWidget(actionsGroup);
+
     // Status and Save
     QHBoxLayout *bottomLayout = new QHBoxLayout;
 
@@ -160,4 +179,37 @@ void DeviceConfigTab::onSaveClicked()
     m_statusLabel->setStyleSheet("color: orange;");
 
     emit saveRequested();
+}
+
+void DeviceConfigTab::onRebootClicked()
+{
+    QMessageBox::StandardButton reply = QMessageBox::question(
+        this, "Reboot Device",
+        "Are you sure you want to reboot the device?\n\n"
+        "The device will restart in 5 seconds.",
+        QMessageBox::Yes | QMessageBox::No);
+
+    if (reply == QMessageBox::Yes) {
+        m_statusLabel->setText("Rebooting device...");
+        m_statusLabel->setStyleSheet("color: orange;");
+        emit rebootRequested();
+    }
+}
+
+void DeviceConfigTab::onFactoryResetClicked()
+{
+    QMessageBox::StandardButton reply = QMessageBox::warning(
+        this, "Factory Reset",
+        "WARNING: This will erase ALL settings!\n\n"
+        "The device will be reset to factory defaults.\n"
+        "This action cannot be undone.\n\n"
+        "Are you sure you want to continue?",
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+
+    if (reply == QMessageBox::Yes) {
+        m_statusLabel->setText("Factory reset in progress...");
+        m_statusLabel->setStyleSheet("color: red;");
+        emit factoryResetRequested();
+    }
 }

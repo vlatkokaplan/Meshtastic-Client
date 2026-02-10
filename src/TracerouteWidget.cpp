@@ -5,9 +5,13 @@
 #include <QVBoxLayout>
 #include <QHeaderView>
 #include <QDateTime>
+#include <cmath>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
-TracerouteTableModel::TracerouteTableModel(NodeManager *nodeManager, QObject *parent)
-    : QAbstractTableModel(parent), m_nodeManager(nodeManager)
+TracerouteTableModel::TracerouteTableModel(NodeManager *nodeManager, Database *database, QObject *parent)
+    : QAbstractTableModel(parent), m_nodeManager(nodeManager), m_database(database)
 {
 }
 
@@ -44,29 +48,48 @@ QVariant TracerouteTableModel::data(const QModelIndex &index, int role) const
             return formatNodeName(tr.to);
         case ColRouteTo:
         {
-            // Build complete path: From → [hops] → To
+            // Build complete path: From → [hop (dist)] → To
             QStringList fullPath;
             fullPath.append(formatNodeName(tr.from));
-            for (const QString &hop : tr.routeTo)
+            for (int i = 0; i < tr.routeTo.size(); ++i)
             {
-                // Convert node ID string to name if possible
-                uint32_t nodeNum = MeshtasticProtocol::nodeIdFromString(hop);
-                fullPath.append(formatNodeName(nodeNum));
+                QString hopName = formatNodeName(MeshtasticProtocol::nodeIdFromString(tr.routeTo[i]));
+                if (i < tr.distancesTo.size() && tr.distancesTo[i] > 0)
+                    fullPath.append(QString("%1 (%2km)").arg(hopName).arg(tr.distancesTo[i], 0, 'f', 1));
+                else
+                    fullPath.append(hopName);
             }
-            fullPath.append(formatNodeName(tr.to));
+            // Last hop to destination
+            int lastIdx = tr.distancesTo.size() - 1;
+            QString toName = formatNodeName(tr.to);
+            if (lastIdx >= 0 && tr.distancesTo[lastIdx] > 0)
+                fullPath.append(QString("%1 (%2km)").arg(toName).arg(tr.distancesTo[lastIdx], 0, 'f', 1));
+            else
+                fullPath.append(toName);
+
             return fullPath.join(" → ");
         }
         case ColRouteBack:
         {
-            // Build complete return path: To → [hops] → From
+            // Build complete return path: To → [hop (dist)] → From
             QStringList fullPath;
             fullPath.append(formatNodeName(tr.to));
-            for (const QString &hop : tr.routeBack)
+            for (int i = 0; i < tr.routeBack.size(); ++i)
             {
-                uint32_t nodeNum = MeshtasticProtocol::nodeIdFromString(hop);
-                fullPath.append(formatNodeName(nodeNum));
+                QString hopName = formatNodeName(MeshtasticProtocol::nodeIdFromString(tr.routeBack[i]));
+                if (i < tr.distancesBack.size() && tr.distancesBack[i] > 0)
+                    fullPath.append(QString("%1 (%2km)").arg(hopName).arg(tr.distancesBack[i], 0, 'f', 1));
+                else
+                    fullPath.append(hopName);
             }
-            fullPath.append(formatNodeName(tr.from));
+            // Last hop back to source
+            int lastIdx = tr.distancesBack.size() - 1;
+            QString fromName = formatNodeName(tr.from);
+            if (lastIdx >= 0 && tr.distancesBack[lastIdx] > 0)
+                fullPath.append(QString("%1 (%2km)").arg(fromName).arg(tr.distancesBack[lastIdx], 0, 'f', 1));
+            else
+                fullPath.append(fromName);
+
             return fullPath.join(" → ");
         }
         case ColSnrTo:
@@ -110,49 +133,71 @@ void TracerouteTableModel::addTraceroute(const MeshtasticProtocol::DecodedPacket
 {
     Traceroute tr;
     tr.timestamp = packet.timestamp;
-    // Note: packet.from is actually the destination node, packet.to is the requesting node
-    // So we swap them for display purposes
+    // By default, packet.from is the destination node, packet.to is the requesting node
     tr.from = packet.to;
     tr.to = packet.from;
 
-    // Extract route and SNR data from packet fields
-    // The "route" field is actually the path from destination back to source
-    // The "routeBack" field is the path from source to destination
-    // We need to swap them for correct display
+    // Extract basic route and SNR data
     if (packet.fields.contains("routeBack"))
     {
         QVariantList routeList = packet.fields["routeBack"].toList();
         for (const auto &node : routeList)
-        {
             tr.routeTo.append(node.toString());
-        }
     }
 
     if (packet.fields.contains("route"))
     {
         QVariantList routeBackList = packet.fields["route"].toList();
         for (const auto &node : routeBackList)
-        {
             tr.routeBack.append(node.toString());
-        }
     }
 
     if (packet.fields.contains("snrBack"))
     {
         QVariantList snrList = packet.fields["snrBack"].toList();
         for (const auto &snr : snrList)
-        {
             tr.snrTo.append(QString::number(snr.toFloat(), 'f', 1));
-        }
     }
 
     if (packet.fields.contains("snrTowards"))
     {
         QVariantList snrBackList = packet.fields["snrTowards"].toList();
         for (const auto &snr : snrBackList)
-        {
             tr.snrBack.append(QString::number(snr.toFloat(), 'f', 1));
+    }
+
+    // Calculate distances for each hop (Inspiration from Malla: use historical locations)
+    if (m_database) {
+        auto getPos = [&](uint32_t nodeNum) {
+            return m_database->loadPositionAt(nodeNum, tr.timestamp / 1000); // loadPositionAt uses seconds
+        };
+
+        // Forward path distance calculation
+        Database::PositionRecord prevPos = getPos(tr.from);
+        for (const QString &nodeId : tr.routeTo) {
+            uint32_t hopNode = MeshtasticProtocol::nodeIdFromString(nodeId);
+            Database::PositionRecord hopPos = getPos(hopNode);
+            float dist = calculateDistance(prevPos.latitude, prevPos.longitude, hopPos.latitude, hopPos.longitude);
+            tr.distancesTo.append(dist);
+            tr.totalDistance += dist;
+            prevPos = hopPos;
         }
+        Database::PositionRecord destPos = getPos(tr.to);
+        float lastDist = calculateDistance(prevPos.latitude, prevPos.longitude, destPos.latitude, destPos.longitude);
+        tr.distancesTo.append(lastDist);
+        tr.totalDistance += lastDist;
+
+        // Return path distance calculation
+        prevPos = destPos;
+        for (const QString &nodeId : tr.routeBack) {
+            uint32_t hopNode = MeshtasticProtocol::nodeIdFromString(nodeId);
+            Database::PositionRecord hopPos = getPos(hopNode);
+            float dist = calculateDistance(prevPos.latitude, prevPos.longitude, hopPos.latitude, hopPos.longitude);
+            tr.distancesBack.append(dist);
+            prevPos = hopPos;
+        }
+        Database::PositionRecord finalPos = getPos(tr.from);
+        tr.distancesBack.append(calculateDistance(prevPos.latitude, prevPos.longitude, finalPos.latitude, finalPos.longitude));
     }
 
     beginInsertRows(QModelIndex(), 0, 0);
@@ -164,9 +209,7 @@ void TracerouteTableModel::addTraceroute(const MeshtasticProtocol::DecodedPacket
     {
         beginRemoveRows(QModelIndex(), MAX_TRACEROUTES, m_traceroutes.size() - 1);
         while (m_traceroutes.size() > MAX_TRACEROUTES)
-        {
             m_traceroutes.removeLast();
-        }
         endRemoveRows();
     }
 }
@@ -184,6 +227,38 @@ void TracerouteTableModel::addTracerouteFromDb(uint32_t from, uint32_t to, quint
     tr.snrTo = snrTo;
     tr.snrBack = snrBack;
 
+    // Recalculate distances from database positions
+    if (m_database) {
+        auto getPos = [&](uint32_t nodeNum) {
+            return m_database->loadPositionAt(nodeNum, tr.timestamp / 1000);
+        };
+
+        Database::PositionRecord prevPos = getPos(tr.from);
+        for (const QString &nodeId : tr.routeTo) {
+            uint32_t hopNode = MeshtasticProtocol::nodeIdFromString(nodeId);
+            Database::PositionRecord hopPos = getPos(hopNode);
+            float dist = calculateDistance(prevPos.latitude, prevPos.longitude, hopPos.latitude, hopPos.longitude);
+            tr.distancesTo.append(dist);
+            tr.totalDistance += dist;
+            prevPos = hopPos;
+        }
+        Database::PositionRecord destPos = getPos(tr.to);
+        float lastDist = calculateDistance(prevPos.latitude, prevPos.longitude, destPos.latitude, destPos.longitude);
+        tr.distancesTo.append(lastDist);
+        tr.totalDistance += lastDist;
+
+        prevPos = destPos;
+        for (const QString &nodeId : tr.routeBack) {
+            uint32_t hopNode = MeshtasticProtocol::nodeIdFromString(nodeId);
+            Database::PositionRecord hopPos = getPos(hopNode);
+            float dist = calculateDistance(prevPos.latitude, prevPos.longitude, hopPos.latitude, hopPos.longitude);
+            tr.distancesBack.append(dist);
+            prevPos = hopPos;
+        }
+        Database::PositionRecord finalPos = getPos(tr.from);
+        tr.distancesBack.append(calculateDistance(prevPos.latitude, prevPos.longitude, finalPos.latitude, finalPos.longitude));
+    }
+
     beginInsertRows(QModelIndex(), m_traceroutes.size(), m_traceroutes.size());
     m_traceroutes.append(tr);
     endInsertRows();
@@ -194,6 +269,11 @@ void TracerouteTableModel::clear()
     beginResetModel();
     m_traceroutes.clear();
     endResetModel();
+}
+
+void TracerouteTableModel::setDatabase(Database *database)
+{
+    m_database = database;
 }
 
 QString TracerouteTableModel::formatNodeName(uint32_t nodeNum) const
@@ -213,18 +293,38 @@ QString TracerouteTableModel::formatNodeName(uint32_t nodeNum) const
     return MeshtasticProtocol::nodeIdToString(nodeNum);
 }
 
+float TracerouteTableModel::calculateDistance(double lat1, double lon1, double lat2, double lon2) const
+{
+    if (lat1 == 0.0 || lon1 == 0.0 || lat2 == 0.0 || lon2 == 0.0)
+        return 0.0f;
+
+    double dLat = (lat2 - lat1) * M_PI / 180.0;
+    double dLon = (lon2 - lon1) * M_PI / 180.0;
+    double rLat1 = lat1 * M_PI / 180.0;
+    double rLat2 = lat2 * M_PI / 180.0;
+
+    double a = sin(dLat / 2) * sin(dLat / 2) +
+               sin(dLon / 2) * sin(dLon / 2) * cos(rLat1) * cos(rLat2);
+    double c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    return 6371.0f * c; // Earth radius in km
+}
+
 TracerouteTableModel::TracerouteData TracerouteTableModel::getTraceroute(int row) const
 {
     TracerouteData data;
     if (row >= 0 && row < m_traceroutes.size())
     {
         const auto &tr = m_traceroutes[row];
+        data.timestamp = tr.timestamp;
         data.from = tr.from;
         data.to = tr.to;
         data.routeTo = tr.routeTo;
         data.routeBack = tr.routeBack;
         data.snrTo = tr.snrTo;
         data.snrBack = tr.snrBack;
+        data.distancesTo = tr.distancesTo;
+        data.distancesBack = tr.distancesBack;
+        data.totalDistance = tr.totalDistance;
     }
     return data;
 }
@@ -245,7 +345,7 @@ void TracerouteWidget::setupUI()
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
 
-    m_model = new TracerouteTableModel(m_nodeManager, this);
+    m_model = new TracerouteTableModel(m_nodeManager, m_database, this);
 
     m_tableView = new QTableView;
     m_tableView->setModel(m_model);
@@ -328,8 +428,8 @@ void TracerouteWidget::loadFromDatabase()
 
     QList<Database::Traceroute> traceroutes = m_database->loadTraceroutes(100, 0);
 
-    // Load in reverse order so newest ends up at top
-    for (int i = traceroutes.size() - 1; i >= 0; i--)
+    // DB returns newest first (ORDER BY timestamp DESC), so iterate forward
+    for (int i = 0; i < traceroutes.size(); i++)
     {
         const auto &tr = traceroutes[i];
         m_model->addTracerouteFromDb(
@@ -344,6 +444,14 @@ void TracerouteWidget::loadFromDatabase()
 void TracerouteWidget::clear()
 {
     m_model->clear();
+}
+
+void TracerouteWidget::setDatabase(Database *database)
+{
+    m_database = database;
+    m_model->setDatabase(database);
+    if (database)
+        loadFromDatabase();
 }
 
 void TracerouteWidget::onSelectionChanged()
@@ -369,6 +477,22 @@ QList<TracerouteWidget::RouteNode> TracerouteWidget::getSelectedRoute() const
     int row = selected.first().row();
     auto data = m_model->getTraceroute(row);
 
+    // Helper for historical position lookup
+    auto getHistoricalPos = [&](uint32_t nodeNum) {
+        if (m_database) {
+            Database::PositionRecord rec = m_database->loadPositionAt(nodeNum, data.timestamp / 1000);
+            if (rec.latitude != 0.0 || rec.longitude != 0.0) {
+                return QPair<double, double>(rec.latitude, rec.longitude);
+            }
+        }
+        // Fallback to current position if no historical data
+        if (m_nodeManager && m_nodeManager->hasNode(nodeNum)) {
+            NodeInfo info = m_nodeManager->getNode(nodeNum);
+            return QPair<double, double>(info.latitude, info.longitude);
+        }
+        return QPair<double, double>(0.0, 0.0);
+    };
+
     // Build route: From -> [hops] -> To
     // Add starting node
     RouteNode startNode;
@@ -378,6 +502,9 @@ QList<TracerouteWidget::RouteNode> TracerouteWidget::getSelectedRoute() const
          m_nodeManager->getNode(data.from).longName :
          m_nodeManager->getNode(data.from).shortName) :
         MeshtasticProtocol::nodeIdToString(data.from);
+    auto startPos = getHistoricalPos(data.from);
+    startNode.latitude = startPos.first;
+    startNode.longitude = startPos.second;
     startNode.snr = 0;
     route.append(startNode);
 
@@ -391,6 +518,11 @@ QList<TracerouteWidget::RouteNode> TracerouteWidget::getSelectedRoute() const
              m_nodeManager->getNode(hopNode.nodeNum).longName :
              m_nodeManager->getNode(hopNode.nodeNum).shortName) :
             data.routeTo[i];
+        
+        auto hopPos = getHistoricalPos(hopNode.nodeNum);
+        hopNode.latitude = hopPos.first;
+        hopNode.longitude = hopPos.second;
+        
         hopNode.snr = (i < data.snrTo.size()) ? data.snrTo[i].toFloat() : 0;
         route.append(hopNode);
     }
@@ -403,6 +535,11 @@ QList<TracerouteWidget::RouteNode> TracerouteWidget::getSelectedRoute() const
          m_nodeManager->getNode(data.to).longName :
          m_nodeManager->getNode(data.to).shortName) :
         MeshtasticProtocol::nodeIdToString(data.to);
+    
+    auto endPos = getHistoricalPos(data.to);
+    endNode.latitude = endPos.first;
+    endNode.longitude = endPos.second;
+    
     endNode.snr = 0;
     route.append(endNode);
 

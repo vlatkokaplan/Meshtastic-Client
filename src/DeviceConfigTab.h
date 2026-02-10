@@ -21,10 +21,14 @@ public:
 signals:
     void configChanged();
     void saveRequested();
+    void rebootRequested();
+    void factoryResetRequested();
 
 private slots:
     void onConfigReceived();
     void onSaveClicked();
+    void onRebootClicked();
+    void onFactoryResetClicked();
 
 private:
     DeviceConfig *m_config;
@@ -39,6 +43,8 @@ private:
     QCheckBox *m_disableTripleClickCheck;
     QLineEdit *m_timezoneEdit;
     QPushButton *m_saveButton;
+    QPushButton *m_rebootButton;
+    QPushButton *m_factoryResetButton;
     QLabel *m_statusLabel;
 
     void setupUI();

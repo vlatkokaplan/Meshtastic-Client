@@ -27,7 +27,7 @@ public:
         ColCount
     };
 
-    explicit TracerouteTableModel(NodeManager *nodeManager, QObject *parent = nullptr);
+    explicit TracerouteTableModel(NodeManager *nodeManager, Database *database, QObject *parent = nullptr);
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override;
     int columnCount(const QModelIndex &parent = QModelIndex()) const override;
@@ -39,15 +39,20 @@ public:
                              const QStringList &routeTo, const QStringList &routeBack,
                              const QStringList &snrTo, const QStringList &snrBack);
     void clear();
+    void setDatabase(Database *database);
 
     // Access to stored traceroute data
     struct TracerouteData {
+        quint64 timestamp;
         uint32_t from;
         uint32_t to;
         QStringList routeTo;
         QStringList routeBack;
         QStringList snrTo;
         QStringList snrBack;
+        QList<float> distancesTo;
+        QList<float> distancesBack;
+        float totalDistance = 0.0f;
     };
     TracerouteData getTraceroute(int row) const;
     int tracerouteCount() const { return m_traceroutes.size(); }
@@ -62,13 +67,18 @@ private:
         QStringList routeBack;
         QStringList snrTo;
         QStringList snrBack;
+        QList<float> distancesTo;
+        QList<float> distancesBack;
+        float totalDistance = 0.0f;
     };
 
     QList<Traceroute> m_traceroutes;
     NodeManager *m_nodeManager;
+    Database *m_database;
     static const int MAX_TRACEROUTES = 1000;
 
     QString formatNodeName(uint32_t nodeNum) const;
+    float calculateDistance(double lat1, double lon1, double lat2, double lon2) const;
 };
 
 class TracerouteWidget : public QWidget
@@ -81,12 +91,15 @@ public:
     void addTraceroute(const MeshtasticProtocol::DecodedPacket &packet);
     void loadFromDatabase();
     void clear();
+    void setDatabase(Database *database);
 
     // Get route data for selected traceroute (for map visualization)
     struct RouteNode {
         uint32_t nodeNum;
         QString name;
         float snr;
+        double latitude;
+        double longitude;
     };
     QList<RouteNode> getSelectedRoute() const;
 

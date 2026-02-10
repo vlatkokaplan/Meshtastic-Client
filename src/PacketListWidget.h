@@ -24,7 +24,9 @@ public:
         ColFromAddr,
         ColTo,
         ColToAddr,
+        ColChannel,
         ColPortNum,
+        ColKey,
         ColContent,
         ColCount
     };

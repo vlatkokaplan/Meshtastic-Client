@@ -1,6 +1,8 @@
 #include "MeshtasticProtocol.h"
+#include "DeviceConfig.h"
 #include <QDateTime>
 #include <QDebug>
+#include <openssl/evp.h>
 
 // Include generated protobuf headers
 #include "meshtastic/mesh.pb.h"
@@ -190,6 +192,7 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
         const auto &packet = fromRadio.packet();
         result.from = packet.from();
         result.to = packet.to();
+        result.channelIndex = packet.channel();
         result.fields = decodeMeshPacket(packet, result.portNum);
         result.fields["hopLimit"] = packet.hop_limit();
         result.fields["hopStart"] = packet.hop_start();
@@ -360,6 +363,7 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
         const auto &meta = fromRadio.metadata();
         result.fields["firmwareVersion"] = QString::fromStdString(meta.firmware_version());
         result.fields["deviceStateVersion"] = meta.device_state_version();
+        result.fields["hwModel"] = static_cast<int>(meta.hw_model());
         break;
     }
 
@@ -513,7 +517,26 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
                 break;
             }
 
+            qDebug() << "[Protocol] Admin message received, payload_variant_case:"
+                     << admin.payload_variant_case();
+
             fields["adminType"] = "response";
+
+            // Check for session passkey in the response
+            if (admin.session_passkey().size() > 0) {
+                QByteArray sessionKey(admin.session_passkey().data(), admin.session_passkey().size());
+                fields["sessionPasskey"] = sessionKey;
+                qDebug() << "[Protocol] Received session passkey, size:" << sessionKey.size();
+            }
+
+            // Handle get_channel_response
+            if (admin.has_get_channel_response())
+            {
+                const auto &channel = admin.get_channel_response();
+                qDebug() << "[Protocol] Got channel response - index:" << channel.index()
+                         << "role:" << channel.role()
+                         << "name:" << QString::fromStdString(channel.settings().name());
+            }
 
             // Handle get_config_response
             if (admin.has_get_config_response())
@@ -550,9 +573,65 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
     }
     else if (packet.has_encrypted())
     {
-        portNum = PortNum::Unknown;
-        fields["encrypted"] = true;
-        fields["encryptedData"] = QByteArray(packet.encrypted().data(), packet.encrypted().size()).toHex();
+        QByteArray encryptedData(packet.encrypted().data(), packet.encrypted().size());
+
+        // Try to decrypt (will brute force simple keys if needed)
+        int foundKeyByte = -1;
+        QByteArray decrypted = decryptPayload(encryptedData, packet.id(), packet.from(), packet.channel(), &foundKeyByte);
+
+        if (!decrypted.isEmpty()) {
+            // Try to parse as Data message
+            meshtastic::Data data;
+            if (data.ParseFromArray(decrypted.constData(), decrypted.size())) {
+                portNum = static_cast<PortNum>(data.portnum());
+                fields["portnum"] = portNumToString(portNum);
+                fields["decrypted"] = true;
+
+                // Report the key if found via brute force
+                if (foundKeyByte >= 0) {
+                    fields["foundKey"] = QByteArray(1, static_cast<char>(foundKeyByte)).toBase64();
+                    fields["foundKeyByte"] = foundKeyByte;
+                }
+
+                const std::string &payload = data.payload();
+                QByteArray payloadData(payload.data(), payload.size());
+
+                // Decode based on port type (same as decoded packets)
+                switch (portNum)
+                {
+                case PortNum::TextMessage:
+                    fields["text"] = QString::fromUtf8(payloadData);
+                    break;
+                case PortNum::Position:
+                    fields.insert(decodePosition(payloadData));
+                    break;
+                case PortNum::NodeInfo:
+                    fields.insert(decodeUser(payloadData));
+                    break;
+                case PortNum::Telemetry:
+                    fields.insert(decodeTelemetry(payloadData));
+                    break;
+                default:
+                    fields["payloadHex"] = payloadData.toHex();
+                    break;
+                }
+
+                if (data.request_id() != 0) {
+                    fields["requestId"] = data.request_id();
+                }
+            } else {
+                // Decryption succeeded but parse failed - wrong key?
+                portNum = PortNum::Unknown;
+                fields["encrypted"] = true;
+                fields["decryptFailed"] = true;
+                fields["encryptedData"] = encryptedData.toHex();
+            }
+        } else {
+            // No key available or decryption failed
+            portNum = PortNum::Unknown;
+            fields["encrypted"] = true;
+            fields["encryptedData"] = encryptedData.toHex();
+        }
     }
 
     return fields;
@@ -961,33 +1040,63 @@ QByteArray MeshtasticProtocol::createTextMessagePacket(const QString &text, uint
     return wrapInFrame(serialized);
 }
 
-// Helper to create admin message frame
-static QByteArray createAdminFrame(uint32_t destNode, uint32_t myNode, const std::string &adminPayload)
+// Helper to create admin message frame for LOCAL device (connected via serial)
+static QByteArray createAdminFrame(uint32_t destNode, uint32_t myNode, const std::string &adminPayload, const QByteArray &sessionKey = QByteArray())
 {
     meshtastic::ToRadio toRadio;
     auto *packet = toRadio.mutable_packet();
 
-    packet->set_to(destNode);
-    packet->set_from(myNode);
-    packet->set_want_ack(true);
+    // For LOCAL admin: don't set 'to' or 'from' (both default to 0)
+    // This tells the device this is a local admin command, not to be routed
     packet->set_id(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF);
 
     auto *decoded = packet->mutable_decoded();
     decoded->set_portnum(meshtastic::PortNum::ADMIN_APP);
-    decoded->set_payload(adminPayload);
+
+    // If we have a session key, we need to include it in the AdminMessage
+    if (!sessionKey.isEmpty()) {
+        // Parse the admin payload, add session key, and re-serialize
+        meshtastic::AdminMessage admin;
+        if (admin.ParseFromArray(adminPayload.data(), adminPayload.size())) {
+            admin.set_session_passkey(sessionKey.constData(), sessionKey.size());
+            std::string newPayload = admin.SerializeAsString();
+            decoded->set_payload(newPayload);
+            qDebug() << "createAdminFrame (local) - payload size:" << newPayload.size() << "with session key";
+        } else {
+            decoded->set_payload(adminPayload);
+            qDebug() << "createAdminFrame (local) - payload size:" << adminPayload.size() << "(failed to add session key)";
+        }
+    } else {
+        decoded->set_payload(adminPayload);
+        qDebug() << "createAdminFrame (local) - payload size:" << adminPayload.size() << "(no session key)";
+    }
 
     std::string serialized;
     toRadio.SerializeToString(&serialized);
+
+    qDebug() << "Full ToRadio packet hex:" << QByteArray(serialized.data(), serialized.size()).toHex();
+
     return wrapInFrame(serialized);
 }
 
 QByteArray MeshtasticProtocol::createGetConfigRequestPacket(uint32_t destNode, uint32_t myNode, int configType)
 {
     meshtastic::AdminMessage admin;
-    // configType: 1=Device, 2=Position, 3=Power, 4=Network, 5=Display, 6=LoRa, 7=Bluetooth
+    // configType: 1=Device, 2=Position, 3=Power, 4=Network, 5=Display, 6=LoRa, 7=Bluetooth, 8=SessionKey
     admin.set_get_config_request(configType);
 
     return createAdminFrame(destNode, myNode, admin.SerializeAsString());
+}
+
+QByteArray MeshtasticProtocol::createSessionKeyRequestPacket()
+{
+    // Request session key (config type 8 = SESSIONKEY_CONFIG)
+    meshtastic::AdminMessage admin;
+    admin.set_get_config_request(8);  // SESSIONKEY_CONFIG
+
+    qDebug() << "Requesting session key from device";
+
+    return createAdminFrame(0, 0, admin.SerializeAsString());
 }
 
 QByteArray MeshtasticProtocol::createLoRaConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config)
@@ -1056,7 +1165,9 @@ QByteArray MeshtasticProtocol::createChannelConfigPacket(uint32_t destNode, uint
     meshtastic::AdminMessage admin;
     auto *setChannel = admin.mutable_set_channel();
 
+    // IMPORTANT: For channel index 0, protobuf3 won't serialize it (default value).
     setChannel->set_index(channelIndex);
+
     int role = config.value("role", 0).toInt();
     setChannel->set_role(static_cast<::meshtastic::Channel_Role>(role));
 
@@ -1069,10 +1180,26 @@ QByteArray MeshtasticProtocol::createChannelConfigPacket(uint32_t destNode, uint
         settings->set_psk(psk.constData(), psk.size());
     }
 
+    // Generate channel ID from PSK (as per Meshtastic spec: xor all PSK bytes + 0x41, mod 26)
+    // But actually, id is a fixed32 random number, not the letter suffix
+    // Generate a random ID for this channel
+    uint32_t channelId = static_cast<uint32_t>(QDateTime::currentMSecsSinceEpoch()) ^ (channelIndex * 0x12345678);
+    settings->set_id(channelId);
+
     settings->set_uplink_enabled(config.value("uplinkEnabled", false).toBool());
     settings->set_downlink_enabled(config.value("downlinkEnabled", false).toBool());
 
-    return createAdminFrame(destNode, myNode, admin.SerializeAsString());
+    std::string adminSerialized = admin.SerializeAsString();
+
+    qDebug() << "createChannelConfigPacket - index:" << channelIndex
+             << "role:" << role
+             << "name:" << config.value("name").toString()
+             << "psk size:" << psk.size()
+             << "channelId:" << channelId
+             << "hasSessionKey:" << hasSessionKey()
+             << "admin payload hex:" << QByteArray(adminSerialized.data(), adminSerialized.size()).toHex();
+
+    return createAdminFrame(destNode, myNode, adminSerialized, m_sessionKey);
 }
 
 QByteArray MeshtasticProtocol::createRebootPacket(uint32_t destNode, uint32_t myNode, int delaySeconds)
@@ -1091,4 +1218,144 @@ QByteArray MeshtasticProtocol::createHeartbeatPacket()
     std::string serialized;
     toRadio.SerializeToString(&serialized);
     return wrapInFrame(serialized);
+}
+
+// Expand a single-byte simple key to full AES-128 key
+// Matches firmware Channels.cpp: copy defaultpsk, then add (pskIndex - 1) to last byte
+QByteArray MeshtasticProtocol::expandSimpleKey(uint8_t keyByte)
+{
+    // keyByte 0 means no encryption
+    if (keyByte == 0)
+        return QByteArray();
+
+    static const unsigned char defaultpsk[16] = {
+        0xd4, 0xf1, 0xbb, 0x3a, 0x20, 0x29, 0x07, 0x59,
+        0xf0, 0xbc, 0xff, 0xab, 0xcf, 0x4e, 0x69, 0x01
+    };
+
+    QByteArray key(reinterpret_cast<const char*>(defaultpsk), 16);
+    // Bump the last byte by (keyByte - 1); index 1 means no change from defaultpsk
+    key[15] = static_cast<char>(static_cast<uint8_t>(key[15]) + keyByte - 1);
+    return key;
+}
+
+// Check if decrypted data looks like a valid Data protobuf
+bool MeshtasticProtocol::isValidDecryptedData(const QByteArray &decrypted)
+{
+    if (decrypted.isEmpty())
+        return false;
+
+    meshtastic::Data data;
+    if (!data.ParseFromArray(decrypted.constData(), decrypted.size()))
+        return false;
+
+    // Check for reasonable port number (1-511 for known ports)
+    int port = static_cast<int>(data.portnum());
+    if (port < 1 || port > 511)
+        return false;
+
+    return true;
+}
+
+// Try to decrypt with a specific key
+QByteArray MeshtasticProtocol::tryDecryptWithKey(const QByteArray &encrypted, uint32_t packetId, uint32_t fromNode, const QByteArray &key)
+{
+    if (key.size() != 16 && key.size() != 32)
+        return QByteArray();
+
+    // Build nonce: packetId (8 bytes LE as uint64) + fromNode (4 bytes LE) + 4 zero bytes
+    // Matches firmware CryptoEngine::initNonce: memcpy(nonce, &packetId_u64, 8) + memcpy(nonce+8, &fromNode, 4)
+    unsigned char nonce[16] = {0};
+    nonce[0] = packetId & 0xFF;
+    nonce[1] = (packetId >> 8) & 0xFF;
+    nonce[2] = (packetId >> 16) & 0xFF;
+    nonce[3] = (packetId >> 24) & 0xFF;
+    // nonce[4..7] = 0 (upper 32 bits of uint64 packetId)
+    nonce[8] = fromNode & 0xFF;
+    nonce[9] = (fromNode >> 8) & 0xFF;
+    nonce[10] = (fromNode >> 16) & 0xFF;
+    nonce[11] = (fromNode >> 24) & 0xFF;
+
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    if (!ctx)
+        return QByteArray();
+
+    const EVP_CIPHER *cipher = (key.size() == 32) ? EVP_aes_256_ctr() : EVP_aes_128_ctr();
+
+    QByteArray decrypted(encrypted.size(), 0);
+    int outLen = 0;
+    int totalLen = 0;
+
+    if (EVP_DecryptInit_ex(ctx, cipher, nullptr,
+                           reinterpret_cast<const unsigned char*>(key.constData()),
+                           nonce) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        return QByteArray();
+    }
+
+    if (EVP_DecryptUpdate(ctx, reinterpret_cast<unsigned char*>(decrypted.data()), &outLen,
+                          reinterpret_cast<const unsigned char*>(encrypted.constData()),
+                          encrypted.size()) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        return QByteArray();
+    }
+    totalLen = outLen;
+
+    if (EVP_DecryptFinal_ex(ctx, reinterpret_cast<unsigned char*>(decrypted.data()) + outLen, &outLen) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        return QByteArray();
+    }
+    totalLen += outLen;
+
+    EVP_CIPHER_CTX_free(ctx);
+    decrypted.resize(totalLen);
+
+    return decrypted;
+}
+
+QByteArray MeshtasticProtocol::decryptPayload(const QByteArray &encrypted, uint32_t packetId, uint32_t fromNode, int channel, int *foundKeyByte)
+{
+    if (foundKeyByte)
+        *foundKeyByte = -1;
+
+    // First, try with configured PSK if available
+    if (m_deviceConfig) {
+        DeviceConfig::ChannelConfig chConfig = m_deviceConfig->channel(channel);
+        QByteArray psk = chConfig.psk;
+
+        if (!psk.isEmpty()) {
+            QByteArray key;
+            if (psk.size() == 1) {
+                key = expandSimpleKey(static_cast<uint8_t>(psk[0]));
+            } else if (psk.size() == 16 || psk.size() == 32) {
+                key = psk;
+            }
+
+            if (!key.isEmpty()) {
+                QByteArray decrypted = tryDecryptWithKey(encrypted, packetId, fromNode, key);
+                if (isValidDecryptedData(decrypted)) {
+                    if (foundKeyByte && psk.size() == 1)
+                        *foundKeyByte = static_cast<uint8_t>(psk[0]);
+                    return decrypted;
+                }
+            }
+        }
+    }
+
+    // Brute force simple keys (0x00 - 0xFF)
+    // This is fast since there are only 256 possibilities
+    for (int keyByte = 0; keyByte <= 255; keyByte++) {
+        QByteArray key = expandSimpleKey(static_cast<uint8_t>(keyByte));
+        QByteArray decrypted = tryDecryptWithKey(encrypted, packetId, fromNode, key);
+
+        if (isValidDecryptedData(decrypted)) {
+            qDebug() << "[Protocol] Brute force found key byte:" << keyByte
+                     << "(" << QByteArray(1, static_cast<char>(keyByte)).toBase64() << ")";
+            if (foundKeyByte)
+                *foundKeyByte = keyByte;
+            return decrypted;
+        }
+    }
+
+    return QByteArray();
 }

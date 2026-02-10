@@ -66,6 +66,9 @@ public:
     bool showPacketFlowLines() const;
     void setShowPacketFlowLines(bool enabled);
 
+    bool savePacketsToDb() const;
+    void setSavePacketsToDb(bool enabled);
+
 signals:
     void settingChanged(const QString &key, const QVariant &value);
 

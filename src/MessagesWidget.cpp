@@ -396,6 +396,8 @@ void MessagesWidget::setChannel(int index, const QString &name, bool enabled)
     if (index < 0 || index > 7)
         return;
 
+    qDebug() << "MessagesWidget::setChannel" << index << name << enabled;
+
     ChannelInfo ch;
     ch.index = index;
     ch.name = name.isEmpty() ? QString("Channel %1").arg(index) : name;
@@ -412,8 +414,8 @@ void MessagesWidget::clearChannels()
     {
         ChannelInfo ch;
         ch.index = i;
-        ch.name = (i == 0) ? "Primary" : QString("Channel %1").arg(i);
-        ch.enabled = (i == 0);
+        ch.name = QString("Channel %1").arg(i);
+        ch.enabled = false;  // All disabled until device sends config
         m_channels[i] = ch;
     }
     updateConversationList();
@@ -677,8 +679,8 @@ void MessagesWidget::updateConversationList()
     for (auto it = m_channels.begin(); it != m_channels.end(); ++it)
     {
         const ChannelInfo &ch = it.value();
-        if (!ch.enabled && ch.index != 0)
-            continue; // Skip disabled channels except primary
+        if (!ch.enabled)
+            continue; // Skip disabled channels
 
         QTreeWidgetItem *item = new QTreeWidgetItem(channelsHeader);
 

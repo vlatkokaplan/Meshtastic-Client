@@ -85,6 +85,7 @@ private:
     // Config loading state
     uint32_t m_expectedConfigId = 0;
     QTimer *m_configHeartbeatTimer = nullptr;
+    QTimer *m_connectionHeartbeatTimer = nullptr;  // Persistent heartbeat for long sessions
 
     // Traceroute cooldown state
     QTimer *m_tracerouteCooldownTimer = nullptr;

@@ -275,3 +275,13 @@ void AppSettings::setShowPacketFlowLines(bool enabled)
 {
     setValue("map/show_packet_flow_lines", enabled);
 }
+
+bool AppSettings::savePacketsToDb() const
+{
+    return value("packets/save_to_db", false).toBool();
+}
+
+void AppSettings::setSavePacketsToDb(bool enabled)
+{
+    setValue("packets/save_to_db", enabled);
+}

@@ -68,6 +68,7 @@ public:
 public slots:
     void refreshNodeList();
     void onTelemetryReceived(uint32_t nodeNum);
+    void setDatabase(Database *database);
 
 private slots:
     void onNodeChanged(int index);

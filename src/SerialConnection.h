@@ -20,6 +20,7 @@ public:
     // Known Meshtastic device VID/PIDs
     static QList<QSerialPortInfo> detectMeshtasticDevices();
     static QList<QSerialPortInfo> availablePorts();
+    static QString deviceDescription(const QSerialPortInfo &info);
 
     bool connectToPort(const QString &portName);
     void disconnect();

@@ -42,6 +42,10 @@
 MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
     : QMainWindow(parent), m_experimentalMode(experimentalMode), m_testMode(testMode)
 {
+    // Explicitly set window flags to prevent them from being dropped
+    // (QWebEngineView GPU init can cause WM to re-evaluate decorations on Linux)
+    setWindowFlags(Qt::Window | Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint);
+
     // Initialize app settings
     AppSettings::instance()->open();
 
@@ -74,6 +78,17 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
             {
         if (m_serial->isConnected()) {
             qDebug() << "[MainWindow] Sending config heartbeat";
+            QByteArray heartbeat = m_protocol->createHeartbeatPacket();
+            m_serial->sendData(heartbeat);
+        } });
+
+    // Persistent connection heartbeat (keeps connection alive for long sessions)
+    m_connectionHeartbeatTimer = new QTimer(this);
+    m_connectionHeartbeatTimer->setInterval(60000); // 60 seconds - slower than config heartbeat
+    connect(m_connectionHeartbeatTimer, &QTimer::timeout, this, [this]()
+            {
+        if (m_serial->isConnected()) {
+            qDebug() << "[MainWindow] Sending connection keep-alive heartbeat";
             QByteArray heartbeat = m_protocol->createHeartbeatPacket();
             m_serial->sendData(heartbeat);
         } });
@@ -131,6 +146,15 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
 
     // Restore window state (geometry, splitter sizes)
     restoreWindowState();
+
+    // Workaround: QWebEngineView GPU init can strip window decoration flags on Linux.
+    // Re-assert flags after the event loop has processed the initial show.
+    QTimer::singleShot(0, this, [this]() {
+        if (!(windowFlags() & Qt::WindowMaximizeButtonHint)) {
+            setWindowFlags(windowFlags() | Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint);
+            show();
+        }
+    });
 }
 
 MainWindow::~MainWindow()
@@ -149,6 +173,9 @@ void MainWindow::setupUI()
 
     // Create ConfigWidget early so DeviceConfig is available for DashboardStatsWidget
     m_configWidget = new ConfigWidget;
+
+    // Give protocol access to device config for packet decryption
+    m_protocol->setDeviceConfig(m_configWidget->deviceConfig());
 
     setupMapTab();
     setupMessagesTab();
@@ -353,7 +380,7 @@ void MainWindow::refreshPorts()
     {
         QString label = QString("%1 - %2 [Meshtastic]")
                             .arg(info.portName())
-                            .arg(info.description());
+                            .arg(SerialConnection::deviceDescription(info));
         m_portCombo->addItem(label, info.portName());
     }
 
@@ -376,7 +403,7 @@ void MainWindow::refreshPorts()
 
         QString label = QString("%1 - %2")
                             .arg(info.portName())
-                            .arg(info.description());
+                            .arg(SerialConnection::deviceDescription(info));
         m_portCombo->addItem(label, info.portName());
     }
 
@@ -451,6 +478,17 @@ void MainWindow::onConnected()
     // Save last used port for auto-connect
     AppSettings::instance()->setLastPort(m_serial->connectedPortName());
 
+    // Start persistent heartbeat for long sessions
+    m_connectionHeartbeatTimer->start();
+
+    // Clean up old data on connect (runs in background)
+    QTimer::singleShot(5000, this, [this]() {
+        if (m_database) {
+            m_database->deleteOldPackets(7);  // Delete packets older than 7 days
+            m_database->deleteTelemetryHistory(7);  // Delete telemetry older than 7 days
+        }
+    });
+
     updateStatusLabel();
     statusBar()->showMessage("Connected", 3000);
 
@@ -465,6 +503,10 @@ void MainWindow::onDisconnected()
     m_rebootButton->setEnabled(false);
     m_portCombo->setEnabled(true);
     m_refreshButton->setEnabled(true);
+
+    // Stop heartbeat timers
+    m_connectionHeartbeatTimer->stop();
+    m_configHeartbeatTimer->stop();
 
     // Close database and clear nodes
     closeDatabase();
@@ -482,6 +524,35 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
 {
     // Add to packet list
     m_packetList->addPacket(packet);
+
+    // Save to database if enabled
+    if (m_database && AppSettings::instance()->savePacketsToDb())
+    {
+        Database::PacketRecord rec;
+        rec.timestamp = packet.timestamp;
+        rec.packetType = static_cast<int>(packet.type);
+        rec.fromNode = packet.from;
+        rec.toNode = packet.to;
+        rec.portNum = static_cast<int>(packet.portNum);
+        rec.channel = packet.channelIndex;
+        rec.typeName = packet.typeName;
+        rec.rawData = packet.rawData;
+        // Serialize fields to JSON
+        QJsonObject fieldsObj = QJsonObject::fromVariantMap(packet.fields);
+        rec.fieldsJson = QString::fromUtf8(QJsonDocument(fieldsObj).toJson(QJsonDocument::Compact));
+        m_database->savePacket(rec);
+    }
+
+    // Check for session key in admin responses
+    if (packet.fields.contains("sessionPasskey"))
+    {
+        QByteArray sessionKey = packet.fields["sessionPasskey"].toByteArray();
+        if (!sessionKey.isEmpty() && m_protocol)
+        {
+            m_protocol->setSessionKey(sessionKey);
+            qDebug() << "[MainWindow] Session key stored, size:" << sessionKey.size();
+        }
+    }
 
     // Process packet for node tracking
     switch (packet.type)
@@ -507,6 +578,9 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             int role = packet.fields.value("role", 0).toInt();
             // role: 0=disabled, 1=primary, 2=secondary
             bool enabled = (role > 0);
+
+            qDebug() << "<<< Received channel from device - index:" << index
+                     << "name:" << name << "role:" << role;
 
             // Update MessagesWidget
             if (m_messagesWidget)
@@ -673,13 +747,16 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             break;
 
         case MeshtasticProtocol::PortNum::TextMessage:
-            if (m_messagesWidget && packet.fields.contains("text"))
+            if (m_messagesWidget && packet.fields.contains("text") && !packet.fields.contains("decrypted"))
             {
+                // Only route device-decoded messages to Messages widget.
+                // Brute-force decrypted packets (fields["decrypted"]=true) are from
+                // unknown channels and should only appear in the Packet List.
                 ChatMessage msg;
                 msg.fromNode = packet.from;
                 msg.toNode = packet.to;
                 msg.text = packet.fields["text"].toString();
-                msg.channelIndex = packet.fields.value("channel", 0).toInt();
+                msg.channelIndex = packet.channelIndex;
                 msg.timestamp = QDateTime::currentDateTime();
                 msg.packetId = packet.fields.value("packetId", 0).toUInt();
                 m_messagesWidget->addMessage(msg);
@@ -791,6 +868,16 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
                 m_dashboardStats->setFirmwareVersion(m_firmwareVersion);
             }
         }
+        if (packet.fields.contains("hwModel"))
+        {
+            uint32_t myNode = m_nodeManager->myNodeNum();
+            int hwId = packet.fields["hwModel"].toInt();
+            qDebug() << "[MainWindow] Metadata received - hwModel ID:" << hwId;
+            if (myNode != 0)
+            {
+                m_nodeManager->updateNodeUser(myNode, "", "", "", m_nodeManager->hwModelToString(hwId));
+            }
+        }
         break;
 
     case MeshtasticProtocol::PacketType::ConfigCompleteId:
@@ -866,7 +953,7 @@ void MainWindow::onTracerouteSelected(uint32_t fromNode, uint32_t toNode)
     if (!m_mapWidget || !m_tracerouteWidget)
         return;
 
-    // Get the selected route from the traceroute widget
+    // Get the selected route from the traceroute widget (now contains historical positions)
     auto routeNodes = m_tracerouteWidget->getSelectedRoute();
 
     if (routeNodes.isEmpty())
@@ -875,20 +962,16 @@ void MainWindow::onTracerouteSelected(uint32_t fromNode, uint32_t toNode)
         return;
     }
 
-    // Build route points with positions
+    // Build route points for the map
     QList<MapWidget::RoutePoint> routePoints;
     for (const auto &node : routeNodes)
     {
-        if (!m_nodeManager->hasNode(node.nodeNum))
-            continue;
-
-        NodeInfo nodeInfo = m_nodeManager->getNode(node.nodeNum);
-        if (!nodeInfo.hasPosition)
+        if (node.latitude == 0.0 && node.longitude == 0.0)
             continue;
 
         MapWidget::RoutePoint pt;
-        pt.lat = nodeInfo.latitude;
-        pt.lon = nodeInfo.longitude;
+        pt.lat = node.latitude;
+        pt.lon = node.longitude;
         pt.name = node.name;
         pt.snr = node.snr;
         routePoints.append(pt);
@@ -1306,6 +1389,17 @@ void MainWindow::openDatabaseForNode(uint32_t nodeNum)
             m_messagesWidget->setDatabase(m_database);
             m_messagesWidget->loadFromDatabase();
         }
+
+        if (m_telemetryGraphWidget)
+        {
+            m_telemetryGraphWidget->setDatabase(m_database);
+        }
+
+        if (m_tracerouteWidget)
+        {
+            m_tracerouteWidget->setDatabase(m_database);
+        }
+
         statusBar()->showMessage(QString("Database loaded: %1 nodes").arg(m_database->nodeCount()), 3000);
     }
     else
@@ -1317,19 +1411,33 @@ void MainWindow::openDatabaseForNode(uint32_t nodeNum)
 
 void MainWindow::closeDatabase()
 {
-    if (m_database)
-    {
-        m_database->close();
-        delete m_database;
-        m_database = nullptr;
-    }
+    if (!m_database)
+        return;
+
+    // 1. Notify all consumers to stop using the database
     m_nodeManager->setDatabase(nullptr);
-    m_nodeManager->clear();
     if (m_messagesWidget)
     {
         m_messagesWidget->setDatabase(nullptr);
         m_messagesWidget->clear();
     }
+    if (m_telemetryGraphWidget)
+    {
+        m_telemetryGraphWidget->setDatabase(nullptr);
+    }
+    if (m_tracerouteWidget)
+    {
+        m_tracerouteWidget->setDatabase(nullptr);
+        m_tracerouteWidget->clear();
+    }
+
+    // 2. Clear local node state
+    m_nodeManager->clear();
+
+    // 3. Close and destroy the database
+    m_database->close();
+    delete m_database;
+    m_database = nullptr;
 }
 
 void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel)
@@ -1701,17 +1809,26 @@ void MainWindow::onSavePositionConfig()
 
 void MainWindow::onSaveChannelConfig(int channelIndex)
 {
+    qDebug() << "=== onSaveChannelConfig called for channel" << channelIndex << "===";
+
     if (!m_serial->isConnected())
     {
+        qDebug() << "Not connected!";
         statusBar()->showMessage("Not connected", 3000);
         return;
     }
 
     DeviceConfig *devConfig = m_configWidget->deviceConfig();
     if (!devConfig)
+    {
+        qDebug() << "No device config!";
         return;
+    }
 
     const auto &ch = devConfig->channel(channelIndex);
+    qDebug() << "Channel config - role:" << ch.role << "name:" << ch.name
+             << "psk size:" << ch.psk.size();
+
     QVariantMap config;
     config["role"] = ch.role;
     config["name"] = ch.name;
@@ -1720,8 +1837,20 @@ void MainWindow::onSaveChannelConfig(int channelIndex)
     config["downlinkEnabled"] = ch.downlinkEnabled;
 
     uint32_t myNode = m_nodeManager->myNodeNum();
+    qDebug() << "Creating packet for node:" << QString::number(myNode, 16);
+
     QByteArray packet = m_protocol->createChannelConfigPacket(myNode, myNode, channelIndex, config);
+    qDebug() << "Packet size:" << packet.size() << "bytes";
+
     m_serial->sendData(packet);
+    qDebug() << "Packet sent to serial";
+
+    // Update MessagesWidget immediately (don't wait for device response)
+    if (m_messagesWidget)
+    {
+        bool enabled = (ch.role > 0);  // role: 0=disabled, 1=primary, 2=secondary
+        m_messagesWidget->setChannel(channelIndex, ch.name, enabled);
+    }
 
     statusBar()->showMessage(QString("Channel %1 config saved to device").arg(channelIndex), 3000);
 }
@@ -1908,6 +2037,13 @@ void MainWindow::onConfigCompleteIdReceived(uint32_t configId)
         if (m_configHeartbeatTimer)
             m_configHeartbeatTimer->stop();
 
+        // Request session key for admin operations
+        if (m_serial && m_serial->isConnected() && m_protocol)
+        {
+            qDebug() << "[MainWindow] Requesting session key for admin operations";
+            m_serial->sendData(m_protocol->createSessionKeyRequestPacket());
+        }
+
         // Explicitly refresh all tabs or signal config ready
         // For now, logging success is sufficient as tabs listen to config changes
     }
@@ -1979,7 +2115,7 @@ void MainWindow::saveWindowState()
     QSettings settings;
     settings.beginGroup("MainWindow");
     settings.setValue("geometry", saveGeometry());
-    settings.setValue("windowState", saveState());
+    settings.setValue("windowState", saveState(1));
     if (m_mapSplitter)
     {
         settings.setValue("mapSplitterSizes", QVariant::fromValue(m_mapSplitter->sizes()));
@@ -1997,7 +2133,7 @@ void MainWindow::restoreWindowState()
     }
     if (settings.contains("windowState"))
     {
-        restoreState(settings.value("windowState").toByteArray());
+        restoreState(settings.value("windowState").toByteArray(), 1);
     }
     if (settings.contains("mapSplitterSizes") && m_mapSplitter)
     {

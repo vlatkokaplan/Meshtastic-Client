@@ -1,6 +1,7 @@
 #include "ChannelsConfigTab.h"
 #include "DeviceConfig.h"
 
+#include <QDebug>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -199,28 +200,41 @@ void ChannelsConfigTab::updateEditorFromConfig(int index)
 
 void ChannelsConfigTab::onSaveClicked()
 {
-    if (m_currentChannel < 0) return;
+    qDebug() << "=== ChannelsConfigTab::onSaveClicked ===";
+    qDebug() << "Current channel:" << m_currentChannel;
+
+    if (m_currentChannel < 0) {
+        qDebug() << "No channel selected!";
+        return;
+    }
+
+    // Save channel index before setChannel() which may trigger list update and reset m_currentChannel
+    int channelToSave = m_currentChannel;
 
     DeviceConfig::ChannelConfig ch;
-    ch.index = m_currentChannel;
+    ch.index = channelToSave;
     ch.role = m_roleCombo->currentIndex();
     ch.name = m_nameEdit->text();
+
+    qDebug() << "Saving - role:" << ch.role << "name:" << ch.name;
 
     // Convert base64 PSK back to bytes
     QString pskBase64 = m_pskEdit->text().trimmed();
     if (!pskBase64.isEmpty()) {
         ch.psk = QByteArray::fromBase64(pskBase64.toLatin1());
     }
+    qDebug() << "PSK size:" << ch.psk.size();
 
     ch.uplinkEnabled = m_uplinkCheck->isChecked();
     ch.downlinkEnabled = m_downlinkCheck->isChecked();
 
-    m_config->setChannel(m_currentChannel, ch);
+    m_config->setChannel(channelToSave, ch);
 
     m_statusLabel->setText("Saving...");
     m_statusLabel->setStyleSheet("color: orange;");
 
-    emit saveRequested(m_currentChannel);
+    qDebug() << "Emitting saveRequested for channel" << channelToSave;
+    emit saveRequested(channelToSave);
 }
 
 void ChannelsConfigTab::onGeneratePskClicked()

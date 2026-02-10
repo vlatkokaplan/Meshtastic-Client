@@ -59,12 +59,25 @@ QVariant PacketTableModel::data(const QModelIndex &index, int role) const
             return formatNodeName(packet.to);
         case ColToAddr:
             return formatNodeId(packet.to);
+        case ColChannel:
+            if (packet.type == MeshtasticProtocol::PacketType::PacketReceived &&
+                packet.channelIndex >= 0 && packet.channelIndex <= 7)
+            {
+                return packet.channelIndex;
+            }
+            return QVariant();
         case ColPortNum:
             if (packet.type == MeshtasticProtocol::PacketType::PacketReceived)
             {
                 return MeshtasticProtocol::portNumToString(packet.portNum);
             }
             return QString();
+        case ColKey:
+            if (packet.fields.contains("foundKey"))
+            {
+                return packet.fields.value("foundKey").toString();
+            }
+            return QVariant();
         case ColContent:
             return formatContent(packet);
         }
@@ -124,8 +137,12 @@ QVariant PacketTableModel::headerData(int section, Qt::Orientation orientation, 
         return "To";
     case ColToAddr:
         return "To ID";
+    case ColChannel:
+        return "Ch";
     case ColPortNum:
         return "Port";
+    case ColKey:
+        return "Key";
     case ColContent:
         return "Content";
     }
@@ -294,6 +311,14 @@ QString PacketTableModel::formatContent(const MeshtasticProtocol::DecodedPacket 
             break;
 
         default:
+            if (f.contains("decrypted"))
+            {
+                return QString("[Decrypted] %1").arg(f.value("payloadHex").toString().left(32));
+            }
+            if (f.contains("decryptFailed"))
+            {
+                return "[Decrypt Failed - wrong key?]";
+            }
             if (f.contains("encrypted"))
             {
                 return "[Encrypted]";

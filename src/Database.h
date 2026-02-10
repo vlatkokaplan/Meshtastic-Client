@@ -88,6 +88,39 @@ public:
     QList<TelemetryRecord> loadTelemetryHistory(uint32_t nodeNum, int hours = 24);
     QList<uint32_t> getNodesWithTelemetry();
     bool deleteTelemetryHistory(int daysOld = 7);
+
+    // Position history operations
+    struct PositionRecord
+    {
+        uint32_t nodeNum = 0;
+        double latitude = 0.0;
+        double longitude = 0.0;
+        int altitude = 0;
+        QDateTime timestamp;
+    };
+
+    bool savePosition(const PositionRecord &record);
+    PositionRecord loadPositionAt(uint32_t nodeNum, qint64 timestamp);
+
+    // Raw packet storage (for long-running sessions)
+    struct PacketRecord
+    {
+        qint64 id = 0;
+        qint64 timestamp = 0;
+        int packetType = 0;
+        uint32_t fromNode = 0;
+        uint32_t toNode = 0;
+        int portNum = 0;
+        int channel = 0;
+        QString typeName;
+        QByteArray rawData;
+        QString fieldsJson;
+    };
+
+    bool savePacket(const PacketRecord &record);
+    QList<PacketRecord> loadPackets(int limit = 1000, int offset = 0);
+    bool deleteOldPackets(int daysOld = 7);
+
     QList<Message> loadMessagesForNode(uint32_t nodeNum, int limit = 100);
     bool markMessageRead(qint64 messageId);
     bool updateMessageStatus(uint32_t packetId, int status);

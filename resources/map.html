@@ -18,6 +18,7 @@
         #map {
             width: 100%;
             height: 100%;
+            background: #1a1a2e;
         }
 
         .node-marker {
@@ -27,36 +28,135 @@
         }
 
         .node-pin {
-            width: 24px;
-            height: 24px;
+            width: 30px;
+            height: 30px;
             border-radius: 50%;
-            border: 2px solid #333;
+            border: 2.5px solid rgba(255,255,255,0.85);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 10px;
+            font-size: 11px;
             font-weight: bold;
             color: white;
-            font-family: Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,0,0,0.1);
+        }
+
+        .node-pin.my-node {
+            border: 3px solid #ffffff;
+            box-shadow: 0 2px 8px rgba(66,133,244,0.6), 0 0 12px rgba(66,133,244,0.3);
+        }
+
+        .node-pin.low-battery {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 0 0 3px rgba(244,67,54,0.5);
         }
 
         .node-pointer {
             width: 0;
             height: 0;
-            border-left: 6px solid transparent;
-            border-right: 6px solid transparent;
-            border-top: 8px solid #333;
+            border-left: 7px solid transparent;
+            border-right: 7px solid transparent;
+            border-top: 9px solid rgba(255,255,255,0.85);
             margin-top: -2px;
         }
 
-        .node-tooltip {
-            background: #333;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 4px;
+        .node-pointer.my-node {
+            border-top-color: #ffffff;
+        }
+
+        .node-label {
+            margin-top: 2px;
+            font-size: 10px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-weight: 600;
+            color: #333;
+            text-shadow: 0 0 3px white, 0 0 3px white, 0 0 3px white;
+            white-space: nowrap;
+            max-width: 80px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-align: center;
+        }
+
+        /* Rich popup styling */
+        .leaflet-popup-content-wrapper {
+            border-radius: 10px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+            padding: 0;
+        }
+
+        .leaflet-popup-content {
+            margin: 0;
+            min-width: 200px;
+        }
+
+        .node-popup {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        .node-popup-header {
+            padding: 10px 14px 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .node-popup-name {
+            font-size: 15px;
+            font-weight: 700;
+            color: #212529;
+            margin: 0;
+        }
+
+        .node-popup-subname {
             font-size: 11px;
-            font-family: Arial, sans-serif;
-            white-space: pre-line;
+            color: #6c757d;
+            margin-top: 2px;
+        }
+
+        .node-popup-body {
+            padding: 8px 14px 10px;
+        }
+
+        .node-popup-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 3px 0;
+        }
+
+        .node-popup-label {
+            color: #6c757d;
+            font-size: 12px;
+        }
+
+        .node-popup-value {
+            font-weight: 600;
+            color: #212529;
+            font-size: 12px;
+        }
+
+        .battery-bar {
+            display: inline-block;
+            width: 40px;
+            height: 10px;
+            border: 1px solid #aaa;
+            border-radius: 2px;
+            overflow: hidden;
+            vertical-align: middle;
+            margin-left: 4px;
+        }
+
+        .battery-bar-fill {
+            height: 100%;
+            transition: width 0.3s;
+        }
+
+        /* Attribution styling */
+        .leaflet-control-attribution {
+            background: rgba(255,255,255,0.6) !important;
+            font-size: 10px !important;
+            padding: 2px 6px !important;
         }
 
         @keyframes node-blink {
@@ -95,10 +195,10 @@
             position: absolute;
             top: 50%;
             left: 50%;
-            width: 24px;
-            height: 24px;
-            margin-top: -12px;
-            margin-left: -12px;
+            width: 30px;
+            height: 30px;
+            margin-top: -15px;
+            margin-left: -15px;
             border: 3px solid #ffff00;
             border-radius: 50%;
             animation: node-ring 1.2s ease-out infinite;
@@ -109,10 +209,20 @@
 <body>
     <div id="map"></div>
     <script>
+        // Role name mapping
+        var roleNames = {
+            0: 'Client', 1: 'Client Mute', 2: 'Router', 3: 'Router Client',
+            4: 'Repeater', 5: 'Tracker', 6: 'Sensor', 7: 'TAK',
+            8: 'Client Hidden', 9: 'Lost & Found', 10: 'TAK Tracker'
+        };
+
         // Initialize map
         var map = L.map('map', {
             zoomControl: true
         }).setView([37.7749, -122.4194], 10);
+
+        // Add scale control
+        L.control.scale({ imperial: true, metric: true }).addTo(map);
 
         // Add tile layer (default OpenStreetMap)
         var currentTileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -125,48 +235,143 @@
 
         // Store packet flow lines
         var packetFlows = [];
-        var maxFlowLines = 100; // Keep only last 100 lines
+        var maxFlowLines = 100;
 
         // Store traceroute line
         var tracerouteLine = null;
         var tracerouteMarkers = [];
 
-        // Color palette for nodes
-        var colors = ["#4A90D9", "#D94A4A", "#4AD94A", "#D9D94A", "#D94AD9", "#4AD9D9"];
-
         function getNodeColor(node) {
-            if (node.batteryLevel > 0) {
-                if (node.batteryLevel < 20) return "#FF4444";
-                if (node.batteryLevel < 50) return "#FFAA00";
-                return "#44AA44";
+            if (node.isMyNode) return '#4285f4'; // bright blue for my node
+            if (node.lastHeardSecs >= 0 && node.lastHeardSecs < 900) {
+                // Online (< 15 min) - green tones
+                return '#34a853';
             }
-            return colors[node.nodeNum % colors.length];
+            if (node.lastHeardSecs >= 900) {
+                // Stale - muted gray
+                return '#9e9e9e';
+            }
+            // Fallback based on battery
+            if (node.batteryLevel > 0) {
+                if (node.batteryLevel < 20) return '#ea4335';
+                if (node.batteryLevel < 50) return '#fbbc04';
+                return '#34a853';
+            }
+            return '#5f6368';
         }
 
-        function buildTooltip(node) {
-            var lines = [];
-            if (node.longName) lines.push(node.longName);
-            if (node.nodeId) lines.push(node.nodeId);
-            if (node.altitude) lines.push("Alt: " + node.altitude + "m");
-            if (node.batteryLevel > 0) lines.push("Battery: " + node.batteryLevel + "%");
-            return lines.join("\n");
+        function formatRelativeTime(secs) {
+            if (secs < 0) return 'Unknown';
+            if (secs < 60) return secs + 's ago';
+            if (secs < 3600) return Math.floor(secs / 60) + ' min ago';
+            if (secs < 86400) return Math.floor(secs / 3600) + 'h ago';
+            return Math.floor(secs / 86400) + 'd ago';
+        }
+
+        function getBatteryColor(level) {
+            if (level > 60) return '#34a853';
+            if (level > 30) return '#fbbc04';
+            return '#ea4335';
+        }
+
+        function buildPopup(node) {
+            var name = node.longName || node.nodeId || 'Unknown';
+            var sub = [];
+            if (node.shortName) sub.push(node.shortName);
+            if (node.nodeId) sub.push(node.nodeId);
+
+            var html = '<div class="node-popup">';
+            html += '<div class="node-popup-header">';
+            html += '<div class="node-popup-name">' + name + '</div>';
+            if (sub.length > 0) {
+                html += '<div class="node-popup-subname">' + sub.join(' &middot; ') + '</div>';
+            }
+            html += '</div>';
+            html += '<div class="node-popup-body">';
+
+            // Battery
+            if (node.batteryLevel > 0) {
+                var batColor = getBatteryColor(node.batteryLevel);
+                var batText = node.isExternalPower ? 'Plugged' : node.batteryLevel + '%';
+                html += '<div class="node-popup-row">';
+                html += '<span class="node-popup-label">Battery</span>';
+                html += '<span class="node-popup-value">' + batText;
+                html += ' <span class="battery-bar"><span class="battery-bar-fill" style="width:' + node.batteryLevel + '%;background:' + batColor + '"></span></span>';
+                html += '</span></div>';
+            }
+
+            // Signal
+            if (node.hopsAway === 0 && (node.snr !== 0 || node.rssi !== 0)) {
+                html += '<div class="node-popup-row">';
+                html += '<span class="node-popup-label">Signal</span>';
+                html += '<span class="node-popup-value">SNR ' + node.snr.toFixed(1) + ' dB / RSSI ' + node.rssi + '</span>';
+                html += '</div>';
+            } else if (node.hopsAway > 0) {
+                html += '<div class="node-popup-row">';
+                html += '<span class="node-popup-label">Hops</span>';
+                html += '<span class="node-popup-value">' + node.hopsAway + ' hop' + (node.hopsAway > 1 ? 's' : '') + '</span>';
+                html += '</div>';
+            }
+
+            // Last heard
+            if (node.lastHeardSecs >= 0) {
+                html += '<div class="node-popup-row">';
+                html += '<span class="node-popup-label">Last heard</span>';
+                html += '<span class="node-popup-value">' + formatRelativeTime(node.lastHeardSecs) + '</span>';
+                html += '</div>';
+            }
+
+            // Altitude
+            if (node.altitude && node.altitude !== 0) {
+                html += '<div class="node-popup-row">';
+                html += '<span class="node-popup-label">Altitude</span>';
+                html += '<span class="node-popup-value">' + node.altitude + ' m</span>';
+                html += '</div>';
+            }
+
+            // Role
+            if (node.role !== undefined && node.role > 0) {
+                var roleName = roleNames[node.role] || ('Role ' + node.role);
+                html += '<div class="node-popup-row">';
+                html += '<span class="node-popup-label">Role</span>';
+                html += '<span class="node-popup-value">' + roleName + '</span>';
+                html += '</div>';
+            }
+
+            html += '</div></div>';
+            return html;
         }
 
         function createMarkerIcon(node) {
             var color = getNodeColor(node);
-            var shortName = node.shortName ? node.shortName.substring(0, 2) : "?";
+            var shortName = node.shortName ? node.shortName.substring(0, 3) : '?';
+            var isMyNode = node.isMyNode;
+            var isLowBat = (node.batteryLevel > 0 && node.batteryLevel < 20 && !node.isExternalPower);
+            var displayName = node.longName || node.shortName || '';
+
+            var pinClasses = 'node-pin';
+            if (isMyNode) pinClasses += ' my-node';
+            if (isLowBat) pinClasses += ' low-battery';
+
+            var pointerClass = 'node-pointer' + (isMyNode ? ' my-node' : '');
 
             var html = '<div class="node-marker">' +
-                '<div class="node-pin" style="background-color: ' + color + ';">' + shortName + '</div>' +
-                '<div class="node-pointer" style="border-top-color: ' + color + ';"></div>' +
-                '</div>';
+                '<div class="' + pinClasses + '" style="background-color: ' + color + ';">' + shortName + '</div>' +
+                '<div class="' + pointerClass + '" style="border-top-color: ' + (isMyNode ? '#ffffff' : 'rgba(255,255,255,0.85)') + ';"></div>';
+
+            // Add name label
+            if (displayName) {
+                html += '<div class="node-label">' + displayName + '</div>';
+            }
+
+            html += '</div>';
 
             return L.divIcon({
                 html: html,
                 className: '',
-                iconSize: [28, 36],
-                iconAnchor: [14, 36],
-                popupAnchor: [0, -36]
+                iconSize: [30, 52],
+                iconAnchor: [15, 42],
+                popupAnchor: [0, -42]
             });
         }
 
@@ -196,10 +401,14 @@
                     if (node.latitude === 0 && node.longitude === 0) continue;
 
                     var marker = L.marker([node.latitude, node.longitude], {
-                        icon: createMarkerIcon(node)
+                        icon: createMarkerIcon(node),
+                        zIndexOffset: node.isMyNode ? 1000 : 0
                     });
 
-                    marker.bindPopup('<div class="node-tooltip">' + buildTooltip(node) + '</div>');
+                    marker.bindPopup(buildPopup(node), {
+                        maxWidth: 280,
+                        className: ''
+                    });
 
                     // Store nodeNum for click handler
                     marker.nodeNum = node.nodeNum;

@@ -129,6 +129,7 @@ private:
     QSplitter *m_mapSplitter;
     QString m_firmwareVersion;
     QSystemTrayIcon *m_trayIcon;
+    int m_messagesTabIndex = -1;
 
     void setupUI();
     void showNotification(const QString &title, const QString &message);

@@ -70,6 +70,11 @@ struct NodeInfo
         map["barometricPressure"] = barometricPressure;
         map["uptimeSeconds"] = uptimeSeconds;
         map["hasEnvironmentTelemetry"] = hasEnvironmentTelemetry;
+        // Computed fields for map display
+        if (lastHeard.isValid())
+            map["lastHeardSecs"] = lastHeard.secsTo(QDateTime::currentDateTime());
+        else
+            map["lastHeardSecs"] = -1;
         return map;
     }
 };

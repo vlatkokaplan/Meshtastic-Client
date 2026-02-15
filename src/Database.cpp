@@ -999,7 +999,7 @@ QList<ChatMessage> Database::getAllMessages()
         msg.channelIndex = query.value("channel").toString().toInt();
         msg.text = query.value("text").toString();
         msg.read = query.value("read").toBool();
-        msg.packetId = 0; // Not stored in DB currently
+        msg.packetId = query.value("packet_id").toUInt();
         qint64 ts = query.value("timestamp").toLongLong();
         if (ts > 0)
         {

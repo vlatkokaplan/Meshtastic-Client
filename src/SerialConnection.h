@@ -23,7 +23,7 @@ public:
     static QString deviceDescription(const QSerialPortInfo &info);
 
     bool connectToPort(const QString &portName);
-    void disconnect();
+    void disconnectDevice();
     bool isConnected() const;
     QString connectedPortName() const;
 

@@ -1077,11 +1077,28 @@ QSet<uint32_t> MessagesWidget::getDmPartners()
     return partners;
 }
 
+int MessagesWidget::totalUnreadCount() const
+{
+    int count = 0;
+    uint32_t myNode = m_nodeManager->myNodeNum();
+    for (const ChatMessage &msg : m_messages)
+    {
+        if (!msg.read && msg.fromNode != myNode)
+            count++;
+    }
+    return count;
+}
+
 void MessagesWidget::updateStatusLabel()
 {
     int total = m_messages.size();
     int displayed = m_messageList->count();
-    m_statusLabel->setText(QString("Total: %1 messages | Showing: %2").arg(total).arg(displayed));
+    int unread = totalUnreadCount();
+    if (unread > 0)
+        m_statusLabel->setText(QString("Unread: %1 | Total: %2 | Showing: %3").arg(unread).arg(total).arg(displayed));
+    else
+        m_statusLabel->setText(QString("Total: %1 messages | Showing: %2").arg(total).arg(displayed));
+    emit unreadCountChanged(unread);
 }
 
 void MessagesWidget::onMessageContextMenu(const QPoint &pos)

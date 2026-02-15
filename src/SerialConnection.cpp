@@ -33,7 +33,7 @@ SerialConnection::SerialConnection(QObject *parent)
 
 SerialConnection::~SerialConnection()
 {
-    disconnect();
+    disconnectDevice();
 }
 
 QList<QSerialPortInfo> SerialConnection::detectMeshtasticDevices()
@@ -85,7 +85,7 @@ bool SerialConnection::connectToPort(const QString &portName)
 {
     if (m_serialPort->isOpen())
     {
-        disconnect();
+        disconnectDevice();
     }
 
     m_serialPort->setPortName(portName);
@@ -114,7 +114,7 @@ bool SerialConnection::connectToPort(const QString &portName)
     }
 }
 
-void SerialConnection::disconnect()
+void SerialConnection::disconnectDevice()
 {
     m_intentionalDisconnect = true;
     m_reconnectTimer->stop();

@@ -70,10 +70,13 @@ public:
     void setChannel(int index, const QString &name, bool enabled);
     void clearChannels();
 
+    int totalUnreadCount() const;
+
 signals:
     void sendMessage(const QString &text, uint32_t toNode, int channel);
     void sendReaction(const QString &emoji, uint32_t toNode, int channel, uint32_t replyId);
     void nodeClicked(uint32_t nodeNum);  // Emitted when user clicks a node name in messages
+    void unreadCountChanged(int count);
 
 private slots:
     void onConversationSelected(QTreeWidgetItem *item, int column);

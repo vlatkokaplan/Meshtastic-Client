@@ -125,6 +125,7 @@ void MapWidget::refreshNodes()
         return;
 
     QVariantList nodes = m_nodeManager->getNodesForMap();
+    uint32_t myNodeNum = m_nodeManager->myNodeNum();
 
     // Convert to JSON for JavaScript
     QJsonArray jsonArray;
@@ -140,6 +141,14 @@ void MapWidget::refreshNodes()
         obj["nodeId"] = nodeMap["nodeId"].toString();
         obj["altitude"] = nodeMap["altitude"].toInt();
         obj["batteryLevel"] = nodeMap["batteryLevel"].toInt();
+        obj["isMyNode"] = (nodeMap["nodeNum"].toUInt() == myNodeNum);
+        obj["lastHeardSecs"] = nodeMap["lastHeardSecs"].toInt();
+        obj["snr"] = nodeMap["snr"].toDouble();
+        obj["rssi"] = nodeMap["rssi"].toInt();
+        obj["role"] = nodeMap["role"].toInt();
+        obj["hopsAway"] = nodeMap["hopsAway"].toInt();
+        obj["isExternalPower"] = nodeMap["isExternalPower"].toBool();
+        obj["voltage"] = nodeMap["voltage"].toDouble();
         jsonArray.append(obj);
     }
 

@@ -159,7 +159,7 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    m_serial->disconnect();
+    m_serial->disconnectDevice();
 }
 
 void MainWindow::setupUI()
@@ -299,8 +299,8 @@ void MainWindow::setupMapTab()
 
     // Node table setup
     m_nodeTable = new QTableWidget;
-    m_nodeTable->setColumnCount(5);
-    m_nodeTable->setHorizontalHeaderLabels({"Node Name", "Role", "Last Heard", "Battery %", "Hops Away"});
+    m_nodeTable->setColumnCount(6);
+    m_nodeTable->setHorizontalHeaderLabels({"Name", "Short", "Role", "Last Heard", "Battery", "Signal"});
     m_nodeTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     m_nodeTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_nodeTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -324,7 +324,7 @@ void MainWindow::setupMapTab()
 void MainWindow::setupMessagesTab()
 {
     m_messagesWidget = new MessagesWidget(m_nodeManager);
-    m_tabWidget->addTab(m_messagesWidget, "Messages");
+    m_messagesTabIndex = m_tabWidget->addTab(m_messagesWidget, "Messages");
 
     // Connect send message signal
     connect(m_messagesWidget, &MessagesWidget::sendMessage,
@@ -337,6 +337,15 @@ void MainWindow::setupMessagesTab()
     // Connect node click to navigate to that node
     connect(m_messagesWidget, &MessagesWidget::nodeClicked,
             this, &MainWindow::navigateToNode);
+
+    // Update tab title with unread count
+    connect(m_messagesWidget, &MessagesWidget::unreadCountChanged,
+            this, [this](int count) {
+                if (count > 0)
+                    m_tabWidget->setTabText(m_messagesTabIndex, QString("Messages (%1)").arg(count));
+                else
+                    m_tabWidget->setTabText(m_messagesTabIndex, "Messages");
+            });
 }
 
 void MainWindow::setupPacketTab()
@@ -433,7 +442,7 @@ void MainWindow::connectToSelected()
 
 void MainWindow::disconnect()
 {
-    m_serial->disconnect();
+    m_serial->disconnectDevice();
 }
 
 void MainWindow::rebootDevice()
@@ -1181,8 +1190,14 @@ void MainWindow::updateNodeList()
     if (m_nodesSortNeeded)
     {
         m_sortedNodes = m_nodeManager->allNodes();
-        std::sort(m_sortedNodes.begin(), m_sortedNodes.end(), [](const NodeInfo &a, const NodeInfo &b)
-                  { return a.lastHeard > b.lastHeard; });
+        uint32_t myNode = m_nodeManager->myNodeNum();
+        std::sort(m_sortedNodes.begin(), m_sortedNodes.end(),
+                  [myNode](const NodeInfo &a, const NodeInfo &b)
+                  {
+                      if (a.nodeNum == myNode) return true;
+                      if (b.nodeNum == myNode) return false;
+                      return a.lastHeard > b.lastHeard;
+                  });
         m_nodesSortNeeded = false;
     }
     const QList<NodeInfo> &nodes = m_sortedNodes;
@@ -1194,6 +1209,8 @@ void MainWindow::updateNodeList()
 
     // Get search filter
     QString searchTerm = m_nodeSearchEdit ? m_nodeSearchEdit->text().trimmed().toLower() : QString();
+
+    uint32_t myNode = m_nodeManager->myNodeNum();
 
     int row = 0;
     for (const NodeInfo &node : nodes)
@@ -1214,8 +1231,11 @@ void MainWindow::updateNodeList()
                 continue;
         }
 
+        bool isMyNode = (node.nodeNum == myNode);
+
         m_nodeTable->insertRow(row);
-        // Node Name
+
+        // Col 0: Node Name
         QString name = node.longName.isEmpty() ? node.nodeId : node.longName;
         if (node.isFavorite)
         {
@@ -1227,23 +1247,48 @@ void MainWindow::updateNodeList()
         {
             nameItem->setForeground(QBrush(Qt::gray));
         }
+        if (isMyNode)
+        {
+            QFont boldFont = nameItem->font();
+            boldFont.setBold(true);
+            nameItem->setFont(boldFont);
+        }
         m_nodeTable->setItem(row, 0, nameItem);
-        // Role
+
+        // Col 1: Short Name
+        QTableWidgetItem *shortItem = new QTableWidgetItem(node.shortName);
+        shortItem->setData(Qt::UserRole, node.nodeNum);
+        shortItem->setTextAlignment(Qt::AlignCenter);
+        if (!node.hasPosition)
+        {
+            shortItem->setForeground(QBrush(Qt::gray));
+        }
+        if (isMyNode)
+        {
+            QFont boldFont = shortItem->font();
+            boldFont.setBold(true);
+            shortItem->setFont(boldFont);
+        }
+        m_nodeTable->setItem(row, 1, shortItem);
+
+        // Col 2: Role
         QTableWidgetItem *roleItem = new QTableWidgetItem(m_nodeManager->roleToString(node.role));
         roleItem->setData(Qt::UserRole, node.nodeNum);
         if (!node.hasPosition)
         {
             roleItem->setForeground(QBrush(Qt::gray));
         }
-        m_nodeTable->setItem(row, 1, roleItem);
-        // Last Heard
+        m_nodeTable->setItem(row, 2, roleItem);
+
+        // Col 3: Last Heard
         QTableWidgetItem *heardItem = new QTableWidgetItem(node.lastHeard.toString("yyyy-MM-dd HH:mm:ss"));
         if (!node.hasPosition)
         {
             heardItem->setForeground(QBrush(Qt::gray));
         }
-        m_nodeTable->setItem(row, 2, heardItem);
-        // Battery icon and value
+        m_nodeTable->setItem(row, 3, heardItem);
+
+        // Col 4: Battery
         QTableWidgetItem *batteryItem = new QTableWidgetItem;
         if (!node.hasPosition)
         {
@@ -1260,25 +1305,15 @@ void MainWindow::updateNodeList()
             {
                 int level = node.batteryLevel;
                 if (level > 80)
-                {
                     batteryItem->setIcon(QIcon::fromTheme("battery-full"));
-                }
                 else if (level > 60)
-                {
                     batteryItem->setIcon(QIcon::fromTheme("battery-good"));
-                }
                 else if (level > 40)
-                {
                     batteryItem->setIcon(QIcon::fromTheme("battery-medium"));
-                }
                 else if (level > 20)
-                {
                     batteryItem->setIcon(QIcon::fromTheme("battery-low"));
-                }
                 else
-                {
                     batteryItem->setIcon(QIcon::fromTheme("battery-caution"));
-                }
                 batteryItem->setText(QString::number(level) + "%");
             }
         }
@@ -1286,23 +1321,49 @@ void MainWindow::updateNodeList()
         {
             batteryItem->setText("?");
         }
-        m_nodeTable->setItem(row, 3, batteryItem);
-        // Hops Away
-        QTableWidgetItem *hopsItem = new QTableWidgetItem;
-        if (!node.hasPosition)
+        m_nodeTable->setItem(row, 4, batteryItem);
+
+        // Col 5: Signal (bars for 0-hop, hop count for multi-hop)
+        QTableWidgetItem *signalItem = new QTableWidgetItem;
+        signalItem->setTextAlignment(Qt::AlignCenter);
+        if (node.hopsAway == 0)
         {
-            hopsItem->setForeground(QBrush(Qt::gray));
+            // Direct node - show signal bars based on SNR
+            QString bars;
+            QColor color;
+            float snr = node.snr;
+            if (snr >= 10.0f) {
+                bars = "||||";
+                color = QColor("#2e7d32"); // green
+            } else if (snr >= 5.0f) {
+                bars = "|||";
+                color = QColor("#2e7d32"); // green
+            } else if (snr >= 0.0f) {
+                bars = "||";
+                color = QColor("#f57c00"); // orange
+            } else if (snr >= -5.0f) {
+                bars = "|";
+                color = QColor("#c62828"); // red
+            } else {
+                bars = " ";
+                color = QColor("#c62828"); // red
+            }
+            signalItem->setText(bars);
+            signalItem->setForeground(QBrush(color));
+            signalItem->setToolTip(QString("SNR: %1 dB / RSSI: %2").arg(node.snr, 0, 'f', 1).arg(node.rssi));
         }
-        if (node.hopsAway >= 0)
+        else if (node.hopsAway > 0)
         {
-            hopsItem->setText(QString::number(node.hopsAway));
+            signalItem->setText(QString("%1 hop%2").arg(node.hopsAway).arg(node.hopsAway > 1 ? "s" : ""));
+            signalItem->setForeground(QBrush(QColor("#6c757d")));
         }
         else
         {
-            hopsItem->setText("-");
+            signalItem->setText("-");
+            if (!node.hasPosition)
+                signalItem->setForeground(QBrush(Qt::gray));
         }
-        hopsItem->setTextAlignment(Qt::AlignCenter);
-        m_nodeTable->setItem(row, 4, hopsItem);
+        m_nodeTable->setItem(row, 5, signalItem);
         row++;
     }
 
@@ -1335,12 +1396,6 @@ void MainWindow::updateStatusLabel()
 
 void MainWindow::requestConfig()
 {
-    if (!m_serial->isConnected())
-    {
-        return;
-    }
-
-    // Send wake-up sequence: 32 bytes of 0xC3 to wake sleeping devices
     if (!m_serial->isConnected())
     {
         return;

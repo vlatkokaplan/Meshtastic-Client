@@ -2,12 +2,18 @@
 #include "NodeManager.h"
 #include "DeviceConfig.h"
 #include <QFrame>
+#include <QNetworkReply>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QDesktopServices>
+#include <QUrl>
 
 DashboardStatsWidget::DashboardStatsWidget(NodeManager *nodeManager, DeviceConfig *deviceConfig,
                                              QWidget *parent)
     : QWidget(parent)
     , m_nodeManager(nodeManager)
     , m_deviceConfig(deviceConfig)
+    , m_networkManager(new QNetworkAccessManager(this))
 {
     setupUI();
 
@@ -45,10 +51,23 @@ void DashboardStatsWidget::setupUI()
     m_fwVersionLabel->setAlignment(Qt::AlignRight);
     m_fwVersionLabel->setStyleSheet("color: gray; font-size: 11px;");
 
+    m_checkFirmwareButton = new QPushButton("Check Updates");
+    m_checkFirmwareButton->setFixedHeight(20);
+    m_checkFirmwareButton->setStyleSheet("font-size: 10px; padding: 1px 6px;");
+    m_checkFirmwareButton->setToolTip("Check for firmware updates on GitHub");
+    connect(m_checkFirmwareButton, &QPushButton::clicked, this, &DashboardStatsWidget::onCheckFirmware);
+
+    m_firmwareStatusLabel = new QLabel;
+    m_firmwareStatusLabel->setStyleSheet("font-size: 10px;");
+    m_firmwareStatusLabel->setAlignment(Qt::AlignRight);
+    m_firmwareStatusLabel->hide();
+
     identityLayout->addWidget(m_nameLabel, 0, 0);
     identityLayout->addWidget(m_hwModelLabel, 0, 1);
     identityLayout->addWidget(m_nodeIdLabel, 1, 0);
     identityLayout->addWidget(m_fwVersionLabel, 1, 1);
+    identityLayout->addWidget(m_checkFirmwareButton, 2, 0);
+    identityLayout->addWidget(m_firmwareStatusLabel, 2, 1);
     mainLayout->addLayout(identityLayout);
 
     // Separator
@@ -376,4 +395,58 @@ void DashboardStatsWidget::updateNodeCount()
 {
     int count = m_nodeManager->allNodes().size();
     m_nodeCountLabel->setText(QString("%1 online").arg(count));
+}
+
+void DashboardStatsWidget::onCheckFirmware()
+{
+    m_checkFirmwareButton->setEnabled(false);
+    m_firmwareStatusLabel->setText("Checking...");
+    m_firmwareStatusLabel->setStyleSheet("font-size: 10px; color: gray;");
+    m_firmwareStatusLabel->show();
+
+    QNetworkRequest request(QUrl("https://api.github.com/repos/meshtastic/firmware/releases/latest"));
+    request.setRawHeader("Accept", "application/vnd.github.v3+json");
+    request.setRawHeader("User-Agent", "MeshtasticVibeClient/1.0");
+
+    QNetworkReply *reply = m_networkManager->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        m_checkFirmwareButton->setEnabled(true);
+
+        if (reply->error() != QNetworkReply::NoError) {
+            m_firmwareStatusLabel->setText("Check failed");
+            m_firmwareStatusLabel->setStyleSheet("font-size: 10px; color: red;");
+            return;
+        }
+
+        QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+        QString latestVersion = doc.object().value("tag_name").toString();
+        QString downloadUrl = doc.object().value("html_url").toString();
+
+        if (latestVersion.isEmpty()) {
+            m_firmwareStatusLabel->setText("Could not parse version");
+            m_firmwareStatusLabel->setStyleSheet("font-size: 10px; color: red;");
+            return;
+        }
+
+        // Normalize versions for comparison (strip leading 'v')
+        QString currentNorm = m_firmwareVersion;
+        QString latestNorm = latestVersion;
+        if (currentNorm.startsWith('v')) currentNorm = currentNorm.mid(1);
+        if (latestNorm.startsWith('v')) latestNorm = latestNorm.mid(1);
+
+        if (currentNorm.isEmpty()) {
+            m_firmwareStatusLabel->setText(QString("Latest: %1").arg(latestVersion));
+            m_firmwareStatusLabel->setStyleSheet("font-size: 10px; color: gray;");
+        } else if (currentNorm == latestNorm) {
+            m_firmwareStatusLabel->setText("Up to date");
+            m_firmwareStatusLabel->setStyleSheet("font-size: 10px; color: #4caf50;");
+        } else {
+            m_firmwareStatusLabel->setText(QString("<a href=\"%1\">Update: %2</a>").arg(downloadUrl, latestVersion));
+            m_firmwareStatusLabel->setTextFormat(Qt::RichText);
+            m_firmwareStatusLabel->setOpenExternalLinks(true);
+            m_firmwareStatusLabel->setStyleSheet("font-size: 10px; color: #ff9800;");
+        }
+        m_firmwareStatusLabel->show();
+    });
 }

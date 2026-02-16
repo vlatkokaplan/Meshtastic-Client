@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; font-family: sans-serif; }
+svg { width: 100%; height: 100%; }
+.node circle { cursor: pointer; stroke-width: 2px; }
+.node text { font-size: 11px; fill: #e0e0e0; pointer-events: none; text-anchor: middle; }
+.link { stroke-opacity: 0.7; }
+.link-label { font-size: 9px; fill: #888; pointer-events: none; }
+#tooltip {
+    position: absolute; display: none; background: rgba(30,30,60,0.95);
+    border: 1px solid #555; border-radius: 6px; padding: 10px; color: #e0e0e0;
+    font-size: 12px; pointer-events: none; z-index: 10; max-width: 250px;
+}
+#legend {
+    position: absolute; bottom: 10px; left: 10px; background: rgba(30,30,60,0.85);
+    border: 1px solid #444; border-radius: 6px; padding: 10px; color: #ccc; font-size: 11px;
+}
+#legend div { margin: 3px 0; display: flex; align-items: center; gap: 6px; }
+#legend .swatch { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+#legend .line-swatch { width: 30px; height: 3px; display: inline-block; border-radius: 2px; }
+</style>
+</head>
+<body>
+<svg id="graph"></svg>
+<div id="tooltip"></div>
+<div id="legend">
+    <b>Nodes</b>
+    <div><span class="swatch" style="background:#4fc3f7;border:2px solid #fff"></span> My Node</div>
+    <div><span class="swatch" style="background:#66bb6a"></span> 1 Hop</div>
+    <div><span class="swatch" style="background:#ffa726"></span> 2 Hops</div>
+    <div><span class="swatch" style="background:#888"></span> 3+ Hops / Unknown</div>
+    <b style="margin-top:6px;display:block">Links</b>
+    <div><span class="line-swatch" style="background:#4caf50"></span> Good SNR (≥5)</div>
+    <div><span class="line-swatch" style="background:#ff9800"></span> Medium SNR (0-5)</div>
+    <div><span class="line-swatch" style="background:#f44336"></span> Weak SNR (&lt;0)</div>
+    <div><span class="line-swatch" style="background:#888;border-top:2px dashed #888;height:0"></span> Unidirectional</div>
+</div>
+
+<script>
+// Minimal D3 force simulation (inline, no CDN needed)
+// We implement a basic force-directed layout without external dependencies
+
+var svg = document.getElementById('graph');
+var tooltip = document.getElementById('tooltip');
+var width, height;
+var nodes = {};
+var links = {};
+var simulation = null;
+var svgNS = 'http://www.w3.org/2000/svg';
+var transform = { x: 0, y: 0, k: 1 };
+var dragTarget = null, dragOffset = { x: 0, y: 0 };
+
+function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Create groups
+var gMain = document.createElementNS(svgNS, 'g');
+gMain.setAttribute('id', 'main');
+svg.appendChild(gMain);
+
+var gLinks = document.createElementNS(svgNS, 'g');
+gLinks.setAttribute('id', 'links');
+gMain.appendChild(gLinks);
+
+var gNodes = document.createElementNS(svgNS, 'g');
+gNodes.setAttribute('id', 'nodes');
+gMain.appendChild(gNodes);
+
+// Zoom and pan
+var isPanning = false, panStart = { x: 0, y: 0 };
+svg.addEventListener('mousedown', function(e) {
+    if (e.target === svg || e.target === gMain) {
+        isPanning = true;
+        panStart = { x: e.clientX - transform.x, y: e.clientY - transform.y };
+    }
+});
+svg.addEventListener('mousemove', function(e) {
+    if (isPanning) {
+        transform.x = e.clientX - panStart.x;
+        transform.y = e.clientY - panStart.y;
+        applyTransform();
+    }
+});
+svg.addEventListener('mouseup', function() { isPanning = false; });
+svg.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    var scale = e.deltaY > 0 ? 0.9 : 1.1;
+    var rect = svg.getBoundingClientRect();
+    var mx = e.clientX - rect.left;
+    var my = e.clientY - rect.top;
+    transform.x = mx - (mx - transform.x) * scale;
+    transform.y = my - (my - transform.y) * scale;
+    transform.k *= scale;
+    transform.k = Math.max(0.1, Math.min(5, transform.k));
+    applyTransform();
+});
+
+function applyTransform() {
+    gMain.setAttribute('transform',
+        'translate(' + transform.x + ',' + transform.y + ') scale(' + transform.k + ')');
+}
+
+// Force simulation
+var simNodes = [];
+var simLinks = [];
+var simRunning = false;
+var simAlpha = 1;
+
+function tick() {
+    if (!simRunning) return;
+
+    simAlpha *= 0.99;
+    if (simAlpha < 0.001) { simRunning = false; return; }
+
+    // Center force
+    var cx = width / 2, cy = height / 2;
+
+    // Apply forces
+    for (var i = 0; i < simNodes.length; i++) {
+        var n = simNodes[i];
+        if (n.fixed) continue;
+
+        // Center gravity
+        n.vx += (cx - n.x) * 0.0005 * simAlpha;
+        n.vy += (cy - n.y) * 0.0005 * simAlpha;
+
+        // Repulsion from other nodes
+        for (var j = i + 1; j < simNodes.length; j++) {
+            var m = simNodes[j];
+            var dx = n.x - m.x;
+            var dy = n.y - m.y;
+            var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            var force = 800 * simAlpha / (dist * dist);
+            var fx = dx / dist * force;
+            var fy = dy / dist * force;
+            if (!n.fixed) { n.vx += fx; n.vy += fy; }
+            if (!m.fixed) { m.vx -= fx; m.vy -= fy; }
+        }
+    }
+
+    // Link spring force
+    for (var i = 0; i < simLinks.length; i++) {
+        var l = simLinks[i];
+        var s = l.source, t = l.target;
+        var dx = t.x - s.x;
+        var dy = t.y - s.y;
+        var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        var targetDist = 120;
+        var force = (dist - targetDist) * 0.005 * simAlpha;
+        var fx = dx / dist * force;
+        var fy = dy / dist * force;
+        if (!s.fixed) { s.vx += fx; s.vy += fy; }
+        if (!t.fixed) { t.vx -= fx; t.vy -= fy; }
+    }
+
+    // Apply velocity with damping
+    for (var i = 0; i < simNodes.length; i++) {
+        var n = simNodes[i];
+        if (n.fixed) continue;
+        n.vx *= 0.85;
+        n.vy *= 0.85;
+        n.x += n.vx;
+        n.y += n.vy;
+    }
+
+    render();
+    requestAnimationFrame(tick);
+}
+
+function render() {
+    // Update link positions
+    for (var key in links) {
+        var l = links[key];
+        if (l.el && l.source && l.target) {
+            l.el.setAttribute('x1', l.source.x);
+            l.el.setAttribute('y1', l.source.y);
+            l.el.setAttribute('x2', l.target.x);
+            l.el.setAttribute('y2', l.target.y);
+            if (l.labelEl) {
+                l.labelEl.setAttribute('x', (l.source.x + l.target.x) / 2);
+                l.labelEl.setAttribute('y', (l.source.y + l.target.y) / 2 - 5);
+            }
+        }
+    }
+
+    // Update node positions
+    for (var id in nodes) {
+        var n = nodes[id];
+        if (n.gEl) {
+            n.gEl.setAttribute('transform', 'translate(' + n.x + ',' + n.y + ')');
+        }
+    }
+}
+
+function getNodeColor(node) {
+    if (node.isMyNode) return '#4fc3f7';
+    if (node.hopsAway === 0 || node.hopsAway === 1) return '#66bb6a';
+    if (node.hopsAway === 2) return '#ffa726';
+    return '#888';
+}
+
+function getNodeRadius(node) {
+    // Routers are bigger
+    if (node.role === 2 || node.role === 3) return 16;
+    if (node.isMyNode) return 14;
+    return 10;
+}
+
+function getLinkColor(snr) {
+    if (snr >= 5) return '#4caf50';
+    if (snr >= 0) return '#ff9800';
+    return '#f44336';
+}
+
+function addNode(nodeNum, name, shortName, isMyNode, hopsAway, role) {
+    if (nodes[nodeNum]) {
+        // Update existing
+        var n = nodes[nodeNum];
+        n.name = name;
+        n.shortName = shortName;
+        n.isMyNode = isMyNode;
+        n.hopsAway = hopsAway;
+        n.role = role;
+        // Update visual
+        if (n.circleEl) {
+            n.circleEl.setAttribute('fill', getNodeColor(n));
+            n.circleEl.setAttribute('r', getNodeRadius(n));
+            n.circleEl.setAttribute('stroke', isMyNode ? '#fff' : getNodeColor(n));
+        }
+        if (n.textEl) {
+            n.textEl.textContent = shortName;
+        }
+        return;
+    }
+
+    var n = {
+        id: nodeNum, name: name, shortName: shortName,
+        isMyNode: isMyNode, hopsAway: hopsAway, role: role,
+        x: width / 2 + (Math.random() - 0.5) * 200,
+        y: height / 2 + (Math.random() - 0.5) * 200,
+        vx: 0, vy: 0, fixed: false
+    };
+
+    // Create SVG group
+    var g = document.createElementNS(svgNS, 'g');
+    g.setAttribute('class', 'node');
+    g.setAttribute('transform', 'translate(' + n.x + ',' + n.y + ')');
+
+    var circle = document.createElementNS(svgNS, 'circle');
+    circle.setAttribute('r', getNodeRadius(n));
+    circle.setAttribute('fill', getNodeColor(n));
+    circle.setAttribute('stroke', isMyNode ? '#fff' : getNodeColor(n));
+    circle.setAttribute('stroke-width', isMyNode ? 3 : 2);
+    g.appendChild(circle);
+
+    var text = document.createElementNS(svgNS, 'text');
+    text.setAttribute('dy', getNodeRadius(n) + 14);
+    text.textContent = shortName;
+    g.appendChild(text);
+
+    n.gEl = g;
+    n.circleEl = circle;
+    n.textEl = text;
+
+    // Mouse events
+    g.addEventListener('mouseenter', function(e) {
+        var roleNames = ['Client', 'Client Mute', 'Router', 'Router Client', 'Repeater', 'Tracker', 'Sensor', 'TAK', 'Client Hidden', 'Lost and Found', 'TAK Tracker'];
+        var roleName = roleNames[n.role] || 'Unknown';
+        tooltip.innerHTML = '<b>' + n.name + '</b><br>Short: ' + n.shortName +
+            '<br>Role: ' + roleName +
+            '<br>Hops: ' + (n.hopsAway >= 0 ? n.hopsAway : '?') +
+            '<br>ID: !' + n.id.toString(16).padStart(8, '0');
+        tooltip.style.display = 'block';
+        tooltip.style.left = (e.clientX + 15) + 'px';
+        tooltip.style.top = (e.clientY + 15) + 'px';
+        circle.setAttribute('stroke', '#fff');
+        circle.setAttribute('stroke-width', 3);
+    });
+    g.addEventListener('mousemove', function(e) {
+        tooltip.style.left = (e.clientX + 15) + 'px';
+        tooltip.style.top = (e.clientY + 15) + 'px';
+    });
+    g.addEventListener('mouseleave', function() {
+        tooltip.style.display = 'none';
+        circle.setAttribute('stroke', n.isMyNode ? '#fff' : getNodeColor(n));
+        circle.setAttribute('stroke-width', n.isMyNode ? 3 : 2);
+    });
+
+    // Drag
+    g.addEventListener('mousedown', function(e) {
+        e.stopPropagation();
+        dragTarget = n;
+        n.fixed = true;
+        dragOffset.x = n.x - (e.clientX - transform.x) / transform.k;
+        dragOffset.y = n.y - (e.clientY - transform.y) / transform.k;
+    });
+
+    gNodes.appendChild(g);
+    nodes[nodeNum] = n;
+    simNodes.push(n);
+}
+
+document.addEventListener('mousemove', function(e) {
+    if (dragTarget) {
+        dragTarget.x = (e.clientX - transform.x) / transform.k + dragOffset.x;
+        dragTarget.y = (e.clientY - transform.y) / transform.k + dragOffset.y;
+        render();
+    }
+});
+document.addEventListener('mouseup', function() {
+    if (dragTarget) {
+        dragTarget.fixed = false;
+        dragTarget = null;
+        restartSimulation();
+    }
+});
+
+function addLink(fromNode, toNode, snr, bidirectional) {
+    var key = Math.min(fromNode, toNode) + '-' + Math.max(fromNode, toNode);
+    var s = nodes[fromNode], t = nodes[toNode];
+    if (!s || !t) return;
+
+    if (links[key]) {
+        // Update existing
+        links[key].snr = snr;
+        links[key].bidirectional = bidirectional;
+        links[key].source = s;
+        links[key].target = t;
+        if (links[key].el) {
+            links[key].el.setAttribute('stroke', getLinkColor(snr));
+            links[key].el.setAttribute('stroke-dasharray', bidirectional ? 'none' : '6,4');
+        }
+        if (links[key].labelEl) {
+            links[key].labelEl.textContent = snr.toFixed(1) + ' dB';
+        }
+        return;
+    }
+
+    var line = document.createElementNS(svgNS, 'line');
+    line.setAttribute('class', 'link');
+    line.setAttribute('stroke', getLinkColor(snr));
+    line.setAttribute('stroke-width', Math.max(1.5, Math.min(4, (snr + 10) / 5)));
+    line.setAttribute('stroke-dasharray', bidirectional ? 'none' : '6,4');
+    line.setAttribute('x1', s.x); line.setAttribute('y1', s.y);
+    line.setAttribute('x2', t.x); line.setAttribute('y2', t.y);
+    gLinks.appendChild(line);
+
+    var label = document.createElementNS(svgNS, 'text');
+    label.setAttribute('class', 'link-label');
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('x', (s.x + t.x) / 2);
+    label.setAttribute('y', (s.y + t.y) / 2 - 5);
+    label.textContent = snr.toFixed(1) + ' dB';
+    gLinks.appendChild(label);
+
+    var l = { source: s, target: t, snr: snr, bidirectional: bidirectional, el: line, labelEl: label };
+    links[key] = l;
+    simLinks.push(l);
+}
+
+function clearGraph() {
+    while (gNodes.firstChild) gNodes.removeChild(gNodes.firstChild);
+    while (gLinks.firstChild) gLinks.removeChild(gLinks.firstChild);
+    nodes = {};
+    links = {};
+    simNodes = [];
+    simLinks = [];
+}
+
+function restartSimulation() {
+    simAlpha = 1;
+    if (!simRunning) {
+        simRunning = true;
+        requestAnimationFrame(tick);
+    }
+}
+
+function highlightPath(nodeIds) {
+    // Reset all
+    for (var id in nodes) {
+        var n = nodes[id];
+        if (n.circleEl) {
+            n.circleEl.setAttribute('stroke', n.isMyNode ? '#fff' : getNodeColor(n));
+            n.circleEl.setAttribute('stroke-width', n.isMyNode ? 3 : 2);
+        }
+    }
+    for (var key in links) {
+        links[key].el.setAttribute('stroke-opacity', 0.3);
+    }
+
+    // Highlight path nodes
+    for (var i = 0; i < nodeIds.length; i++) {
+        var n = nodes[nodeIds[i]];
+        if (n && n.circleEl) {
+            n.circleEl.setAttribute('stroke', '#ffeb3b');
+            n.circleEl.setAttribute('stroke-width', 4);
+        }
+    }
+
+    // Highlight path links
+    for (var i = 0; i < nodeIds.length - 1; i++) {
+        var key = Math.min(nodeIds[i], nodeIds[i + 1]) + '-' + Math.max(nodeIds[i], nodeIds[i + 1]);
+        if (links[key]) {
+            links[key].el.setAttribute('stroke', '#ffeb3b');
+            links[key].el.setAttribute('stroke-opacity', 1);
+            links[key].el.setAttribute('stroke-width', 4);
+        }
+    }
+
+    // Fade back after 5 seconds
+    setTimeout(function() {
+        for (var key in links) {
+            var l = links[key];
+            l.el.setAttribute('stroke', getLinkColor(l.snr));
+            l.el.setAttribute('stroke-opacity', 0.7);
+            l.el.setAttribute('stroke-width', Math.max(1.5, Math.min(4, (l.snr + 10) / 5)));
+        }
+        for (var id in nodes) {
+            var n = nodes[id];
+            if (n.circleEl) {
+                n.circleEl.setAttribute('stroke', n.isMyNode ? '#fff' : getNodeColor(n));
+                n.circleEl.setAttribute('stroke-width', n.isMyNode ? 3 : 2);
+            }
+        }
+    }, 5000);
+}
+
+// QWebChannel bridge
+if (typeof QWebChannel !== 'undefined') {
+    new QWebChannel(qt.webChannelTransport, function(channel) {
+        var bridge = channel.objects.bridge;
+        if (bridge) bridge.notifyReady();
+    });
+} else {
+    // Load qwebchannel.js
+    var script = document.createElement('script');
+    script.src = 'qrc:///qtwebchannel/qwebchannel.js';
+    script.onload = function() {
+        new QWebChannel(qt.webChannelTransport, function(channel) {
+            var bridge = channel.objects.bridge;
+            if (bridge) bridge.notifyReady();
+        });
+    };
+    document.head.appendChild(script);
+}
+</script>
+</body>
+</html>

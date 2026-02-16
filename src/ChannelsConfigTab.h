@@ -27,6 +27,8 @@ private slots:
     void onChannelConfigChanged(int index);
     void onSaveClicked();
     void onGeneratePskClicked();
+    void onShareUrlClicked();
+    void onShowQrClicked();
 
 private:
     DeviceConfig *m_config;
@@ -45,6 +47,8 @@ private:
     QCheckBox *m_uplinkCheck;
     QCheckBox *m_downlinkCheck;
     QPushButton *m_saveButton;
+    QPushButton *m_shareUrlButton;
+    QPushButton *m_showQrButton;
     QLabel *m_statusLabel;
 
     // Placeholder for no selection
@@ -56,6 +60,7 @@ private:
     void updateChannelList();
     void updateEditorFromConfig(int index);
     QString roleToString(int role);
+    QString buildChannelUrl() const;
 };
 
 #endif // CHANNELSCONFIGTAB_H

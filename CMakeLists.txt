@@ -15,8 +15,10 @@ find_package(Qt6 REQUIRED COMPONENTS
     Core
     Widgets
     SerialPort
+    Network
     WebChannel
     Sql
+    Bluetooth
 )
 
 find_package(Qt6 COMPONENTS WebEngineWidgets)
@@ -26,6 +28,10 @@ find_package(Protobuf REQUIRED)
 
 # Find OpenSSL for packet decryption
 find_package(OpenSSL REQUIRED)
+
+# Find libqrencode for QR code generation
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(QRENCODE REQUIRED libqrencode)
 
 # Proto source directory
 set(PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/proto)
@@ -39,6 +45,7 @@ set(PROTO_FILES
     ${PROTO_PATH}/meshtastic/module_config.proto
     ${PROTO_PATH}/meshtastic/mesh.proto
     ${PROTO_PATH}/meshtastic/admin.proto
+    ${PROTO_PATH}/meshtastic/apponly.proto
 )
 
 # Generate protobuf sources with proper import path
@@ -81,6 +88,7 @@ set(SOURCES
     src/SignalScannerWidget.cpp
     src/TelemetryGraphWidget.cpp
     src/SerialConnection.cpp
+    src/TcpConnection.cpp
     src/MeshtasticProtocol.cpp
     src/NodeManager.cpp
     src/MapWidget.cpp
@@ -95,6 +103,8 @@ set(SOURCES
     src/DeviceConfigTab.cpp
     src/PositionConfigTab.cpp
     src/ChannelsConfigTab.cpp
+    src/BluetoothConnection.cpp
+    src/TopologyWidget.cpp
 )
 
 set(HEADERS
@@ -104,6 +114,7 @@ set(HEADERS
     src/SignalScannerWidget.h
     src/TelemetryGraphWidget.h
     src/SerialConnection.h
+    src/TcpConnection.h
     src/MeshtasticProtocol.h
     src/NodeManager.h
     src/MapWidget.h
@@ -118,6 +129,8 @@ set(HEADERS
     src/DeviceConfigTab.h
     src/PositionConfigTab.h
     src/ChannelsConfigTab.h
+    src/BluetoothConnection.h
+    src/TopologyWidget.h
 )
 
 # Resources
@@ -139,6 +152,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_BINARY_DIR}
     ${Protobuf_INCLUDE_DIRS}
+    ${QRENCODE_INCLUDE_DIRS}
 )
 
 # Link libraries
@@ -146,10 +160,13 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Qt6::Core
     Qt6::Widgets
     Qt6::SerialPort
+    Qt6::Network
     Qt6::WebChannel
     Qt6::Sql
+    Qt6::Bluetooth
     protobuf::libprotobuf
     OpenSSL::Crypto
+    ${QRENCODE_LIBRARIES}
 )
 
 if(Qt6WebEngineWidgets_FOUND)

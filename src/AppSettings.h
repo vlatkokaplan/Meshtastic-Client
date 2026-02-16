@@ -24,6 +24,9 @@ public:
     QString lastPort() const;
     void setLastPort(const QString &port);
 
+    QString lastTcpHost() const;
+    void setLastTcpHost(const QString &host);
+
     bool autoConnect() const;
     void setAutoConnect(bool enabled);
 

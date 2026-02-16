@@ -14,9 +14,12 @@
 
 #include "MeshtasticProtocol.h" // Need full include for nested type
 #include "NodeManager.h"        // For NodeInfo
+#include <QBluetoothDeviceInfo>
 
 class QTimer;
 class SerialConnection;
+class TcpConnection;
+class BluetoothConnection;
 class NodeManager;
 class PacketListWidget;
 class Database;
@@ -28,6 +31,7 @@ class TelemetryGraphWidget;
 
 class MapWidget;
 class DashboardStatsWidget;
+class TopologyWidget;
 
 class MainWindow : public QMainWindow
 {
@@ -60,6 +64,10 @@ private slots:
     void requestPosition(uint32_t nodeNum);
     void onSendMessage(const QString &text, uint32_t toNode, int channel);
     void onSendReaction(const QString &emoji, uint32_t toNode, int channel, uint32_t replyId);
+    void connectToTcp();
+    void onBtScanClicked();
+    void onBtConnectClicked();
+    void onBtDeviceDiscovered(const QString &name, const QString &address, const QBluetoothDeviceInfo &info);
     void onSettingChanged(const QString &key, const QVariant &value);
 
     // Config save handlers
@@ -103,6 +111,8 @@ private:
 
     // Core components
     SerialConnection *m_serial;
+    TcpConnection *m_tcp;
+    BluetoothConnection *m_bluetooth;
     MeshtasticProtocol *m_protocol;
     NodeManager *m_nodeManager;
     Database *m_database;
@@ -114,6 +124,8 @@ private:
     QPushButton *m_disconnectButton;
     QPushButton *m_rebootButton;
     QPushButton *m_refreshButton;
+    QLineEdit *m_hostEdit;
+    QPushButton *m_tcpConnectButton;
     QLabel *m_statusLabel;
     PacketListWidget *m_packetList;
     QTableWidget *m_nodeTable;
@@ -126,10 +138,18 @@ private:
 
     MapWidget *m_mapWidget;
     DashboardStatsWidget *m_dashboardStats;
+    TopologyWidget *m_topologyWidget;
+    QComboBox *m_btDeviceCombo;
+    QPushButton *m_btScanButton;
+    QPushButton *m_btConnectButton;
     QSplitter *m_mapSplitter;
     QString m_firmwareVersion;
     QSystemTrayIcon *m_trayIcon;
     int m_messagesTabIndex = -1;
+
+    bool isDeviceConnected() const;
+    bool sendToDevice(const QByteArray &data);
+    QString connectedDeviceName() const;
 
     void setupUI();
     void showNotification(const QString &title, const QString &message);

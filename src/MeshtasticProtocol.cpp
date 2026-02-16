@@ -472,16 +472,16 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
             }
             fields["route"] = routeList;
 
-            // SNR values towards destination
+            // SNR values towards destination (from RouteDiscovery only)
+            // These are int32 values scaled by SNR_SCALE_FACTOR in the protobuf
+            // A raw value of -128 (resulting in -32.0) means "unknown/no data"
             QVariantList snrTowardsList;
-            // Add the received packet's SNR as first hop if available
-            if (packet.rx_snr() != 0)
-            {
-                snrTowardsList.append(packet.rx_snr() / SNR_SCALE_FACTOR);
-            }
             for (const auto &snr : routeData.snr_towards())
             {
-                snrTowardsList.append(snr / SNR_SCALE_FACTOR);
+                if (snr == -128)
+                    snrTowardsList.append(QVariant()); // null = unknown
+                else
+                    snrTowardsList.append(snr / SNR_SCALE_FACTOR);
             }
             fields["snrTowards"] = snrTowardsList;
 
@@ -493,16 +493,21 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
             }
             fields["routeBack"] = routeBackList;
 
-            // SNR values back
+            // SNR values back (from RouteDiscovery + packet rx_snr for last hop)
+            // A raw value of -128 (resulting in -32.0) means "unknown/no data"
             QVariantList snrBackList;
-            // Add the received packet's SNR as first hop if available
-            if (packet.rx_snr() != 0)
-            {
-                snrBackList.append(packet.rx_snr() / SNR_SCALE_FACTOR);
-            }
             for (const auto &snr : routeData.snr_back())
             {
-                snrBackList.append(snr / SNR_SCALE_FACTOR);
+                if (snr == -128)
+                    snrBackList.append(QVariant()); // null = unknown
+                else
+                    snrBackList.append(snr / SNR_SCALE_FACTOR);
+            }
+            // packet.rx_snr() is already a float in dB (NOT scaled) — it's the
+            // SNR of the final hop of the return path back to us
+            if (packet.rx_snr() != 0)
+            {
+                snrBackList.append(static_cast<double>(packet.rx_snr()));
             }
             fields["snrBack"] = snrBackList;
             break;

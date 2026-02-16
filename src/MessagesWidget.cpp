@@ -996,17 +996,13 @@ QString MessagesWidget::getNodeName(uint32_t nodeNum)
 
 bool MessagesWidget::isDuplicate(const ChatMessage &msg)
 {
-    if (msg.packetId != 0)
+    // O(1) packetId check using hash index
+    if (msg.packetId != 0 && m_packetIdIndex.contains(msg.packetId))
     {
-        for (const ChatMessage &existing : m_messages)
-        {
-            if (existing.packetId == msg.packetId)
-            {
-                return true;
-            }
-        }
+        return true;
     }
 
+    // Fallback: content-based duplicate detection (for messages without packetId)
     for (const ChatMessage &existing : m_messages)
     {
         if (existing.fromNode == msg.fromNode &&
@@ -1142,13 +1138,7 @@ void MessagesWidget::onMessageContextMenu(const QPoint &pos)
     }
     else if (selected == copyAction)
     {
-        QString text = item->text();
-        // Extract just the message part (after the newline)
-        int newlinePos = text.indexOf('\n');
-        if (newlinePos >= 0)
-        {
-            text = text.mid(newlinePos + 1);
-        }
+        QString text = item->data(MessageTextRole).toString();
         QApplication::clipboard()->setText(text);
     }
 }

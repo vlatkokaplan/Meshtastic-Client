@@ -6,6 +6,8 @@
 #include <QProgressBar>
 #include <QGridLayout>
 #include <QVBoxLayout>
+#include <QPushButton>
+#include <QNetworkAccessManager>
 
 class NodeManager;
 class DeviceConfig;
@@ -27,6 +29,7 @@ private slots:
     void onMyNodeNumChanged();
     void onLoraConfigChanged();
     void onDeviceConfigChanged();
+    void onCheckFirmware();
 
 private:
     void setupUI();
@@ -37,6 +40,7 @@ private:
 
     NodeManager *m_nodeManager;
     DeviceConfig *m_deviceConfig;
+    QNetworkAccessManager *m_networkManager;
     QString m_firmwareVersion;
 
     // Identity section
@@ -44,6 +48,8 @@ private:
     QLabel *m_hwModelLabel;
     QLabel *m_nodeIdLabel;
     QLabel *m_fwVersionLabel;
+    QPushButton *m_checkFirmwareButton;
+    QLabel *m_firmwareStatusLabel;
 
     // Telemetry section
     QProgressBar *m_batteryBar;

@@ -2,6 +2,7 @@
 <RCC version="1.0">
     <qresource prefix="/">
         <file>map.html</file>
+        <file>topology.html</file>
         <file>icon.svg</file>
     </qresource>
 </RCC>

@@ -137,33 +137,34 @@ void TracerouteTableModel::addTraceroute(const MeshtasticProtocol::DecodedPacket
     tr.from = packet.to;
     tr.to = packet.from;
 
-    // Extract basic route and SNR data
-    if (packet.fields.contains("routeBack"))
+    // Extract route and SNR data
+    // "route" = forward path (us → destination), "routeBack" = return path (destination → us)
+    if (packet.fields.contains("route"))
     {
-        QVariantList routeList = packet.fields["routeBack"].toList();
+        QVariantList routeList = packet.fields["route"].toList();
         for (const auto &node : routeList)
             tr.routeTo.append(node.toString());
     }
 
-    if (packet.fields.contains("route"))
+    if (packet.fields.contains("routeBack"))
     {
-        QVariantList routeBackList = packet.fields["route"].toList();
+        QVariantList routeBackList = packet.fields["routeBack"].toList();
         for (const auto &node : routeBackList)
             tr.routeBack.append(node.toString());
     }
 
-    if (packet.fields.contains("snrBack"))
-    {
-        QVariantList snrList = packet.fields["snrBack"].toList();
-        for (const auto &snr : snrList)
-            tr.snrTo.append(QString::number(snr.toFloat(), 'f', 1));
-    }
-
     if (packet.fields.contains("snrTowards"))
     {
-        QVariantList snrBackList = packet.fields["snrTowards"].toList();
+        QVariantList snrList = packet.fields["snrTowards"].toList();
+        for (const auto &snr : snrList)
+            tr.snrTo.append(snr.isNull() ? "-" : QString::number(snr.toFloat(), 'f', 1));
+    }
+
+    if (packet.fields.contains("snrBack"))
+    {
+        QVariantList snrBackList = packet.fields["snrBack"].toList();
         for (const auto &snr : snrBackList)
-            tr.snrBack.append(QString::number(snr.toFloat(), 'f', 1));
+            tr.snrBack.append(snr.isNull() ? "-" : QString::number(snr.toFloat(), 'f', 1));
     }
 
     // Calculate distances for each hop (Inspiration from Malla: use historical locations)
@@ -280,6 +281,9 @@ QString TracerouteTableModel::formatNodeName(uint32_t nodeNum) const
 {
     if (nodeNum == 0)
         return QString();
+
+    if (nodeNum == 0xFFFFFFFF)
+        return "Unknown Node";
 
     if (m_nodeManager && m_nodeManager->hasNode(nodeNum))
     {
@@ -402,7 +406,7 @@ void TracerouteWidget::addTraceroute(const MeshtasticProtocol::DecodedPacket &pa
             QVariantList snrList = packet.fields["snrTowards"].toList();
             for (const auto &snr : snrList)
             {
-                dbTracer.snrTo.append(QString::number(snr.toFloat(), 'f', 1));
+                dbTracer.snrTo.append(snr.isNull() ? "-" : QString::number(snr.toFloat(), 'f', 1));
             }
         }
 
@@ -411,7 +415,7 @@ void TracerouteWidget::addTraceroute(const MeshtasticProtocol::DecodedPacket &pa
             QVariantList snrBackList = packet.fields["snrBack"].toList();
             for (const auto &snr : snrBackList)
             {
-                dbTracer.snrBack.append(QString::number(snr.toFloat(), 'f', 1));
+                dbTracer.snrBack.append(snr.isNull() ? "-" : QString::number(snr.toFloat(), 'f', 1));
             }
         }
 

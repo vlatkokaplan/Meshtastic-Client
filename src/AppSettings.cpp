@@ -136,6 +136,16 @@ void AppSettings::setLastPort(const QString &port)
     setValue("connection/last_port", port);
 }
 
+QString AppSettings::lastTcpHost() const
+{
+    return value("connection/last_tcp_host", QString()).toString();
+}
+
+void AppSettings::setLastTcpHost(const QString &host)
+{
+    setValue("connection/last_tcp_host", host);
+}
+
 bool AppSettings::autoConnect() const
 {
     return value("connection/auto_connect", false).toBool();

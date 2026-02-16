@@ -8,6 +8,18 @@
 #include <QGroupBox>
 #include <QSplitter>
 #include <QRandomGenerator>
+#include <QClipboard>
+#include <QApplication>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QPixmap>
+#include <QImage>
+
+#include <qrencode.h>
+
+#include "meshtastic/apponly.pb.h"
+#include "meshtastic/channel.pb.h"
+#include "meshtastic/config.pb.h"
 
 ChannelsConfigTab::ChannelsConfigTab(DeviceConfig *config, QWidget *parent)
     : QWidget(parent)
@@ -124,6 +136,16 @@ void ChannelsConfigTab::setupUI()
     bottomLayout->addWidget(m_statusLabel);
 
     bottomLayout->addStretch();
+
+    m_shareUrlButton = new QPushButton("Share URL");
+    m_shareUrlButton->setToolTip("Copy channel configuration URL to clipboard");
+    connect(m_shareUrlButton, &QPushButton::clicked, this, &ChannelsConfigTab::onShareUrlClicked);
+    bottomLayout->addWidget(m_shareUrlButton);
+
+    m_showQrButton = new QPushButton("Show QR");
+    m_showQrButton->setToolTip("Display QR code for channel configuration");
+    connect(m_showQrButton, &QPushButton::clicked, this, &ChannelsConfigTab::onShowQrClicked);
+    bottomLayout->addWidget(m_showQrButton);
 
     m_saveButton = new QPushButton("Save Channel");
     connect(m_saveButton, &QPushButton::clicked, this, &ChannelsConfigTab::onSaveClicked);
@@ -255,4 +277,130 @@ QString ChannelsConfigTab::roleToString(int role)
     case 2: return "Secondary";
     default: return "Unknown";
     }
+}
+
+QString ChannelsConfigTab::buildChannelUrl() const
+{
+    // Build ChannelSet protobuf from DeviceConfig
+    meshtastic::ChannelSet channelSet;
+
+    // Add all enabled channels
+    for (int i = 0; i < 8; i++) {
+        auto ch = m_config->channel(i);
+        if (ch.role == 0)
+            continue; // skip disabled
+
+        auto *settings = channelSet.add_settings();
+        settings->set_channel_num(i);
+        if (!ch.psk.isEmpty()) {
+            settings->set_psk(ch.psk.constData(), ch.psk.size());
+        }
+        if (!ch.name.isEmpty()) {
+            settings->set_name(ch.name.toStdString());
+        }
+        settings->set_uplink_enabled(ch.uplinkEnabled);
+        settings->set_downlink_enabled(ch.downlinkEnabled);
+    }
+
+    // Add LoRa config
+    if (m_config->hasLoRaConfig()) {
+        auto lora = m_config->loraConfig();
+        auto *loraProto = channelSet.mutable_lora_config();
+        loraProto->set_use_preset(lora.usePreset);
+        loraProto->set_modem_preset(lora.modemPreset);
+        loraProto->set_region(lora.region);
+        loraProto->set_hop_limit(lora.hopLimit);
+        loraProto->set_tx_enabled(lora.txEnabled);
+        loraProto->set_tx_power(lora.txPower);
+        loraProto->set_bandwidth(lora.bandwidth);
+        loraProto->set_spread_factor(lora.spreadFactor);
+        loraProto->set_coding_rate(lora.codingRate);
+    }
+
+    // Serialize and base64url encode
+    std::string serialized;
+    channelSet.SerializeToString(&serialized);
+    QByteArray data(serialized.data(), serialized.size());
+
+    // Base64url encoding (replace + with -, / with _, strip padding =)
+    QString base64 = QString::fromLatin1(data.toBase64());
+    base64.replace('+', '-');
+    base64.replace('/', '_');
+    while (base64.endsWith('='))
+        base64.chop(1);
+
+    return QString("https://meshtastic.org/e/#") + base64;
+}
+
+void ChannelsConfigTab::onShareUrlClicked()
+{
+    QString url = buildChannelUrl();
+    QApplication::clipboard()->setText(url);
+    m_statusLabel->setText("Channel URL copied to clipboard");
+    m_statusLabel->setStyleSheet("color: green;");
+}
+
+void ChannelsConfigTab::onShowQrClicked()
+{
+    QString url = buildChannelUrl();
+
+    // Generate QR code using libqrencode
+    QRcode *qr = QRcode_encodeString(url.toUtf8().constData(), 0, QR_ECLEVEL_M, QR_MODE_8, 1);
+    if (!qr) {
+        m_statusLabel->setText("Failed to generate QR code");
+        m_statusLabel->setStyleSheet("color: red;");
+        return;
+    }
+
+    // Convert to QImage (scale up for visibility)
+    int scale = 6;
+    int border = 2;
+    int size = (qr->width + border * 2) * scale;
+    QImage image(size, size, QImage::Format_RGB32);
+    image.fill(Qt::white);
+
+    for (int y = 0; y < qr->width; y++) {
+        for (int x = 0; x < qr->width; x++) {
+            if (qr->data[y * qr->width + x] & 1) {
+                for (int dy = 0; dy < scale; dy++) {
+                    for (int dx = 0; dx < scale; dx++) {
+                        image.setPixel((x + border) * scale + dx,
+                                       (y + border) * scale + dy,
+                                       qRgb(0, 0, 0));
+                    }
+                }
+            }
+        }
+    }
+    QRcode_free(qr);
+
+    // Show in dialog
+    QDialog *dialog = new QDialog(this);
+    dialog->setWindowTitle("Channel QR Code");
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+
+    QVBoxLayout *layout = new QVBoxLayout(dialog);
+
+    QLabel *qrLabel = new QLabel;
+    qrLabel->setPixmap(QPixmap::fromImage(image));
+    qrLabel->setAlignment(Qt::AlignCenter);
+    layout->addWidget(qrLabel);
+
+    QLabel *urlLabel = new QLabel(url);
+    urlLabel->setWordWrap(true);
+    urlLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    urlLabel->setStyleSheet("color: gray; font-size: 10px; margin-top: 8px;");
+    layout->addWidget(urlLabel);
+
+    QPushButton *copyButton = new QPushButton("Copy URL");
+    connect(copyButton, &QPushButton::clicked, this, [url]() {
+        QApplication::clipboard()->setText(url);
+    });
+    layout->addWidget(copyButton);
+
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Close);
+    connect(buttonBox, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    layout->addWidget(buttonBox);
+
+    dialog->exec();
 }

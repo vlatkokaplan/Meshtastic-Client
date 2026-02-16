@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 #include "SerialConnection.h"
+#include "TcpConnection.h"
+#include "BluetoothConnection.h"
 #include "MeshtasticProtocol.h"
 #include "NodeManager.h"
 #include "PacketListWidget.h"
@@ -12,6 +14,7 @@
 #include "DeviceConfig.h"
 #include "AppSettings.h"
 #include "AppSettingsTab.h"
+#include "TopologyWidget.h"
 
 #include "MapWidget.h"
 #include "DashboardStatsWidget.h"
@@ -50,12 +53,15 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
     AppSettings::instance()->open();
 
     m_serial = new SerialConnection(this);
+    m_tcp = new TcpConnection(this);
+    m_bluetooth = new BluetoothConnection(this);
     m_protocol = new MeshtasticProtocol(this);
     m_nodeManager = new NodeManager(this);
     m_database = nullptr; // Database opened after connection with device-specific path
 
     m_mapWidget = nullptr;
     m_dashboardStats = nullptr;
+    m_topologyWidget = nullptr;
     m_messagesWidget = nullptr;
     m_configWidget = nullptr;
     m_trayIcon = nullptr;
@@ -76,10 +82,10 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
     m_configHeartbeatTimer->setInterval(5000); // 5 seconds
     connect(m_configHeartbeatTimer, &QTimer::timeout, this, [this]()
             {
-        if (m_serial->isConnected()) {
+        if (isDeviceConnected()) {
             qDebug() << "[MainWindow] Sending config heartbeat";
             QByteArray heartbeat = m_protocol->createHeartbeatPacket();
-            m_serial->sendData(heartbeat);
+            sendToDevice(heartbeat);
         } });
 
     // Persistent connection heartbeat (keeps connection alive for long sessions)
@@ -87,10 +93,10 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
     m_connectionHeartbeatTimer->setInterval(60000); // 60 seconds - slower than config heartbeat
     connect(m_connectionHeartbeatTimer, &QTimer::timeout, this, [this]()
             {
-        if (m_serial->isConnected()) {
+        if (isDeviceConnected()) {
             qDebug() << "[MainWindow] Sending connection keep-alive heartbeat";
             QByteArray heartbeat = m_protocol->createHeartbeatPacket();
-            m_serial->sendData(heartbeat);
+            sendToDevice(heartbeat);
         } });
 
     // Connect signals
@@ -102,6 +108,30 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
             this, &MainWindow::onDataReceived);
     connect(m_serial, &SerialConnection::errorOccurred,
             this, &MainWindow::onSerialError);
+
+    // TCP connection signals
+    connect(m_tcp, &TcpConnection::connected,
+            this, &MainWindow::onConnected);
+    connect(m_tcp, &TcpConnection::disconnected,
+            this, &MainWindow::onDisconnected);
+    connect(m_tcp, &TcpConnection::dataReceived,
+            this, &MainWindow::onDataReceived);
+    connect(m_tcp, &TcpConnection::errorOccurred,
+            this, &MainWindow::onSerialError);
+
+    // Bluetooth connection signals
+    connect(m_bluetooth, &BluetoothConnection::connected,
+            this, &MainWindow::onConnected);
+    connect(m_bluetooth, &BluetoothConnection::disconnected,
+            this, &MainWindow::onDisconnected);
+    connect(m_bluetooth, &BluetoothConnection::dataReceived,
+            this, &MainWindow::onDataReceived);
+    connect(m_bluetooth, &BluetoothConnection::errorOccurred,
+            this, &MainWindow::onSerialError);
+    connect(m_bluetooth, &BluetoothConnection::deviceDiscovered,
+            this, &MainWindow::onBtDeviceDiscovered);
+    connect(m_bluetooth, &BluetoothConnection::scanFinished,
+            this, [this]() { m_btScanButton->setEnabled(true); m_btScanButton->setText("BT Scan"); });
 
     connect(m_protocol, &MeshtasticProtocol::packetReceived,
             this, &MainWindow::onPacketReceived);
@@ -159,6 +189,8 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    m_bluetooth->disconnectDevice();
+    m_tcp->disconnectDevice();
     m_serial->disconnectDevice();
 }
 
@@ -199,6 +231,10 @@ void MainWindow::setupUI()
     // Telemetry Graph tab
     m_telemetryGraphWidget = new TelemetryGraphWidget(m_nodeManager, m_database);
     m_tabWidget->addTab(m_telemetryGraphWidget, "Telemetry Graph");
+
+    // Topology tab
+    m_topologyWidget = new TopologyWidget(m_nodeManager);
+    m_tabWidget->addTab(m_topologyWidget, "Topology");
 
     setupConfigTab();
 
@@ -250,6 +286,50 @@ void MainWindow::setupToolbar()
     m_disconnectButton->setEnabled(false);
     connect(m_disconnectButton, &QPushButton::clicked, this, &MainWindow::disconnect);
     toolbar->addWidget(m_disconnectButton);
+
+    toolbar->addSeparator();
+
+    // TCP connection controls
+    QLabel *tcpLabel = new QLabel(" TCP: ");
+    toolbar->addWidget(tcpLabel);
+
+    m_hostEdit = new QLineEdit;
+    m_hostEdit->setPlaceholderText("192.168.1.x:4403");
+    m_hostEdit->setMinimumWidth(150);
+    m_hostEdit->setMaximumWidth(200);
+    // Restore last TCP host
+    QString lastHost = AppSettings::instance()->lastTcpHost();
+    if (!lastHost.isEmpty())
+        m_hostEdit->setText(lastHost);
+    toolbar->addWidget(m_hostEdit);
+
+    m_tcpConnectButton = new QPushButton("TCP Connect");
+    connect(m_tcpConnectButton, &QPushButton::clicked, this, &MainWindow::connectToTcp);
+    toolbar->addWidget(m_tcpConnectButton);
+
+    toolbar->addSeparator();
+
+    // Bluetooth connection controls
+    QLabel *btLabel = new QLabel(" BT: ");
+    toolbar->addWidget(btLabel);
+
+    m_btScanButton = new QPushButton("BT Scan");
+    m_btScanButton->setToolTip("Scan for nearby Meshtastic BLE devices");
+    connect(m_btScanButton, &QPushButton::clicked, this, &MainWindow::onBtScanClicked);
+    toolbar->addWidget(m_btScanButton);
+
+    m_btDeviceCombo = new QComboBox;
+    m_btDeviceCombo->setMinimumWidth(150);
+    m_btDeviceCombo->setMaximumWidth(200);
+    m_btDeviceCombo->setPlaceholderText("Select BT device...");
+    toolbar->addWidget(m_btDeviceCombo);
+
+    m_btConnectButton = new QPushButton("BT Connect");
+    m_btConnectButton->setToolTip("Connect to selected Bluetooth device");
+    connect(m_btConnectButton, &QPushButton::clicked, this, &MainWindow::onBtConnectClicked);
+    toolbar->addWidget(m_btConnectButton);
+
+    toolbar->addSeparator();
 
     m_rebootButton = new QPushButton("Reboot Device");
     m_rebootButton->setEnabled(false);
@@ -442,12 +522,14 @@ void MainWindow::connectToSelected()
 
 void MainWindow::disconnect()
 {
+    m_bluetooth->disconnectDevice();
+    m_tcp->disconnectDevice();
     m_serial->disconnectDevice();
 }
 
 void MainWindow::rebootDevice()
 {
-    if (!m_serial->isConnected())
+    if (!isDeviceConnected())
     {
         statusBar()->showMessage("Not connected", 3000);
         return;
@@ -471,7 +553,7 @@ void MainWindow::rebootDevice()
 
     // Send reboot command (5 second delay)
     QByteArray packet = m_protocol->createRebootPacket(myNode, myNode, 5);
-    m_serial->sendData(packet);
+    sendToDevice(packet);
 
     statusBar()->showMessage("Reboot command sent. Device will restart in 5 seconds...", 5000);
 }
@@ -483,9 +565,21 @@ void MainWindow::onConnected()
     m_rebootButton->setEnabled(true);
     m_portCombo->setEnabled(false);
     m_refreshButton->setEnabled(false);
+    m_tcpConnectButton->setEnabled(false);
+    m_hostEdit->setEnabled(false);
+    m_btScanButton->setEnabled(false);
+    m_btConnectButton->setEnabled(false);
+    m_btDeviceCombo->setEnabled(false);
 
-    // Save last used port for auto-connect
-    AppSettings::instance()->setLastPort(m_serial->connectedPortName());
+    // Save last connection info
+    if (m_tcp->isConnected())
+    {
+        AppSettings::instance()->setLastTcpHost(m_hostEdit->text());
+    }
+    else if (m_serial->isConnected())
+    {
+        AppSettings::instance()->setLastPort(m_serial->connectedPortName());
+    }
 
     // Start persistent heartbeat for long sessions
     m_connectionHeartbeatTimer->start();
@@ -507,11 +601,20 @@ void MainWindow::onConnected()
 
 void MainWindow::onDisconnected()
 {
+    // Only update UI if no transport is still connected
+    if (isDeviceConnected())
+        return;
+
     m_connectButton->setEnabled(true);
     m_disconnectButton->setEnabled(false);
     m_rebootButton->setEnabled(false);
     m_portCombo->setEnabled(true);
     m_refreshButton->setEnabled(true);
+    m_tcpConnectButton->setEnabled(true);
+    m_hostEdit->setEnabled(true);
+    m_btScanButton->setEnabled(true);
+    m_btConnectButton->setEnabled(true);
+    m_btDeviceCombo->setEnabled(true);
 
     // Stop heartbeat timers
     m_connectionHeartbeatTimer->stop();
@@ -805,6 +908,13 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             }
             break;
 
+        case MeshtasticProtocol::PortNum::Neighborinfo:
+            // Forward neighbor info to topology widget
+            if (m_topologyWidget) {
+                m_topologyWidget->handleNeighborInfo(packet.from, packet.fields);
+            }
+            break;
+
         case MeshtasticProtocol::PortNum::Routing:
             // Handle routing responses to update message status
             if (m_messagesWidget && packet.fields.contains("errorReason"))
@@ -913,7 +1023,10 @@ void MainWindow::onNodeSelected(QTableWidgetItem *item)
     if (!item)
         return;
     int row = item->row();
-    uint32_t nodeNum = m_nodeTable->item(row, 0)->data(Qt::UserRole).toUInt();
+    QTableWidgetItem *firstCol = m_nodeTable->item(row, 0);
+    if (!firstCol)
+        return;
+    uint32_t nodeNum = firstCol->data(Qt::UserRole).toUInt();
     if (m_mapWidget)
     {
         NodeInfo node = m_nodeManager->getNode(nodeNum);
@@ -1004,8 +1117,12 @@ void MainWindow::onNodeContextMenu(const QPoint &pos)
     if (!item)
         return;
 
-    // Ensure we have the data
-    uint32_t nodeNum = item->data(Qt::UserRole).toUInt();
+    // Get column 0 item which stores the nodeNum in UserRole
+    QTableWidgetItem *col0Item = m_nodeTable->item(item->row(), 0);
+    if (!col0Item)
+        return;
+
+    uint32_t nodeNum = col0Item->data(Qt::UserRole).toUInt();
     if (nodeNum == 0)
         return;
 
@@ -1045,11 +1162,14 @@ void MainWindow::onNodeContextMenu(const QPoint &pos)
     centerMapAction->setEnabled(node.hasPosition);
     QAction *selectedAction = menu.exec(m_nodeTable->viewport()->mapToGlobal(pos));
 
-    if (selectedAction == sendDmAction && sendDmAction)
+    if (sendDmAction && selectedAction == sendDmAction)
     {
         // Switch to Messages tab and start DM with this node
-        m_messagesWidget->startDirectMessage(nodeNum);
-        m_tabWidget->setCurrentWidget(m_messagesWidget);
+        if (m_messagesWidget)
+        {
+            m_messagesWidget->startDirectMessage(nodeNum);
+            m_tabWidget->setCurrentWidget(m_messagesWidget);
+        }
     }
     else if (selectedAction == tracerouteAction)
     {
@@ -1067,7 +1187,7 @@ void MainWindow::onNodeContextMenu(const QPoint &pos)
     {
         requestPosition(nodeNum);
     }
-    else if (selectedAction == centerMapAction && node.hasPosition)
+    else if (selectedAction == centerMapAction && node.hasPosition && m_mapWidget)
     {
         m_mapWidget->centerOnLocation(node.latitude, node.longitude);
         m_mapWidget->setZoomLevel(15);
@@ -1078,7 +1198,7 @@ void MainWindow::onNodeContextMenu(const QPoint &pos)
 
 void MainWindow::requestTraceroute(uint32_t nodeNum)
 {
-    if (!m_serial->isConnected())
+    if (!isDeviceConnected())
     {
         statusBar()->showMessage("Not connected", 3000);
         return;
@@ -1094,7 +1214,7 @@ void MainWindow::requestTraceroute(uint32_t nodeNum)
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     QByteArray packet = m_protocol->createTraceroutePacket(nodeNum, myNode);
-    m_serial->sendData(packet);
+    sendToDevice(packet);
 
     NodeInfo node = m_nodeManager->getNode(nodeNum);
     QString name = node.longName.isEmpty() ? node.nodeId : node.longName;
@@ -1139,7 +1259,7 @@ void MainWindow::onTracerouteCooldownTick()
 
 void MainWindow::requestNodeInfo(uint32_t nodeNum)
 {
-    if (!m_serial->isConnected())
+    if (!isDeviceConnected())
     {
         statusBar()->showMessage("Not connected", 3000);
         return;
@@ -1147,14 +1267,14 @@ void MainWindow::requestNodeInfo(uint32_t nodeNum)
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     QByteArray packet = m_protocol->createNodeInfoRequestPacket(nodeNum, myNode);
-    m_serial->sendData(packet);
+    sendToDevice(packet);
 
     statusBar()->showMessage("Node info request sent...", 3000);
 }
 
 void MainWindow::requestTelemetry(uint32_t nodeNum)
 {
-    if (!m_serial->isConnected())
+    if (!isDeviceConnected())
     {
         statusBar()->showMessage("Not connected", 3000);
         return;
@@ -1162,14 +1282,14 @@ void MainWindow::requestTelemetry(uint32_t nodeNum)
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     QByteArray packet = m_protocol->createTelemetryRequestPacket(nodeNum, myNode);
-    m_serial->sendData(packet);
+    sendToDevice(packet);
 
     statusBar()->showMessage("Telemetry request sent...", 3000);
 }
 
 void MainWindow::requestPosition(uint32_t nodeNum)
 {
-    if (!m_serial->isConnected())
+    if (!isDeviceConnected())
     {
         statusBar()->showMessage("Not connected", 3000);
         return;
@@ -1177,13 +1297,14 @@ void MainWindow::requestPosition(uint32_t nodeNum)
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     QByteArray packet = m_protocol->createPositionRequestPacket(nodeNum, myNode);
-    m_serial->sendData(packet);
+    sendToDevice(packet);
 
     statusBar()->showMessage("Position request sent...", 3000);
 }
 
 void MainWindow::updateNodeList()
 {
+    m_nodeTable->setUpdatesEnabled(false);
     m_nodeTable->setRowCount(0);
 
     // Only re-sort when node data has changed, not just filter changes
@@ -1294,41 +1415,34 @@ void MainWindow::updateNodeList()
         {
             batteryItem->setForeground(QBrush(Qt::gray));
         }
-        if (node.batteryLevel >= 0)
+        if (node.isExternalPower)
         {
-            if (node.isExternalPower)
-            {
-                batteryItem->setIcon(QIcon::fromTheme("battery-charging"));
-                batteryItem->setText("Plugged");
-            }
-            else
-            {
-                int level = node.batteryLevel;
-                if (level > 80)
-                    batteryItem->setIcon(QIcon::fromTheme("battery-full"));
-                else if (level > 60)
-                    batteryItem->setIcon(QIcon::fromTheme("battery-good"));
-                else if (level > 40)
-                    batteryItem->setIcon(QIcon::fromTheme("battery-medium"));
-                else if (level > 20)
-                    batteryItem->setIcon(QIcon::fromTheme("battery-low"));
-                else
-                    batteryItem->setIcon(QIcon::fromTheme("battery-caution"));
-                batteryItem->setText(QString::number(level) + "%");
-            }
+            batteryItem->setIcon(QIcon::fromTheme("battery-charging"));
+            batteryItem->setText("Plugged");
         }
-        else
+        else if (node.batteryLevel > 0 || node.voltage > 0)
         {
-            batteryItem->setText("?");
+            int level = node.batteryLevel;
+            if (level > 80)
+                batteryItem->setIcon(QIcon::fromTheme("battery-full"));
+            else if (level > 60)
+                batteryItem->setIcon(QIcon::fromTheme("battery-good"));
+            else if (level > 40)
+                batteryItem->setIcon(QIcon::fromTheme("battery-medium"));
+            else if (level > 20)
+                batteryItem->setIcon(QIcon::fromTheme("battery-low"));
+            else
+                batteryItem->setIcon(QIcon::fromTheme("battery-caution"));
+            batteryItem->setText(QString::number(level) + "%");
         }
         m_nodeTable->setItem(row, 4, batteryItem);
 
         // Col 5: Signal (bars for 0-hop, hop count for multi-hop)
         QTableWidgetItem *signalItem = new QTableWidgetItem;
         signalItem->setTextAlignment(Qt::AlignCenter);
-        if (node.hopsAway == 0)
+        if (node.hopsAway == 0 && (node.snr != 0.0f || node.rssi != 0))
         {
-            // Direct node - show signal bars based on SNR
+            // Direct node with signal data - show signal bars based on SNR
             QString bars;
             QColor color;
             float snr = node.snr;
@@ -1367,6 +1481,8 @@ void MainWindow::updateNodeList()
         row++;
     }
 
+    m_nodeTable->setUpdatesEnabled(true);
+
     // Draw test lines if test mode is enabled
     if (m_testMode && m_mapWidget)
     {
@@ -1380,10 +1496,10 @@ void MainWindow::updateStatusLabel()
     int nodeCount = m_nodeManager->allNodes().count();
     int dbCount = m_database && m_database->isOpen() ? m_database->nodeCount() : 0;
 
-    if (m_serial->isConnected())
+    if (isDeviceConnected())
     {
         status = QString("Connected: %1 | Nodes: %2 (DB: %3)")
-                     .arg(m_serial->connectedPortName())
+                     .arg(connectedDeviceName())
                      .arg(nodeCount)
                      .arg(dbCount);
     }
@@ -1396,7 +1512,7 @@ void MainWindow::updateStatusLabel()
 
 void MainWindow::requestConfig()
 {
-    if (!m_serial->isConnected())
+    if (!isDeviceConnected())
     {
         return;
     }
@@ -1411,7 +1527,7 @@ void MainWindow::requestConfig()
     statusBar()->showMessage(QString("Requesting configuration (ID: %1)...").arg(m_expectedConfigId));
 
     // Send want_config_id
-    m_serial->sendData(m_protocol->createWantConfigPacket(m_expectedConfigId));
+    sendToDevice(m_protocol->createWantConfigPacket(m_expectedConfigId));
 
     // Start fast heartbeat for config phase
     if (!m_configHeartbeatTimer->isActive())
@@ -1497,7 +1613,7 @@ void MainWindow::closeDatabase()
 
 void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel)
 {
-    if (!m_serial->isConnected())
+    if (!isDeviceConnected())
     {
         statusBar()->showMessage("Not connected", 3000);
         return;
@@ -1506,7 +1622,7 @@ void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel
     uint32_t myNode = m_nodeManager->myNodeNum();
     uint32_t packetId = 0;
     QByteArray packet = m_protocol->createTextMessagePacket(text, toNode, myNode, channel, 0, &packetId);
-    m_serial->sendData(packet);
+    sendToDevice(packet);
 
     qDebug() << "[MainWindow] Sent message with packetId:" << packetId;
 
@@ -1536,7 +1652,7 @@ void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel
 
 void MainWindow::onSendReaction(const QString &emoji, uint32_t toNode, int channel, uint32_t replyId)
 {
-    if (!m_serial->isConnected())
+    if (!isDeviceConnected())
     {
         statusBar()->showMessage("Not connected", 3000);
         return;
@@ -1545,7 +1661,7 @@ void MainWindow::onSendReaction(const QString &emoji, uint32_t toNode, int chann
     uint32_t myNode = m_nodeManager->myNodeNum();
     uint32_t packetId = 0;
     QByteArray packet = m_protocol->createTextMessagePacket(emoji, toNode, myNode, channel, replyId, &packetId);
-    m_serial->sendData(packet);
+    sendToDevice(packet);
 
     // Add the reaction to our local display
     ChatMessage msg;
@@ -1601,20 +1717,22 @@ void MainWindow::showTracerouteResult(const MeshtasticProtocol::DecodedPacket &p
     QVBoxLayout *layout = new QVBoxLayout(dialog);
 
     // Header with source and destination
+    // packet.from = responder (the node we tracerouted), packet.to = requester (us)
+    // So for display: origin = packet.to (us), destination = packet.from (target)
     QString fromName, toName;
-    if (packet.from != 0)
-    {
-        NodeInfo fromNode = m_nodeManager->getNode(packet.from);
-        fromName = fromNode.longName.isEmpty()
-                       ? MeshtasticProtocol::nodeIdToString(packet.from)
-                       : fromNode.longName;
-    }
     if (packet.to != 0)
     {
-        NodeInfo toNode = m_nodeManager->getNode(packet.to);
-        toName = toNode.longName.isEmpty()
-                     ? MeshtasticProtocol::nodeIdToString(packet.to)
-                     : toNode.longName;
+        NodeInfo originNode = m_nodeManager->getNode(packet.to);
+        fromName = originNode.longName.isEmpty()
+                       ? MeshtasticProtocol::nodeIdToString(packet.to)
+                       : originNode.longName;
+    }
+    if (packet.from != 0)
+    {
+        NodeInfo destNode = m_nodeManager->getNode(packet.from);
+        toName = destNode.longName.isEmpty()
+                     ? MeshtasticProtocol::nodeIdToString(packet.from)
+                     : destNode.longName;
     }
 
     QLabel *headerLabel = new QLabel(QString("<h3>Traceroute: %1 → %2</h3>").arg(fromName, toName));
@@ -1657,12 +1775,17 @@ void MainWindow::showTracerouteResult(const MeshtasticProtocol::DecodedPacket &p
         {
             QString nodeId = route[i].toString();
             uint32_t nodeNum = MeshtasticProtocol::nodeIdFromString(nodeId);
-            NodeInfo node = m_nodeManager->getNode(nodeNum);
-            QString nodeName = node.longName.isEmpty() ? nodeId : node.longName;
+            QString nodeName;
+            if (nodeNum == 0xFFFFFFFF) {
+                nodeName = "<i>Unknown Node</i>";
+            } else {
+                NodeInfo node = m_nodeManager->getNode(nodeNum);
+                nodeName = node.longName.isEmpty() ? nodeId : node.longName;
+            }
 
             QString snrStr = "-";
             QString snrClass = "";
-            if (i < snrTowards.size())
+            if (i < snrTowards.size() && !snrTowards[i].isNull())
             {
                 double snr = snrTowards[i].toDouble();
                 snrStr = QString::number(snr, 'f', 1);
@@ -1709,12 +1832,17 @@ void MainWindow::showTracerouteResult(const MeshtasticProtocol::DecodedPacket &p
         {
             QString nodeId = routeBack[i].toString();
             uint32_t nodeNum = MeshtasticProtocol::nodeIdFromString(nodeId);
-            NodeInfo node = m_nodeManager->getNode(nodeNum);
-            QString nodeName = node.longName.isEmpty() ? nodeId : node.longName;
+            QString nodeName;
+            if (nodeNum == 0xFFFFFFFF) {
+                nodeName = "<i>Unknown Node</i>";
+            } else {
+                NodeInfo node = m_nodeManager->getNode(nodeNum);
+                nodeName = node.longName.isEmpty() ? nodeId : node.longName;
+            }
 
             QString snrStr = "-";
             QString snrClass = "";
-            if (i < snrBack.size())
+            if (i < snrBack.size() && !snrBack[i].isNull())
             {
                 double snr = snrBack[i].toDouble();
                 snrStr = QString::number(snr, 'f', 1);
@@ -1767,7 +1895,7 @@ void MainWindow::showTracerouteResult(const MeshtasticProtocol::DecodedPacket &p
 
 void MainWindow::onSaveLoRaConfig()
 {
-    if (!m_serial->isConnected())
+    if (!isDeviceConnected())
     {
         statusBar()->showMessage("Not connected", 3000);
         return;
@@ -1791,14 +1919,14 @@ void MainWindow::onSaveLoRaConfig()
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     QByteArray packet = m_protocol->createLoRaConfigPacket(myNode, myNode, config);
-    m_serial->sendData(packet);
+    sendToDevice(packet);
 
     statusBar()->showMessage("LoRa config saved to device", 3000);
 }
 
 void MainWindow::onSaveDeviceConfig()
 {
-    if (!m_serial->isConnected())
+    if (!isDeviceConnected())
     {
         statusBar()->showMessage("Not connected", 3000);
         return;
@@ -1825,14 +1953,14 @@ void MainWindow::onSaveDeviceConfig()
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     QByteArray packet = m_protocol->createDeviceConfigPacket(myNode, myNode, config);
-    m_serial->sendData(packet);
+    sendToDevice(packet);
 
     statusBar()->showMessage("Device config saved to device", 3000);
 }
 
 void MainWindow::onSavePositionConfig()
 {
-    if (!m_serial->isConnected())
+    if (!isDeviceConnected())
     {
         statusBar()->showMessage("Not connected", 3000);
         return;
@@ -1857,7 +1985,7 @@ void MainWindow::onSavePositionConfig()
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     QByteArray packet = m_protocol->createPositionConfigPacket(myNode, myNode, config);
-    m_serial->sendData(packet);
+    sendToDevice(packet);
 
     statusBar()->showMessage("Position config saved to device", 3000);
 }
@@ -1866,7 +1994,7 @@ void MainWindow::onSaveChannelConfig(int channelIndex)
 {
     qDebug() << "=== onSaveChannelConfig called for channel" << channelIndex << "===";
 
-    if (!m_serial->isConnected())
+    if (!isDeviceConnected())
     {
         qDebug() << "Not connected!";
         statusBar()->showMessage("Not connected", 3000);
@@ -1897,8 +2025,8 @@ void MainWindow::onSaveChannelConfig(int channelIndex)
     QByteArray packet = m_protocol->createChannelConfigPacket(myNode, myNode, channelIndex, config);
     qDebug() << "Packet size:" << packet.size() << "bytes";
 
-    m_serial->sendData(packet);
-    qDebug() << "Packet sent to serial";
+    sendToDevice(packet);
+    qDebug() << "Packet sent to device";
 
     // Update MessagesWidget immediately (don't wait for device response)
     if (m_messagesWidget)
@@ -2093,10 +2221,10 @@ void MainWindow::onConfigCompleteIdReceived(uint32_t configId)
             m_configHeartbeatTimer->stop();
 
         // Request session key for admin operations
-        if (m_serial && m_serial->isConnected() && m_protocol)
+        if (isDeviceConnected() && m_protocol)
         {
             qDebug() << "[MainWindow] Requesting session key for admin operations";
-            m_serial->sendData(m_protocol->createSessionKeyRequestPacket());
+            sendToDevice(m_protocol->createSessionKeyRequestPacket());
         }
 
         // Explicitly refresh all tabs or signal config ready
@@ -2157,6 +2285,112 @@ void MainWindow::drawTestNodeLines()
         qDebug() << "[Test] Drawing line from" << from.shortName << "to" << to.shortName;
         m_mapWidget->drawPacketFlow(from.nodeNum, to.nodeNum, from.latitude, from.longitude, to.latitude, to.longitude);
     }
+}
+
+bool MainWindow::isDeviceConnected() const
+{
+    return m_serial->isConnected() || m_tcp->isConnected() || m_bluetooth->isConnected();
+}
+
+bool MainWindow::sendToDevice(const QByteArray &data)
+{
+    if (m_bluetooth->isConnected())
+        return m_bluetooth->sendData(data);
+    if (m_tcp->isConnected())
+        return m_tcp->sendData(data);
+    if (m_serial->isConnected())
+        return m_serial->sendData(data);
+    return false;
+}
+
+QString MainWindow::connectedDeviceName() const
+{
+    if (m_bluetooth->isConnected())
+        return m_bluetooth->connectedDeviceName();
+    if (m_tcp->isConnected())
+        return m_tcp->connectedAddress();
+    if (m_serial->isConnected())
+        return m_serial->connectedPortName();
+    return QString();
+}
+
+void MainWindow::onBtScanClicked()
+{
+    m_btDeviceCombo->clear();
+    m_btScanButton->setEnabled(false);
+    m_btScanButton->setText("Scanning...");
+    m_bluetooth->startScan();
+    statusBar()->showMessage("Scanning for Bluetooth devices...", 5000);
+}
+
+void MainWindow::onBtConnectClicked()
+{
+    if (m_btDeviceCombo->count() == 0 || m_btDeviceCombo->currentIndex() < 0) {
+        statusBar()->showMessage("No Bluetooth device selected. Scan first.", 3000);
+        return;
+    }
+
+    // The device info is stored in the combo box item data
+    QBluetoothDeviceInfo deviceInfo = m_btDeviceCombo->currentData().value<QBluetoothDeviceInfo>();
+    if (!deviceInfo.isValid()) {
+        statusBar()->showMessage("Invalid device selection", 3000);
+        return;
+    }
+
+    m_btConnectButton->setEnabled(false);
+    statusBar()->showMessage("Connecting via Bluetooth...");
+    m_bluetooth->connectToDevice(deviceInfo);
+}
+
+void MainWindow::onBtDeviceDiscovered(const QString &name, const QString &address, const QBluetoothDeviceInfo &info)
+{
+    // Check for duplicates
+    for (int i = 0; i < m_btDeviceCombo->count(); i++) {
+        if (m_btDeviceCombo->itemText(i).contains(address))
+            return;
+    }
+
+    QString label = QString("%1 (%2)").arg(name, address);
+    m_btDeviceCombo->addItem(label, QVariant::fromValue(info));
+    statusBar()->showMessage(QString("Found: %1").arg(name), 3000);
+}
+
+void MainWindow::connectToTcp()
+{
+    QString input = m_hostEdit->text().trimmed();
+    if (input.isEmpty())
+    {
+        statusBar()->showMessage("Enter a host address", 3000);
+        return;
+    }
+
+    QString host;
+    quint16 port = 4403;
+
+    // Parse "host:port" or just "host"
+    int colonIdx = input.lastIndexOf(':');
+    if (colonIdx > 0)
+    {
+        bool ok;
+        quint16 parsedPort = input.mid(colonIdx + 1).toUShort(&ok);
+        if (ok)
+        {
+            host = input.left(colonIdx);
+            port = parsedPort;
+        }
+        else
+        {
+            host = input;
+        }
+    }
+    else
+    {
+        host = input;
+    }
+
+    m_tcpConnectButton->setEnabled(false);
+    statusBar()->showMessage(QString("Connecting to %1:%2...").arg(host).arg(port));
+    m_tcp->connectToHost(host, port);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

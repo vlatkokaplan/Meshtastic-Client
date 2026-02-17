@@ -65,7 +65,7 @@ jobs:
           modules: 'qtserialport qtwebchannel qtwebengine qtpositioning qtconnectivity'
 
       - name: Install vcpkg dependencies
-        run: vcpkg install protobuf:x64-windows openssl:x64-windows qrencode:x64-windows
+        run: vcpkg install protobuf:x64-windows openssl:x64-windows
 
       - name: Configure
         run: |

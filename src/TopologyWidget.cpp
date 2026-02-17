@@ -1,5 +1,6 @@
 #include "TopologyWidget.h"
 #include "NodeManager.h"
+#include "Database.h"
 
 #include <QVBoxLayout>
 #include <QLabel>
@@ -48,6 +49,43 @@ void TopologyWidget::onGraphReady()
     refreshFromManager();
 }
 
+void TopologyWidget::setDatabase(Database *db)
+{
+    m_database = db;
+}
+
+void TopologyWidget::loadFromDatabase()
+{
+    if (!m_database)
+        return;
+
+    auto allNeighbors = m_database->loadAllNeighborInfo();
+    if (allNeighbors.isEmpty())
+        return;
+
+    qDebug() << "[Topology] Loading neighbor info from DB for" << allNeighbors.size() << "nodes";
+
+    // Convert DB records to internal format
+    m_neighborData.clear();
+    for (auto it = allNeighbors.constBegin(); it != allNeighbors.constEnd(); ++it)
+    {
+        uint32_t fromNode = it.key();
+        QList<NeighborEntry> entries;
+        for (const auto &rec : it.value())
+        {
+            NeighborEntry entry;
+            entry.neighborNode = rec.neighborNode;
+            entry.snr = rec.snr;
+            entries.append(entry);
+        }
+        m_neighborData[fromNode] = entries;
+    }
+
+    // Refresh graph if ready
+    if (m_graphReady)
+        refreshFromManager();
+}
+
 void TopologyWidget::runJavaScript(const QString &script)
 {
 #if HAVE_WEBENGINE
@@ -80,6 +118,21 @@ void TopologyWidget::handleNeighborInfo(uint32_t fromNode, const QVariantMap &fi
              << "- neighbors:" << entries.size();
 
     m_neighborData[fromNode] = entries;
+
+    // Persist to database
+    if (m_database)
+    {
+        QList<Database::NeighborRecord> dbRecords;
+        for (const auto &entry : entries)
+        {
+            Database::NeighborRecord rec;
+            rec.nodeNum = fromNode;
+            rec.neighborNode = entry.neighborNode;
+            rec.snr = entry.snr;
+            dbRecords.append(rec);
+        }
+        m_database->saveNeighborInfo(fromNode, dbRecords);
+    }
 
     // Update graph
     addNodeToGraph(fromNode);

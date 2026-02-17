@@ -7,7 +7,7 @@
 #include <QDebug>
 #include <QUuid>
 
-static const int SCHEMA_VERSION = 7;
+static const int SCHEMA_VERSION = 8;
 
 Database::Database(QObject *parent)
     : QObject(parent)
@@ -250,7 +250,24 @@ bool Database::createTables()
         return false;
     }
 
+    // Neighbor info table (for topology)
+    if (!query.exec(R"(
+        CREATE TABLE IF NOT EXISTS neighbor_info (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_num INTEGER,
+            neighbor_node INTEGER,
+            snr REAL DEFAULT 0,
+            timestamp INTEGER,
+            UNIQUE(node_num, neighbor_node)
+        )
+    )"))
+    {
+        qWarning() << "Failed to create neighbor_info table:" << query.lastError().text();
+        return false;
+    }
+
     // Indexes
+    query.exec("CREATE INDEX IF NOT EXISTS idx_neighbor_node ON neighbor_info(node_num)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_node)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_node)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)");
@@ -410,6 +427,27 @@ bool Database::migrateSchema(int fromVersion, int toVersion)
             query.exec("CREATE INDEX IF NOT EXISTS idx_packets_from ON packets(from_node)");
             query.exec("CREATE INDEX IF NOT EXISTS idx_packets_type ON packets(packet_type)");
             qDebug() << "Database migrated to schema version 7";
+            break;
+
+        case 8:
+            // Add neighbor_info table for topology persistence
+            qDebug() << "Migrating to schema version 8 - adding neighbor_info table";
+            if (!query.exec(R"(
+                CREATE TABLE IF NOT EXISTS neighbor_info (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    node_num INTEGER,
+                    neighbor_node INTEGER,
+                    snr REAL DEFAULT 0,
+                    timestamp INTEGER,
+                    UNIQUE(node_num, neighbor_node)
+                )
+            )"))
+            {
+                qWarning() << "Migration to v8 failed:" << query.lastError().text();
+                return false;
+            }
+            query.exec("CREATE INDEX IF NOT EXISTS idx_neighbor_node ON neighbor_info(node_num)");
+            qDebug() << "Database migrated to schema version 8";
             break;
         }
     }
@@ -1272,6 +1310,95 @@ QList<Database::PacketRecord> Database::loadPackets(int limit, int offset)
     }
 
     return packets;
+}
+
+bool Database::saveNeighborInfo(uint32_t nodeNum, const QList<NeighborRecord> &neighbors)
+{
+    if (!m_db.isOpen() || nodeNum == 0)
+        return false;
+
+    if (!m_db.transaction())
+    {
+        qWarning() << "Failed to start transaction for neighbor info:" << m_db.lastError().text();
+        return false;
+    }
+
+    // Delete old entries for this node, then insert fresh ones
+    QSqlQuery delQuery(m_db);
+    delQuery.prepare("DELETE FROM neighbor_info WHERE node_num = ?");
+    delQuery.addBindValue(nodeNum);
+    delQuery.exec();
+
+    qint64 now = QDateTime::currentSecsSinceEpoch();
+
+    QSqlQuery query(m_db);
+    query.prepare(R"(
+        INSERT INTO neighbor_info (node_num, neighbor_node, snr, timestamp)
+        VALUES (:node_num, :neighbor_node, :snr, :timestamp)
+    )");
+
+    for (const auto &rec : neighbors)
+    {
+        query.bindValue(":node_num", nodeNum);
+        query.bindValue(":neighbor_node", rec.neighborNode);
+        query.bindValue(":snr", rec.snr);
+        query.bindValue(":timestamp", now);
+
+        if (!query.exec())
+        {
+            qWarning() << "Failed to save neighbor record:" << query.lastError().text();
+            m_db.rollback();
+            return false;
+        }
+    }
+
+    return m_db.commit();
+}
+
+QMap<uint32_t, QList<Database::NeighborRecord>> Database::loadAllNeighborInfo()
+{
+    QMap<uint32_t, QList<NeighborRecord>> result;
+    if (!m_db.isOpen())
+        return result;
+
+    QSqlQuery query(m_db);
+    if (!query.exec("SELECT node_num, neighbor_node, snr, timestamp FROM neighbor_info ORDER BY node_num"))
+    {
+        qWarning() << "Failed to load neighbor info:" << query.lastError().text();
+        return result;
+    }
+
+    while (query.next())
+    {
+        NeighborRecord rec;
+        rec.nodeNum = query.value("node_num").toUInt();
+        rec.neighborNode = query.value("neighbor_node").toUInt();
+        rec.snr = query.value("snr").toFloat();
+        rec.timestamp = query.value("timestamp").toLongLong();
+        result[rec.nodeNum].append(rec);
+    }
+
+    qDebug() << "[Database] Loaded neighbor info for" << result.size() << "nodes";
+    return result;
+}
+
+bool Database::deleteOldNeighborInfo(int daysOld)
+{
+    if (!m_db.isOpen())
+        return false;
+
+    QSqlQuery query(m_db);
+    qint64 cutoff = QDateTime::currentSecsSinceEpoch() - (daysOld * 86400);
+    query.prepare("DELETE FROM neighbor_info WHERE timestamp < ?");
+    query.addBindValue(cutoff);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to delete old neighbor info:" << query.lastError().text();
+        return false;
+    }
+
+    return true;
 }
 
 bool Database::deleteOldPackets(int daysOld)

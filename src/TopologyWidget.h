@@ -5,6 +5,8 @@
 #include <QVariantMap>
 #include <QMap>
 
+class Database;
+
 #if HAVE_WEBENGINE
 #include <QWebEngineView>
 #include <QWebChannel>
@@ -32,6 +34,8 @@ public:
     explicit TopologyWidget(NodeManager *nodeManager, QWidget *parent = nullptr);
 
     void handleNeighborInfo(uint32_t fromNode, const QVariantMap &fields);
+    void setDatabase(Database *db);
+    void loadFromDatabase();
     void refreshFromManager();
     void highlightPath(const QList<uint32_t> &nodeList);
 
@@ -45,6 +49,7 @@ private:
     void addLinkToGraph(uint32_t fromNode, uint32_t toNode, float snr, bool bidirectional);
 
     NodeManager *m_nodeManager;
+    Database *m_database = nullptr;
     bool m_graphReady;
 
 #if HAVE_WEBENGINE

@@ -15,6 +15,7 @@
 #include "AppSettings.h"
 #include "AppSettingsTab.h"
 #include "TopologyWidget.h"
+#include "ConnectionDialog.h"
 
 #include "MapWidget.h"
 #include "DashboardStatsWidget.h"
@@ -128,10 +129,7 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
             this, &MainWindow::onDataReceived);
     connect(m_bluetooth, &BluetoothConnection::errorOccurred,
             this, &MainWindow::onSerialError);
-    connect(m_bluetooth, &BluetoothConnection::deviceDiscovered,
-            this, &MainWindow::onBtDeviceDiscovered);
-    connect(m_bluetooth, &BluetoothConnection::scanFinished,
-            this, [this]() { m_btScanButton->setEnabled(true); m_btScanButton->setText("BT Scan"); });
+    // BT discovery signals are wired to the ConnectionDialog when it's open
 
     connect(m_protocol, &MeshtasticProtocol::packetReceived,
             this, &MainWindow::onPacketReceived);
@@ -147,8 +145,6 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
                 updateNodeList();
             });
 
-    // Initial refresh
-    refreshPorts();
     updateStatusLabel();
 
     // Auto-connect if enabled
@@ -157,15 +153,22 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
         QString lastPort = AppSettings::instance()->lastPort();
         if (!lastPort.isEmpty())
         {
-            // Find the port in combo box
-            for (int i = 0; i < m_portCombo->count(); i++)
+            // Verify the port exists before auto-connecting
+            QList<QSerialPortInfo> allPorts = SerialConnection::availablePorts();
+            bool portFound = false;
+            for (const QSerialPortInfo &info : allPorts)
             {
-                if (m_portCombo->itemData(i).toString() == lastPort)
+                if (info.portName() == lastPort)
                 {
-                    m_portCombo->setCurrentIndex(i);
-                    QTimer::singleShot(500, this, &MainWindow::connectToSelected);
+                    portFound = true;
                     break;
                 }
+            }
+            if (portFound)
+            {
+                QTimer::singleShot(500, this, [this, lastPort]() {
+                    connectSerial(lastPort);
+                });
             }
         }
     }
@@ -264,22 +267,9 @@ void MainWindow::setupToolbar()
     QToolBar *toolbar = addToolBar("Main");
     toolbar->setMovable(false);
 
-    // Port selection
-    QLabel *portLabel = new QLabel(" Port: ");
-    toolbar->addWidget(portLabel);
-
-    m_portCombo = new QComboBox;
-    m_portCombo->setMinimumWidth(200);
-    toolbar->addWidget(m_portCombo);
-
-    m_refreshButton = new QPushButton("Refresh");
-    connect(m_refreshButton, &QPushButton::clicked, this, &MainWindow::refreshPorts);
-    toolbar->addWidget(m_refreshButton);
-
-    toolbar->addSeparator();
-
-    m_connectButton = new QPushButton("Connect");
-    connect(m_connectButton, &QPushButton::clicked, this, &MainWindow::connectToSelected);
+    m_connectButton = new QPushButton("Connect...");
+    m_connectButton->setToolTip("Open connection dialog (Serial, TCP, or Bluetooth)");
+    connect(m_connectButton, &QPushButton::clicked, this, &MainWindow::showConnectionDialog);
     toolbar->addWidget(m_connectButton);
 
     m_disconnectButton = new QPushButton("Disconnect");
@@ -289,55 +279,11 @@ void MainWindow::setupToolbar()
 
     toolbar->addSeparator();
 
-    // TCP connection controls
-    QLabel *tcpLabel = new QLabel(" TCP: ");
-    toolbar->addWidget(tcpLabel);
-
-    m_hostEdit = new QLineEdit;
-    m_hostEdit->setPlaceholderText("192.168.1.x:4403");
-    m_hostEdit->setMinimumWidth(150);
-    m_hostEdit->setMaximumWidth(200);
-    // Restore last TCP host
-    QString lastHost = AppSettings::instance()->lastTcpHost();
-    if (!lastHost.isEmpty())
-        m_hostEdit->setText(lastHost);
-    toolbar->addWidget(m_hostEdit);
-
-    m_tcpConnectButton = new QPushButton("TCP Connect");
-    connect(m_tcpConnectButton, &QPushButton::clicked, this, &MainWindow::connectToTcp);
-    toolbar->addWidget(m_tcpConnectButton);
-
-    toolbar->addSeparator();
-
-    // Bluetooth connection controls
-    QLabel *btLabel = new QLabel(" BT: ");
-    toolbar->addWidget(btLabel);
-
-    m_btScanButton = new QPushButton("BT Scan");
-    m_btScanButton->setToolTip("Scan for nearby Meshtastic BLE devices");
-    connect(m_btScanButton, &QPushButton::clicked, this, &MainWindow::onBtScanClicked);
-    toolbar->addWidget(m_btScanButton);
-
-    m_btDeviceCombo = new QComboBox;
-    m_btDeviceCombo->setMinimumWidth(150);
-    m_btDeviceCombo->setMaximumWidth(200);
-    m_btDeviceCombo->setPlaceholderText("Select BT device...");
-    toolbar->addWidget(m_btDeviceCombo);
-
-    m_btConnectButton = new QPushButton("BT Connect");
-    m_btConnectButton->setToolTip("Connect to selected Bluetooth device");
-    connect(m_btConnectButton, &QPushButton::clicked, this, &MainWindow::onBtConnectClicked);
-    toolbar->addWidget(m_btConnectButton);
-
-    toolbar->addSeparator();
-
     m_rebootButton = new QPushButton("Reboot Device");
     m_rebootButton->setEnabled(false);
     m_rebootButton->setToolTip("Reboot the connected Meshtastic device");
     connect(m_rebootButton, &QPushButton::clicked, this, &MainWindow::rebootDevice);
     toolbar->addWidget(m_rebootButton);
-
-    toolbar->addSeparator();
 
     QPushButton *configButton = new QPushButton("Request Config");
     connect(configButton, &QPushButton::clicked, this, &MainWindow::requestConfig);
@@ -459,65 +405,58 @@ void MainWindow::setupConfigTab()
     }
 }
 
-void MainWindow::refreshPorts()
+void MainWindow::showConnectionDialog()
 {
-    m_portCombo->clear();
+    ConnectionDialog dialog(m_bluetooth, this);
 
-    // First add detected Meshtastic devices
-    QList<QSerialPortInfo> meshtasticPorts = SerialConnection::detectMeshtasticDevices();
-    for (const QSerialPortInfo &info : meshtasticPorts)
-    {
-        QString label = QString("%1 - %2 [Meshtastic]")
-                            .arg(info.portName())
-                            .arg(SerialConnection::deviceDescription(info));
-        m_portCombo->addItem(label, info.portName());
-    }
+    // Wire BT discovery signals to dialog while it's open
+    connect(m_bluetooth, &BluetoothConnection::deviceDiscovered,
+            &dialog, &ConnectionDialog::onBtDeviceDiscovered);
+    connect(m_bluetooth, &BluetoothConnection::scanFinished,
+            &dialog, &ConnectionDialog::onBtScanFinished);
 
-    // Then add other ports
-    QList<QSerialPortInfo> allPorts = SerialConnection::availablePorts();
-    for (const QSerialPortInfo &info : allPorts)
-    {
-        // Skip if already added as Meshtastic device
-        bool isMeshtastic = false;
-        for (const QSerialPortInfo &mesh : meshtasticPorts)
-        {
-            if (mesh.portName() == info.portName())
-            {
-                isMeshtastic = true;
-                break;
-            }
-        }
-        if (isMeshtastic)
-            continue;
+    if (dialog.exec() != QDialog::Accepted)
+        return;
 
-        QString label = QString("%1 - %2")
-                            .arg(info.portName())
-                            .arg(SerialConnection::deviceDescription(info));
-        m_portCombo->addItem(label, info.portName());
-    }
+    ConnectionDialog::ConnectionResult result = dialog.result();
 
-    if (m_portCombo->count() == 0)
-    {
-        m_portCombo->addItem("No ports found", QString());
+    switch (result.type) {
+    case ConnectionDialog::ConnectionType::Serial:
+        connectSerial(result.serialPort);
+        break;
+    case ConnectionDialog::ConnectionType::Tcp:
+        AppSettings::instance()->setLastTcpHost(
+            result.tcpHost + ":" + QString::number(result.tcpPort));
+        connectTcp(result.tcpHost, result.tcpPort);
+        break;
+    case ConnectionDialog::ConnectionType::Bluetooth:
+        connectBluetooth(result.btDevice);
+        break;
+    default:
+        break;
     }
 }
 
-void MainWindow::connectToSelected()
+void MainWindow::connectSerial(const QString &port)
 {
-    QString portName = m_portCombo->currentData().toString();
-    if (portName.isEmpty())
-    {
-        QMessageBox::warning(this, "Error", "No port selected");
-        return;
-    }
-
     m_connectButton->setEnabled(false);
-    statusBar()->showMessage("Connecting to " + portName + "...");
-
-    if (!m_serial->connectToPort(portName))
-    {
+    statusBar()->showMessage("Connecting to " + port + "...");
+    if (!m_serial->connectToPort(port))
         m_connectButton->setEnabled(true);
-    }
+}
+
+void MainWindow::connectTcp(const QString &host, quint16 port)
+{
+    m_connectButton->setEnabled(false);
+    statusBar()->showMessage(QString("Connecting to %1:%2...").arg(host).arg(port));
+    m_tcp->connectToHost(host, port);
+}
+
+void MainWindow::connectBluetooth(const QBluetoothDeviceInfo &device)
+{
+    m_connectButton->setEnabled(false);
+    statusBar()->showMessage("Connecting via Bluetooth...");
+    m_bluetooth->connectToDevice(device);
 }
 
 void MainWindow::disconnect()
@@ -563,20 +502,9 @@ void MainWindow::onConnected()
     m_connectButton->setEnabled(false);
     m_disconnectButton->setEnabled(true);
     m_rebootButton->setEnabled(true);
-    m_portCombo->setEnabled(false);
-    m_refreshButton->setEnabled(false);
-    m_tcpConnectButton->setEnabled(false);
-    m_hostEdit->setEnabled(false);
-    m_btScanButton->setEnabled(false);
-    m_btConnectButton->setEnabled(false);
-    m_btDeviceCombo->setEnabled(false);
 
     // Save last connection info
-    if (m_tcp->isConnected())
-    {
-        AppSettings::instance()->setLastTcpHost(m_hostEdit->text());
-    }
-    else if (m_serial->isConnected())
+    if (m_serial->isConnected())
     {
         AppSettings::instance()->setLastPort(m_serial->connectedPortName());
     }
@@ -589,6 +517,7 @@ void MainWindow::onConnected()
         if (m_database) {
             m_database->deleteOldPackets(7);  // Delete packets older than 7 days
             m_database->deleteTelemetryHistory(7);  // Delete telemetry older than 7 days
+            m_database->deleteOldNeighborInfo(7);  // Delete neighbor info older than 7 days
         }
     });
 
@@ -608,13 +537,6 @@ void MainWindow::onDisconnected()
     m_connectButton->setEnabled(true);
     m_disconnectButton->setEnabled(false);
     m_rebootButton->setEnabled(false);
-    m_portCombo->setEnabled(true);
-    m_refreshButton->setEnabled(true);
-    m_tcpConnectButton->setEnabled(true);
-    m_hostEdit->setEnabled(true);
-    m_btScanButton->setEnabled(true);
-    m_btConnectButton->setEnabled(true);
-    m_btDeviceCombo->setEnabled(true);
 
     // Stop heartbeat timers
     m_connectionHeartbeatTimer->stop();
@@ -1015,6 +937,8 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
 
 void MainWindow::onSerialError(const QString &error)
 {
+    if (!isDeviceConnected())
+        m_connectButton->setEnabled(true);
     statusBar()->showMessage("Error: " + error, 5000);
 }
 
@@ -1571,6 +1495,12 @@ void MainWindow::openDatabaseForNode(uint32_t nodeNum)
             m_tracerouteWidget->setDatabase(m_database);
         }
 
+        if (m_topologyWidget)
+        {
+            m_topologyWidget->setDatabase(m_database);
+            m_topologyWidget->loadFromDatabase();
+        }
+
         statusBar()->showMessage(QString("Database loaded: %1 nodes").arg(m_database->nodeCount()), 3000);
     }
     else
@@ -1600,6 +1530,10 @@ void MainWindow::closeDatabase()
     {
         m_tracerouteWidget->setDatabase(nullptr);
         m_tracerouteWidget->clear();
+    }
+    if (m_topologyWidget)
+    {
+        m_topologyWidget->setDatabase(nullptr);
     }
 
     // 2. Clear local node state
@@ -2312,85 +2246,6 @@ QString MainWindow::connectedDeviceName() const
     if (m_serial->isConnected())
         return m_serial->connectedPortName();
     return QString();
-}
-
-void MainWindow::onBtScanClicked()
-{
-    m_btDeviceCombo->clear();
-    m_btScanButton->setEnabled(false);
-    m_btScanButton->setText("Scanning...");
-    m_bluetooth->startScan();
-    statusBar()->showMessage("Scanning for Bluetooth devices...", 5000);
-}
-
-void MainWindow::onBtConnectClicked()
-{
-    if (m_btDeviceCombo->count() == 0 || m_btDeviceCombo->currentIndex() < 0) {
-        statusBar()->showMessage("No Bluetooth device selected. Scan first.", 3000);
-        return;
-    }
-
-    // The device info is stored in the combo box item data
-    QBluetoothDeviceInfo deviceInfo = m_btDeviceCombo->currentData().value<QBluetoothDeviceInfo>();
-    if (!deviceInfo.isValid()) {
-        statusBar()->showMessage("Invalid device selection", 3000);
-        return;
-    }
-
-    m_btConnectButton->setEnabled(false);
-    statusBar()->showMessage("Connecting via Bluetooth...");
-    m_bluetooth->connectToDevice(deviceInfo);
-}
-
-void MainWindow::onBtDeviceDiscovered(const QString &name, const QString &address, const QBluetoothDeviceInfo &info)
-{
-    // Check for duplicates
-    for (int i = 0; i < m_btDeviceCombo->count(); i++) {
-        if (m_btDeviceCombo->itemText(i).contains(address))
-            return;
-    }
-
-    QString label = QString("%1 (%2)").arg(name, address);
-    m_btDeviceCombo->addItem(label, QVariant::fromValue(info));
-    statusBar()->showMessage(QString("Found: %1").arg(name), 3000);
-}
-
-void MainWindow::connectToTcp()
-{
-    QString input = m_hostEdit->text().trimmed();
-    if (input.isEmpty())
-    {
-        statusBar()->showMessage("Enter a host address", 3000);
-        return;
-    }
-
-    QString host;
-    quint16 port = 4403;
-
-    // Parse "host:port" or just "host"
-    int colonIdx = input.lastIndexOf(':');
-    if (colonIdx > 0)
-    {
-        bool ok;
-        quint16 parsedPort = input.mid(colonIdx + 1).toUShort(&ok);
-        if (ok)
-        {
-            host = input.left(colonIdx);
-            port = parsedPort;
-        }
-        else
-        {
-            host = input;
-        }
-    }
-    else
-    {
-        host = input;
-    }
-
-    m_tcpConnectButton->setEnabled(false);
-    statusBar()->showMessage(QString("Connecting to %1:%2...").arg(host).arg(port));
-    m_tcp->connectToHost(host, port);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

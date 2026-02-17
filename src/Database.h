@@ -121,6 +121,19 @@ public:
     QList<PacketRecord> loadPackets(int limit = 1000, int offset = 0);
     bool deleteOldPackets(int daysOld = 7);
 
+    // Neighbor info operations (for topology)
+    struct NeighborRecord
+    {
+        uint32_t nodeNum = 0;        // The node reporting its neighbors
+        uint32_t neighborNode = 0;   // A neighbor of that node
+        float snr = 0.0f;
+        qint64 timestamp = 0;
+    };
+
+    bool saveNeighborInfo(uint32_t nodeNum, const QList<NeighborRecord> &neighbors);
+    QMap<uint32_t, QList<NeighborRecord>> loadAllNeighborInfo();
+    bool deleteOldNeighborInfo(int daysOld = 7);
+
     QList<Message> loadMessagesForNode(uint32_t nodeNum, int limit = 100);
     bool markMessageRead(qint64 messageId);
     bool updateMessageStatus(uint32_t packetId, int status);

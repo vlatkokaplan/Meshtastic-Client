@@ -513,6 +513,36 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
             break;
         }
 
+        case PortNum::Neighborinfo:
+        {
+            meshtastic::NeighborInfo neighborInfo;
+            if (!neighborInfo.ParseFromArray(payloadData.constData(), payloadData.size()))
+            {
+                qWarning() << "[Protocol] Failed to parse NeighborInfo message";
+                break;
+            }
+
+            fields["nodeId"] = neighborInfo.node_id();
+            fields["lastSentById"] = neighborInfo.last_sent_by_id();
+            fields["nodeBroadcastIntervalSecs"] = neighborInfo.node_broadcast_interval_secs();
+
+            QVariantList neighborsList;
+            for (const auto &neighbor : neighborInfo.neighbors())
+            {
+                QVariantMap nm;
+                nm["nodeId"] = neighbor.node_id();
+                nm["snr"] = neighbor.snr();
+                nm["lastRxTime"] = neighbor.last_rx_time();
+                nm["nodeBroadcastIntervalSecs"] = neighbor.node_broadcast_interval_secs();
+                neighborsList.append(nm);
+            }
+            fields["neighbors"] = neighborsList;
+
+            qDebug() << "[Protocol] NeighborInfo from node" << neighborInfo.node_id()
+                     << "with" << neighborInfo.neighbors_size() << "neighbors";
+            break;
+        }
+
         case PortNum::Admin:
         {
             meshtastic::AdminMessage admin;
@@ -616,6 +646,29 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
                 case PortNum::Telemetry:
                     fields.insert(decodeTelemetry(payloadData));
                     break;
+                case PortNum::Neighborinfo:
+                {
+                    meshtastic::NeighborInfo neighborInfo;
+                    if (neighborInfo.ParseFromArray(payloadData.constData(), payloadData.size()))
+                    {
+                        fields["nodeId"] = neighborInfo.node_id();
+                        fields["lastSentById"] = neighborInfo.last_sent_by_id();
+                        fields["nodeBroadcastIntervalSecs"] = neighborInfo.node_broadcast_interval_secs();
+
+                        QVariantList neighborsList;
+                        for (const auto &neighbor : neighborInfo.neighbors())
+                        {
+                            QVariantMap nm;
+                            nm["nodeId"] = neighbor.node_id();
+                            nm["snr"] = neighbor.snr();
+                            nm["lastRxTime"] = neighbor.last_rx_time();
+                            nm["nodeBroadcastIntervalSecs"] = neighbor.node_broadcast_interval_secs();
+                            neighborsList.append(nm);
+                        }
+                        fields["neighbors"] = neighborsList;
+                    }
+                    break;
+                }
                 default:
                     fields["payloadHex"] = payloadData.toHex();
                     break;

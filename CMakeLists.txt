@@ -105,6 +105,7 @@ set(SOURCES
     src/ChannelsConfigTab.cpp
     src/BluetoothConnection.cpp
     src/TopologyWidget.cpp
+    src/ConnectionDialog.cpp
 )
 
 set(HEADERS
@@ -131,6 +132,7 @@ set(HEADERS
     src/ChannelsConfigTab.h
     src/BluetoothConnection.h
     src/TopologyWidget.h
+    src/ConnectionDialog.h
 )
 
 # Resources

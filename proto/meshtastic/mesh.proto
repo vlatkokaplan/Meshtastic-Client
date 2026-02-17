@@ -109,6 +109,20 @@ message User {
     uint32 role = 7;
 }
 
+message Neighbor {
+    uint32 node_id = 1;
+    float snr = 2;
+    fixed32 last_rx_time = 3;
+    uint32 node_broadcast_interval_secs = 4;
+}
+
+message NeighborInfo {
+    uint32 node_id = 1;
+    fixed32 last_sent_by_id = 2;
+    uint32 node_broadcast_interval_secs = 3;
+    repeated Neighbor neighbors = 4;
+}
+
 message RouteDiscovery {
     repeated fixed32 route = 1;
     repeated int32 snr_towards = 2;

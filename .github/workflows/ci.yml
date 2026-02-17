@@ -19,7 +19,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake build-essential git wget pkg-config \
             qt6-base-dev qt6-serialport-dev qt6-webengine-dev \
-            libprotobuf-dev protobuf-compiler
+            qt6-connectivity-dev \
+            libprotobuf-dev protobuf-compiler \
+            libssl-dev libqrencode-dev
 
       - name: Configure
         run: |
@@ -53,51 +55,71 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install Qt6 with SerialPort and WebChannel
+      - name: Install Qt6
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.5.3'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2019_64'
-          modules: 'qtserialport qtwebchannel qtwebengine qtpositioning'
+          modules: 'qtserialport qtwebchannel qtwebengine qtpositioning qtbluetooth qtsql'
 
-      - name: Install dependencies
-        run: |
-          choco install cmake -y
-          vcpkg install protobuf:x64-windows
+      - name: Install vcpkg dependencies
+        run: vcpkg install protobuf:x64-windows openssl:x64-windows qrencode:x64-windows
 
-      - name: Configure for Windows
+      - name: Configure
         run: |
           mkdir build-win
           cd build-win
-          cmake -G "Visual Studio 17 2022" -A x64 -DQt6_DIR="${Qt6_DIR}" -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" ..
+          cmake -G "Visual Studio 17 2022" -A x64 `
+            -DQt6_DIR="$env:Qt6_DIR" `
+            -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" ..
 
-      - name: Build for Windows
+      - name: Build
         run: |
           cd build-win
           cmake --build . --config Release
 
-      - name: Package Windows executable
+      - name: Stage application files
+        shell: pwsh
         run: |
-          cd build-win
-          mkdir meshtastic-vibe-client-win
-          copy Release\meshtastic-vibe-client.exe meshtastic-vibe-client-win\
-          xcopy ..\resources meshtastic-vibe-client-win\resources /E /I
+          New-Item -ItemType Directory -Path build-win\dist | Out-Null
 
-          # Deploy Qt DLLs and dependencies
-          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw meshtastic-vibe-client-win\meshtastic-vibe-client.exe
+          # Executable
+          Copy-Item build-win\Release\meshtastic-vibe-client.exe build-win\dist\
 
-          # Copy protobuf DLL from vcpkg
-          copy C:\vcpkg\installed\x64-windows\bin\libprotobuf.dll meshtastic-vibe-client-win\
+          # Resources
+          Copy-Item -Recurse resources build-win\dist\resources
 
-          7z a meshtastic-vibe-client-windows.zip meshtastic-vibe-client-win
+          # Deploy Qt DLLs alongside the exe
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw `
+            build-win\dist\meshtastic-vibe-client.exe
 
-      - name: Upload Windows Artifacts
+          # Copy vcpkg runtime DLLs (protobuf, openssl, qrencode)
+          Get-ChildItem C:\vcpkg\installed\x64-windows\bin\*.dll |
+            Where-Object { $_.Name -match 'protobuf|ssl|crypto|qrencode' } |
+            Copy-Item -Destination build-win\dist\
+
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}"
+          if ($ver -notmatch '^v?\d') { $ver = "1.0.0" }
+          $ver = $ver -replace '^v', ''
+          echo "VER=$ver" >> $env:GITHUB_OUTPUT
+
+      - name: Create Windows installer
+        run: makensis /DAPP_VERSION=${{ steps.version.outputs.VER }} installer\windows.nsi
+
+      - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: windows-exe
-          path: build-win/meshtastic-vibe-client-windows.zip
+          name: windows-installer
+          path: meshtastic-vibe-client-*-windows-setup.exe
 
   create-release:
     needs: [build-linux, build-windows]
@@ -111,7 +133,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: windows-exe
+          name: windows-installer
           path: windows-artifacts
 
       - name: Create Release
@@ -119,6 +141,6 @@ jobs:
         with:
           files: |
             linux-artifacts/meshtastic-vibe-client-*.deb
-            windows-artifacts/meshtastic-vibe-client-windows.zip
+            windows-artifacts/meshtastic-vibe-client-*-windows-setup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

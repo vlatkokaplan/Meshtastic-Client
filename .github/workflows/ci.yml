@@ -114,9 +114,6 @@ jobs:
             Where-Object { $_.Name -match 'protobuf|ssl|crypto|qrencode' } |
             Copy-Item -Destination build-win\dist\
 
-      - name: Install NSIS
-        run: choco install nsis -y
-
       - name: Determine version
         id: version
         shell: pwsh
@@ -127,7 +124,9 @@ jobs:
           echo "VER=$ver" >> $env:GITHUB_OUTPUT
 
       - name: Create Windows installer
-        run: makensis /DAPP_VERSION=${{ steps.version.outputs.VER }} installer\windows.nsi
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\NSIS\makensis.exe" /DAPP_VERSION=${{ steps.version.outputs.VER }} installer\windows.nsi
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4

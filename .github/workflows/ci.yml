@@ -62,7 +62,7 @@ jobs:
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2019_64'
-          modules: 'qtserialport qtwebchannel qtwebengine qtpositioning qtbluetooth qtsql'
+          modules: 'qtserialport qtwebchannel qtwebengine qtpositioning qtconnectivity'
 
       - name: Install vcpkg dependencies
         run: vcpkg install protobuf:x64-windows openssl:x64-windows qrencode:x64-windows

@@ -30,8 +30,18 @@ find_package(Protobuf REQUIRED)
 find_package(OpenSSL REQUIRED)
 
 # Find libqrencode for QR code generation
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(QRENCODE REQUIRED libqrencode)
+if(WIN32)
+    # pkg-config is not reliably available on Windows; use cmake finders directly
+    find_path(QRENCODE_INCLUDE_DIRS NAMES qrencode.h)
+    find_library(QRENCODE_LIBRARIES NAMES qrencode)
+    if(NOT QRENCODE_INCLUDE_DIRS OR NOT QRENCODE_LIBRARIES)
+        message(FATAL_ERROR "qrencode not found. Set CMAKE_PREFIX_PATH to its install dir.")
+    endif()
+    message(STATUS "Found qrencode: ${QRENCODE_LIBRARIES}")
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(QRENCODE REQUIRED libqrencode)
+endif()
 
 # Proto source directory
 set(PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/proto)

@@ -67,13 +67,27 @@ jobs:
       - name: Install vcpkg dependencies
         run: vcpkg install protobuf:x64-windows openssl:x64-windows
 
+      - name: Build qrencode from source
+        shell: pwsh
+        run: |
+          git clone --depth=1 --branch v4.1.1 https://github.com/fukuchi/libqrencode.git C:\qrencode-src
+          cmake -S C:\qrencode-src -B C:\qrencode-build `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_INSTALL_PREFIX="C:\qrencode-install" `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DWITH_TOOLS=OFF `
+            -DWITH_TESTS=OFF
+          cmake --build C:\qrencode-build --config Release
+          cmake --install C:\qrencode-build --config Release
+
       - name: Configure
         run: |
           mkdir build-win
           cd build-win
           cmake -G "Visual Studio 17 2022" -A x64 `
             -DQt6_DIR="$env:Qt6_DIR" `
-            -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" ..
+            -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+            -DCMAKE_PREFIX_PATH="C:\qrencode-install" ..
 
       - name: Build
         run: |

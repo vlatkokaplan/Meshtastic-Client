@@ -126,7 +126,9 @@ jobs:
       - name: Create Windows installer
         shell: pwsh
         run: |
-          & "C:\Program Files (x86)\NSIS\makensis.exe" /DAPP_VERSION=${{ steps.version.outputs.VER }} installer\windows.nsi
+          choco install nsis -y
+          $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+          makensis /DAPP_VERSION=${{ steps.version.outputs.VER }} installer\windows.nsi
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4

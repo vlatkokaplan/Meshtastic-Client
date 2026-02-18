@@ -9,7 +9,7 @@
 !define APP_EXE       "meshtastic-vibe-client.exe"
 !define PUBLISHER     "vlatkokaplan"
 !define REG_KEY       "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
-!define DIST_DIR      "build-win\dist"
+!define DIST_DIR      "..\build-win\dist"
 !define OUT_FILE      "meshtastic-vibe-client-${APP_VERSION}-windows-setup.exe"
 
 Name              "${APP_NAME}"

@@ -111,7 +111,7 @@ jobs:
 
           # Copy vcpkg runtime DLLs (protobuf, openssl, qrencode)
           Get-ChildItem C:\vcpkg\installed\x64-windows\bin\*.dll |
-            Where-Object { $_.Name -match 'protobuf|ssl|crypto|qrencode' } |
+            Where-Object { $_.Name -match 'protobuf|abseil|ssl|crypto|qrencode' } |
             Copy-Item -Destination build-win\dist\
 
       - name: Determine version

@@ -265,9 +265,13 @@ void MainWindow::setupUI()
 
     setupConfigTab();
 
-    // Connect traceroute selection to map visualization
+    // Connect traceroute selection to map + topology visualization
     connect(m_tracerouteWidget, &TracerouteWidget::tracerouteSelected,
             this, &MainWindow::onTracerouteSelected);
+
+    // Connect traceroute request button → send packet to device
+    connect(m_tracerouteWidget, &TracerouteWidget::tracerouteRequested,
+            this, &MainWindow::requestTraceroute);
 
     // Status bar with cooldown indicator
     m_statusLabel = new QLabel("Disconnected");
@@ -1104,6 +1108,15 @@ void MainWindow::onTracerouteSelected(uint32_t fromNode, uint32_t toNode)
     else
     {
         m_mapWidget->clearTraceroute();
+    }
+
+    // Also highlight the path on the topology graph
+    if (m_topologyWidget && !routeNodes.isEmpty())
+    {
+        QList<uint32_t> pathNodes;
+        for (const auto &node : routeNodes)
+            pathNodes.append(node.nodeNum);
+        m_topologyWidget->highlightPath(pathNodes);
     }
 }
 

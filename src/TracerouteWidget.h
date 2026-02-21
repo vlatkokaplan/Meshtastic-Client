@@ -4,6 +4,8 @@
 #include <QWidget>
 #include <QTableView>
 #include <QAbstractTableModel>
+#include <QComboBox>
+#include <QPushButton>
 #include <QList>
 #include "MeshtasticProtocol.h"
 
@@ -105,15 +107,20 @@ public:
 
 signals:
     void tracerouteSelected(uint32_t fromNode, uint32_t toNode);
+    void tracerouteRequested(uint32_t targetNode);
 
 private slots:
     void onSelectionChanged();
+    void onRequestClicked();
+    void onNodesChanged();
 
 private:
-    QTableView *m_tableView;
+    QTableView   *m_tableView;
+    QComboBox    *m_targetCombo;
+    QPushButton  *m_requestButton;
     TracerouteTableModel *m_model;
-    NodeManager *m_nodeManager;
-    Database *m_database;
+    NodeManager  *m_nodeManager;
+    Database     *m_database;
 
     void setupUI();
 };

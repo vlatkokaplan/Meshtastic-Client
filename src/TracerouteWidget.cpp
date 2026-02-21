@@ -3,6 +3,8 @@
 #include "Database.h"
 #include "MeshtasticProtocol.h"
 #include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QHeaderView>
 #include <QDateTime>
 #include <cmath>
@@ -339,16 +341,42 @@ TracerouteWidget::TracerouteWidget(NodeManager *nodeManager, Database *database,
 {
     setupUI();
 
-    // Connect selection change
     connect(m_tableView->selectionModel(), &QItemSelectionModel::selectionChanged,
             this, &TracerouteWidget::onSelectionChanged);
+    connect(m_requestButton, &QPushButton::clicked,
+            this, &TracerouteWidget::onRequestClicked);
+
+    if (m_nodeManager) {
+        connect(m_nodeManager, &NodeManager::nodesChanged,
+                this, &TracerouteWidget::onNodesChanged);
+        connect(m_nodeManager, &NodeManager::myNodeNumChanged,
+                this, &TracerouteWidget::onNodesChanged);
+        onNodesChanged();
+    }
 }
 
 void TracerouteWidget::setupUI()
 {
     QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setContentsMargins(4, 4, 4, 4);
+    layout->setSpacing(4);
 
+    // ── Request toolbar ───────────────────────────────────────────────────
+    QHBoxLayout *toolbarLayout = new QHBoxLayout;
+    toolbarLayout->setContentsMargins(0, 0, 0, 0);
+    toolbarLayout->addWidget(new QLabel("Target:"));
+
+    m_targetCombo = new QComboBox;
+    m_targetCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_targetCombo->setPlaceholderText("(connect to device first)");
+    toolbarLayout->addWidget(m_targetCombo, 1);
+
+    m_requestButton = new QPushButton("Request Traceroute");
+    m_requestButton->setEnabled(false);
+    toolbarLayout->addWidget(m_requestButton);
+    layout->addLayout(toolbarLayout);
+
+    // ── History table ─────────────────────────────────────────────────────
     m_model = new TracerouteTableModel(m_nodeManager, m_database, this);
 
     m_tableView = new QTableView;
@@ -468,6 +496,50 @@ void TracerouteWidget::onSelectionChanged()
     auto data = m_model->getTraceroute(row);
 
     emit tracerouteSelected(data.from, data.to);
+}
+
+void TracerouteWidget::onRequestClicked()
+{
+    int idx = m_targetCombo->currentIndex();
+    if (idx < 0)
+        return;
+    uint32_t target = m_targetCombo->itemData(idx).toUInt();
+    if (target != 0)
+        emit tracerouteRequested(target);
+}
+
+void TracerouteWidget::onNodesChanged()
+{
+    if (!m_nodeManager)
+        return;
+
+    uint32_t myNode = m_nodeManager->myNodeNum();
+    uint32_t prevTarget = 0;
+    if (m_targetCombo->currentIndex() >= 0)
+        prevTarget = m_targetCombo->currentData().toUInt();
+
+    m_targetCombo->clear();
+
+    for (const NodeInfo &node : m_nodeManager->allNodes()) {
+        if (node.nodeNum == myNode || node.nodeNum == 0)
+            continue;
+        QString label = node.longName.isEmpty()
+            ? QString("!%1").arg(node.nodeNum, 8, 16, QChar('0'))
+            : node.longName;
+        m_targetCombo->addItem(label, node.nodeNum);
+    }
+
+    // Restore previous selection if still present
+    if (prevTarget != 0) {
+        for (int i = 0; i < m_targetCombo->count(); ++i) {
+            if (m_targetCombo->itemData(i).toUInt() == prevTarget) {
+                m_targetCombo->setCurrentIndex(i);
+                break;
+            }
+        }
+    }
+
+    m_requestButton->setEnabled(m_targetCombo->count() > 0 && myNode != 0);
 }
 
 QList<TracerouteWidget::RouteNode> TracerouteWidget::getSelectedRoute() const

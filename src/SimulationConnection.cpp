@@ -158,6 +158,7 @@ void SimulationConnection::scheduleConfigDump()
                  << SIM_NODE_COUNT + 1 << "nodes populated";
 
         scheduleNeighborInfoDump();
+        scheduleTracerouteDump();
 
         if (m_scenario == Scenario::Reconnect && !m_reconnectDone)
             scheduleReconnect();
@@ -390,6 +391,88 @@ QByteArray SimulationConnection::buildConfigCompleteId(uint32_t configId)
 {
     meshtastic::FromRadio fr;
     fr.set_config_complete_id(configId);
+    std::string s;
+    fr.SerializeToString(&s);
+    return wrapFrame(s);
+}
+
+void SimulationConnection::scheduleTracerouteDump()
+{
+    // Simulated traceroute responses — one per reachable destination.
+    // SNR values are stored as int32 = actual_snr * 4 (Meshtastic wire format).
+    // snrTowards[i] = SNR for hop i of the forward path.
+    // snrBack contains all hops of the return path EXCEPT the last one
+    // (MY_NODE's rx_snr covers that final hop).
+    struct SimTraceroute {
+        uint32_t        responder;    // packet.from  (destination, responding node)
+        QList<uint32_t> route;        // intermediate nodes, forward path
+        QList<int32_t>  snrTowards;   // per-hop SNR * 4, forward
+        QList<uint32_t> routeBack;    // intermediate nodes, return path
+        QList<int32_t>  snrBack;      // per-hop SNR * 4, return (excl. last hop)
+        float           rxSnr;        // SNR of the last hop back to MY_NODE
+    };
+
+    const QList<SimTraceroute> routes = {
+        // MY_NODE → Alpha  (direct)
+        { 0xAAAA0001, {}, {36},     {}, {},   9.0f },
+        // MY_NODE → Beta   (direct)
+        { 0xAAAA0002, {}, {22},     {}, {},   5.5f },
+        // MY_NODE → Gamma  via Alpha
+        { 0xAAAA0003, {0xAAAA0001}, {36, 12}, {0xAAAA0001}, {12}, 9.0f },
+        // MY_NODE → Delta  via Beta
+        { 0xAAAA0004, {0xAAAA0002}, {22, 27}, {0xAAAA0002}, {27}, 5.5f },
+        // MY_NODE → Echo   via Beta → Delta
+        { 0xAAAA0005, {0xAAAA0002, 0xAAAA0004}, {22, 27, -6},
+                      {0xAAAA0004, 0xAAAA0002}, {-6, 27},   5.5f },
+    };
+
+    // Start 3 s after ConfigComplete (after all NeighborInfo has been emitted)
+    int t = 3000;
+    for (const SimTraceroute &sr : routes) {
+        auto *timer = new QTimer(this);
+        timer->setSingleShot(true);
+        timer->setInterval(t);
+        connect(timer, &QTimer::timeout, this, [this, sr]() {
+            emit dataReceived(buildTraceroute(sr.responder, MY_NODE_NUM,
+                                             sr.route, sr.snrTowards,
+                                             sr.routeBack, sr.snrBack,
+                                             sr.rxSnr));
+            qDebug() << "[SIM] Sent Traceroute response from"
+                     << QString("!%1").arg(sr.responder, 8, 16, QChar('0'));
+        });
+        timer->start();
+        m_timers.append(timer);
+        t += 400;
+    }
+}
+
+QByteArray SimulationConnection::buildTraceroute(
+    uint32_t responder, uint32_t requester,
+    const QList<uint32_t> &route,
+    const QList<int32_t>  &snrTowards,
+    const QList<uint32_t> &routeBack,
+    const QList<int32_t>  &snrBack,
+    float rxSnr)
+{
+    meshtastic::RouteDiscovery rd;
+    for (uint32_t n : route)       rd.add_route(n);
+    for (int32_t  s : snrTowards)  rd.add_snr_towards(s);
+    for (uint32_t n : routeBack)   rd.add_route_back(n);
+    for (int32_t  s : snrBack)     rd.add_snr_back(s);
+
+    std::string rdBytes;
+    rd.SerializeToString(&rdBytes);
+
+    meshtastic::FromRadio fr;
+    auto *packet = fr.mutable_packet();
+    packet->set_from(responder);
+    packet->set_to(requester);
+    packet->set_id(static_cast<uint32_t>(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF));
+    packet->set_rx_snr(rxSnr);
+    auto *decoded = packet->mutable_decoded();
+    decoded->set_portnum(static_cast<meshtastic::PortNum>(meshtastic::PortNum::TRACEROUTE_APP));
+    decoded->set_payload(rdBytes);
+
     std::string s;
     fr.SerializeToString(&s);
     return wrapFrame(s);

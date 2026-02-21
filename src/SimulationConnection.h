@@ -58,11 +58,18 @@ private:
     QByteArray buildConfigCompleteId(uint32_t configId);
     QByteArray buildNeighborInfo(uint32_t fromNode,
                                  const QList<QPair<uint32_t, float>> &neighbors);
+    QByteArray buildTraceroute(uint32_t responder, uint32_t requester,
+                               const QList<uint32_t> &route,
+                               const QList<int32_t> &snrTowards,
+                               const QList<uint32_t> &routeBack,
+                               const QList<int32_t> &snrBack,
+                               float rxSnr);
 
     static QByteArray wrapFrame(const std::string &serialized);
 
     void scheduleConfigDump();
     void scheduleNeighborInfoDump();
+    void scheduleTracerouteDump();
     void scheduleReconnect();
     void clearTimers();
 };

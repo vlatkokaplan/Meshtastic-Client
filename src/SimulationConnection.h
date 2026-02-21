@@ -64,6 +64,7 @@ private:
                                const QList<uint32_t> &routeBack,
                                const QList<int32_t> &snrBack,
                                float rxSnr);
+    QByteArray buildRoutingAck(uint32_t fromNode, uint32_t toNode, uint32_t requestId);
 
     static QByteArray wrapFrame(const std::string &serialized);
 

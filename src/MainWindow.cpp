@@ -347,8 +347,14 @@ void MainWindow::setupMapTab()
     m_nodeSearchEdit = new QLineEdit;
     m_nodeSearchEdit->setPlaceholderText("Search nodes...");
     m_nodeSearchEdit->setClearButtonEnabled(true);
+    // Restore saved search text
+    m_nodeSearchEdit->setText(AppSettings::instance()->value("nodeSearchText").toString());
     connect(m_nodeSearchEdit, &QLineEdit::textChanged,
             this, &MainWindow::updateNodeList);
+    // Persist search text across restarts
+    connect(m_nodeSearchEdit, &QLineEdit::textChanged, this, [](const QString &text) {
+        AppSettings::instance()->setValue("nodeSearchText", text);
+    });
     sidebarLayout->addWidget(m_nodeSearchEdit);
 
     // Node table setup
@@ -360,6 +366,19 @@ void MainWindow::setupMapTab()
     m_nodeTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_nodeTable->setSortingEnabled(true);
     m_nodeTable->setContextMenuPolicy(Qt::CustomContextMenu);
+    // Restore saved sort column/order
+    {
+        int col   = AppSettings::instance()->value("nodeSortColumn", -1).toInt();
+        int order = AppSettings::instance()->value("nodeSortOrder",   0).toInt();
+        if (col >= 0)
+            m_nodeTable->sortByColumn(col, static_cast<Qt::SortOrder>(order));
+    }
+    // Persist sort state across restarts
+    connect(m_nodeTable->horizontalHeader(), &QHeaderView::sortIndicatorChanged,
+            this, [](int col, Qt::SortOrder order) {
+        AppSettings::instance()->setValue("nodeSortColumn", col);
+        AppSettings::instance()->setValue("nodeSortOrder",  static_cast<int>(order));
+    });
     sidebarLayout->addWidget(m_nodeTable);
 
     m_mapSplitter->addWidget(sidebar);

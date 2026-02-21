@@ -16,15 +16,15 @@ Priority-ordered backlog as of 2026-02-21.
 
 ## Medium Priority
 
-4. **Windows CI: run unit tests** — The Linux CI job runs `ctest`; the Windows job builds the NSIS installer but never runs the test suite. Add a `ctest` step to the Windows workflow.
+4. ~~**Windows CI: run unit tests**~~ — **DONE** (added `ctest -C Release` step to Windows workflow with Qt bin dir on PATH).
 
-5. **Config tab: "Reboot Device" button** — Some Meshtastic config changes (LoRa region, role) require a device reboot to take effect. Add a reboot button that sends `AdminMessage::reboot_seconds = 2` after saving.
+5. ~~**Config tab: "Reboot Device" button**~~ — **ALREADY DONE** (`m_rebootButton` in toolbar wired to `rebootDevice()` slot).
 
-6. **Node list: persist sort/filter state across reconnects** — The search text and column sort order reset when the connection drops and comes back. Save them in `AppSettings` and restore on reconnect.
+6. ~~**Node list: persist sort/filter state across reconnects**~~ — **DONE** (search text + sort column/order saved in `AppSettings`, restored in `setupNodeList()`).
 
-7. **Message ACK rendering audit** — `updateMessageStatus` / `updateMessageDelivered` exist but the delivery tick/cross rendering hasn't been tested end-to-end for multi-hop DMs vs. broadcast. Verify with hardware or extend the simulation to send routing ACK packets back.
+7. ~~**Message ACK rendering audit**~~ — **DONE** (simulation now sends `ROUTING_APP` ACK 500 ms after each DM to a sim node via `buildRoutingAck()`).
 
-8. **Telemetry graph: time-range selector** — The graph currently shows all stored data. Add a "1 h / 6 h / 24 h / All" toggle that filters the query to `Database::loadTelemetry()`.
+8. ~~**Telemetry graph: time-range selector**~~ — **ALREADY DONE** (`m_timeRangeCombo` with 1 h / 6 h / 24 h / 7 days already implemented in `TelemetryGraphWidget`).
 
 ---
 

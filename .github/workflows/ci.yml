@@ -99,6 +99,14 @@ jobs:
           cd build-win
           cmake --build . --config Release
 
+      - name: Test
+        shell: pwsh
+        run: |
+          cd build-win
+          # Add Qt bin to PATH so test executables can find Qt DLLs
+          $env:PATH = "$env:Qt6_DIR\..\..\..\bin;$env:PATH"
+          ctest -C Release --output-on-failure
+
       - name: Stage application files
         shell: pwsh
         run: |

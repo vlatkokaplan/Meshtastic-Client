@@ -89,6 +89,33 @@ bool SimulationConnection::sendData(const QByteArray &data)
         scheduleConfigDump();
     }
 
+    // Intercept outgoing text messages sent to a sim node → reply with routing ACK
+    if (msg.has_packet()) {
+        const meshtastic::MeshPacket &pkt = msg.packet();
+        if (pkt.has_decoded() &&
+            pkt.decoded().portnum() == meshtastic::PortNum::TEXT_MESSAGE_APP &&
+            pkt.to() != 0xFFFFFFFFu)  // private message (not broadcast)
+        {
+            uint32_t destNode = pkt.to();
+            uint32_t packetId = pkt.id();
+
+            bool isSimNode = false;
+            for (int i = 0; i < SIM_NODE_COUNT; ++i) {
+                if (SIM_NODES[i].num == destNode) { isSimNode = true; break; }
+            }
+
+            if (isSimNode) {
+                QTimer::singleShot(500, this, [this, destNode, packetId]() {
+                    if (!m_active) return;
+                    emit dataReceived(buildRoutingAck(destNode, MY_NODE_NUM, packetId));
+                    qDebug() << "[SIM] Sent routing ACK from"
+                             << QString("!%1").arg(destNode, 8, 16, QChar('0'))
+                             << "for packetId" << packetId;
+                });
+            }
+        }
+    }
+
     return true;
 }
 
@@ -472,6 +499,30 @@ QByteArray SimulationConnection::buildTraceroute(
     auto *decoded = packet->mutable_decoded();
     decoded->set_portnum(static_cast<meshtastic::PortNum>(meshtastic::PortNum::TRACEROUTE_APP));
     decoded->set_payload(rdBytes);
+
+    std::string s;
+    fr.SerializeToString(&s);
+    return wrapFrame(s);
+}
+
+QByteArray SimulationConnection::buildRoutingAck(
+    uint32_t fromNode, uint32_t toNode, uint32_t requestId)
+{
+    meshtastic::Routing routing;
+    // error_reason NONE = 0 — leave at default (success ACK)
+
+    std::string routingBytes;
+    routing.SerializeToString(&routingBytes);
+
+    meshtastic::FromRadio fr;
+    auto *packet = fr.mutable_packet();
+    packet->set_from(fromNode);
+    packet->set_to(toNode);
+    packet->set_id(static_cast<uint32_t>(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF));
+    auto *decoded = packet->mutable_decoded();
+    decoded->set_portnum(static_cast<meshtastic::PortNum>(meshtastic::PortNum::ROUTING_APP));
+    decoded->set_payload(routingBytes);
+    decoded->set_request_id(requestId);
 
     std::string s;
     fr.SerializeToString(&s);

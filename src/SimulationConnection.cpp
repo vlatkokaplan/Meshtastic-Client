@@ -157,6 +157,8 @@ void SimulationConnection::scheduleConfigDump()
         qDebug() << "[TEST PASS] Config load complete -"
                  << SIM_NODE_COUNT + 1 << "nodes populated";
 
+        scheduleNeighborInfoDump();
+
         if (m_scenario == Scenario::Reconnect && !m_reconnectDone)
             scheduleReconnect();
     });
@@ -310,6 +312,75 @@ QByteArray SimulationConnection::buildPrimaryChannel()
     settings->set_name("");     // primary channel has empty name
     settings->set_psk("\xd4\xf1\xbb\x3a\x20\x29\x07\x59\xf0\xbc\xff\xab\xcf\x4e\x69\x01", 16);
     ch->set_role(static_cast<meshtastic::Channel_Role>(1));  // PRIMARY = 1
+    std::string s;
+    fr.SerializeToString(&s);
+    return wrapFrame(s);
+}
+
+void SimulationConnection::scheduleNeighborInfoDump()
+{
+    // Simulated RF links between nodes (bidirectional, SNR in dB)
+    struct Link { uint32_t a; uint32_t b; float snr; };
+    static const Link LINKS[] = {
+        { MY_NODE_NUM,  0xAAAA0001,  9.0f },  // My device ↔ Alpha
+        { MY_NODE_NUM,  0xAAAA0002,  5.5f },  // My device ↔ Beta
+        { 0xAAAA0001,   0xAAAA0002,  7.2f },  // Alpha ↔ Beta
+        { 0xAAAA0001,   0xAAAA0003,  3.1f },  // Alpha ↔ Gamma
+        { 0xAAAA0002,   0xAAAA0004,  6.8f },  // Beta ↔ Delta
+        { 0xAAAA0004,   0xAAAA0005, -1.5f },  // Delta ↔ Echo (weak link)
+    };
+    static const int LINK_COUNT = static_cast<int>(sizeof(LINKS) / sizeof(LINKS[0]));
+
+    // Build per-node neighbor lists from the symmetric link table
+    QMap<uint32_t, QList<QPair<uint32_t, float>>> neighborMap;
+    for (int i = 0; i < LINK_COUNT; ++i) {
+        neighborMap[LINKS[i].a].append({LINKS[i].b, LINKS[i].snr});
+        neighborMap[LINKS[i].b].append({LINKS[i].a, LINKS[i].snr});
+    }
+
+    // Send each node's NeighborInfo packet 200 ms apart, 1 s after config
+    int t = 1000;
+    for (auto it = neighborMap.constBegin(); it != neighborMap.constEnd(); ++it) {
+        uint32_t node = it.key();
+        QList<QPair<uint32_t, float>> nbrs = it.value();
+        auto *timer = new QTimer(this);
+        timer->setSingleShot(true);
+        timer->setInterval(t);
+        connect(timer, &QTimer::timeout, this, [this, node, nbrs]() {
+            emit dataReceived(buildNeighborInfo(node, nbrs));
+            qDebug() << "[SIM] Sent NeighborInfo from" << QString::number(node, 16)
+                     << "with" << nbrs.size() << "neighbors";
+        });
+        timer->start();
+        m_timers.append(timer);
+        t += 200;
+    }
+}
+
+QByteArray SimulationConnection::buildNeighborInfo(
+    uint32_t fromNode, const QList<QPair<uint32_t, float>> &neighbors)
+{
+    meshtastic::NeighborInfo ni;
+    ni.set_node_id(fromNode);
+    ni.set_node_broadcast_interval_secs(900);
+    for (const auto &pair : neighbors) {
+        auto *n = ni.add_neighbors();
+        n->set_node_id(pair.first);
+        n->set_snr(pair.second);
+    }
+
+    std::string niBytes;
+    ni.SerializeToString(&niBytes);
+
+    meshtastic::FromRadio fr;
+    auto *packet = fr.mutable_packet();
+    packet->set_from(fromNode);
+    packet->set_to(0xFFFFFFFFu);  // broadcast
+    packet->set_id(static_cast<uint32_t>(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF));
+    auto *decoded = packet->mutable_decoded();
+    decoded->set_portnum(static_cast<meshtastic::PortNum>(67));  // NEIGHBORINFO_APP
+    decoded->set_payload(niBytes);
+
     std::string s;
     fr.SerializeToString(&s);
     return wrapFrame(s);

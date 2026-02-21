@@ -56,10 +56,13 @@ private:
     QByteArray buildPositionConfig();
     QByteArray buildPrimaryChannel();
     QByteArray buildConfigCompleteId(uint32_t configId);
+    QByteArray buildNeighborInfo(uint32_t fromNode,
+                                 const QList<QPair<uint32_t, float>> &neighbors);
 
     static QByteArray wrapFrame(const std::string &serialized);
 
     void scheduleConfigDump();
+    void scheduleNeighborInfoDump();
     void scheduleReconnect();
     void clearTimers();
 };

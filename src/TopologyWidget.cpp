@@ -152,6 +152,8 @@ void TopologyWidget::handleNeighborInfo(uint32_t fromNode, const QVariantMap &fi
 
         addLinkToGraph(fromNode, entry.neighborNode, entry.snr, bidirectional);
     }
+
+    runJavaScript("restartSimulation();");
 }
 
 void TopologyWidget::addNodeToGraph(uint32_t nodeNum)

@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 
+# PROTO_SRCS paths are inherited from the parent scope but the GENERATED
+# property is directory-scoped, so re-declare it here so CMake doesn't
+# complain that the .pb.cc files don't exist yet on a clean build.
+set_source_files_properties(${PROTO_SRCS} PROPERTIES GENERATED TRUE)
+
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Test Sql)
 find_package(Protobuf REQUIRED)
 find_package(OpenSSL REQUIRED)

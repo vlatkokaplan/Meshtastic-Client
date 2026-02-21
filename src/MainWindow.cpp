@@ -892,6 +892,10 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             {
                 showTracerouteResult(packet);
                 m_tracerouteWidget->addTraceroute(packet);
+                // For a response: packet.from=responder, packet.to=requester.
+                // Full path: requester(packet.to) → route → responder(packet.from)
+                if (m_topologyWidget)
+                    m_topologyWidget->handleTraceroute(packet.to, packet.from, packet.fields);
             }
             break;
 

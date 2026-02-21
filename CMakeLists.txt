@@ -89,6 +89,16 @@ endforeach()
 # Mark generated files
 set_source_files_properties(${PROTO_SRCS} ${PROTO_HDRS} PROPERTIES GENERATED TRUE)
 
+# Proto static library — compiled here where add_custom_command lives so that
+# tests/ can link against it without needing to list PROTO_SRCS as sources
+# (which would break AUTOMOC's timestamp_deps in the subdirectory scope).
+add_library(meshtastic_proto STATIC EXCLUDE_FROM_ALL ${PROTO_SRCS})
+target_include_directories(meshtastic_proto PUBLIC
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${Protobuf_INCLUDE_DIRS}
+)
+target_link_libraries(meshtastic_proto PUBLIC protobuf::libprotobuf)
+
 # Source files
 set(SOURCES
     src/main.cpp

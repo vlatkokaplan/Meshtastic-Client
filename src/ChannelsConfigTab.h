@@ -19,6 +19,9 @@ class ChannelsConfigTab : public QWidget
 public:
     explicit ChannelsConfigTab(DeviceConfig *config, QWidget *parent = nullptr);
 
+public slots:
+    void notifySaved();
+
 signals:
     void saveRequested(int channelIndex);
 

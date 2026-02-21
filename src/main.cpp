@@ -49,6 +49,12 @@ int main(int argc, char *argv[])
                                   "Enable test mode (testing features)");
     parser.addOption(testOption);
 
+    QCommandLineOption simulateOption(QStringList() << "simulate",
+                                      "Run with a simulated device (no hardware needed). "
+                                      "Scenario: basic (default) or reconnect.",
+                                      "scenario", "basic");
+    parser.addOption(simulateOption);
+
     parser.process(app);
 
     // Set debug mode based on command line flag
@@ -72,9 +78,16 @@ int main(int argc, char *argv[])
         qDebug() << "Test mode enabled";
     }
 
+    QString simulateScenario;
+    if (parser.isSet(simulateOption))
+    {
+        simulateScenario = parser.value(simulateOption);
+        qDebug() << "Simulation mode enabled, scenario:" << simulateScenario;
+    }
+
     app.setWindowIcon(QIcon(":/icon.svg"));
 
-    MainWindow window(experimentalMode, testMode);
+    MainWindow window(experimentalMode, testMode, simulateScenario);
     window.show();
 
     return app.exec();

@@ -98,6 +98,9 @@ public:
     // Process incoming raw data, emits packetReceived for complete packets
     void processIncomingData(const QByteArray &data);
 
+    // Clear framing state — call on reconnect to discard stale partial frames
+    void resetParser();
+
     // Create a ToRadio packet for sending
     QByteArray createWantConfigPacket(uint32_t configId);
     QByteArray createTraceroutePacket(uint32_t destNode, uint32_t myNode);

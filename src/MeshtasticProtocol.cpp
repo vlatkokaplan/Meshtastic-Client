@@ -84,6 +84,13 @@ MeshtasticProtocol::MeshtasticProtocol(QObject *parent)
 
 MeshtasticProtocol::~MeshtasticProtocol() = default;
 
+void MeshtasticProtocol::resetParser()
+{
+    m_parseState = ParseState::WaitingForSync1;
+    m_frameBuffer.clear();
+    m_expectedLength = 0;
+}
+
 void MeshtasticProtocol::processIncomingData(const QByteArray &data)
 {
     for (int i = 0; i < data.size(); ++i)

@@ -18,6 +18,9 @@ class DeviceConfigTab : public QWidget
 public:
     explicit DeviceConfigTab(DeviceConfig *config, QWidget *parent = nullptr);
 
+public slots:
+    void notifySaved();
+
 signals:
     void configChanged();
     void saveRequested();

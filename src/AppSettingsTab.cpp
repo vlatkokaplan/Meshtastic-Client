@@ -55,7 +55,7 @@ void AppSettingsTab::setupUI()
     m_tileServerCombo = new QComboBox;
     m_tileServerCombo->addItem("OpenStreetMap", "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png");
     m_tileServerCombo->addItem("OpenTopoMap", "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png");
-    m_tileServerCombo->addItem("Stamen Terrain", "https://stamen-tiles.a.ssl.fastly.net/terrain/{z}/{x}/{y}.jpg");
+    m_tileServerCombo->addItem("Stamen Terrain", "https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}.jpg");
     m_tileServerCombo->addItem("CartoDB Positron", "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png");
     m_tileServerCombo->addItem("CartoDB Dark Matter", "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png");
     m_tileServerCombo->addItem("Custom...", "custom");
@@ -94,8 +94,20 @@ void AppSettingsTab::setupUI()
     QGroupBox *messagesGroup = new QGroupBox("Messages");
     QVBoxLayout *messagesLayout = new QVBoxLayout(messagesGroup);
 
-    m_autoPingResponseCheck = new QCheckBox("Auto-respond to 'ping' direct messages with 'pong'");
-    m_autoPingResponseCheck->setToolTip("When someone sends you a direct message containing just 'ping', automatically reply with 'pong'");
+    m_autoPingResponseCheck = new QCheckBox("Enable autoresponder for DMs (!ping, !nodes, !weather, etc)");
+    m_autoPingResponseCheck->setToolTip(
+        "Automatically respond to !commands in direct messages:\n"
+        "!ping - pong\n"
+        "!nodes - mesh node count\n"
+        "!battery - battery/voltage status\n"
+        "!uptime - device uptime\n"
+        "!weather - temperature/humidity/pressure\n"
+        "!signal - sender's signal quality\n"
+        "!pos - GPS position\n"
+        "!time - current UTC time\n"
+        "!info - device name/model/firmware\n"
+        "!help - list commands\n\n"
+        "30 second cooldown per sender (except !ping)");
     connect(m_autoPingResponseCheck, &QCheckBox::toggled, this, &AppSettingsTab::onAutoPingResponseChanged);
     messagesLayout->addWidget(m_autoPingResponseCheck);
 

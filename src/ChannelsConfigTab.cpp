@@ -220,6 +220,12 @@ void ChannelsConfigTab::updateEditorFromConfig(int index)
     m_statusLabel->setStyleSheet("color: gray;");
 }
 
+void ChannelsConfigTab::notifySaved()
+{
+    m_statusLabel->setText("Saved \u2713");
+    m_statusLabel->setStyleSheet("color: green;");
+}
+
 void ChannelsConfigTab::onSaveClicked()
 {
     qDebug() << "=== ChannelsConfigTab::onSaveClicked ===";

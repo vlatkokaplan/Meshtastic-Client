@@ -116,6 +116,7 @@ set(SOURCES
     src/BluetoothConnection.cpp
     src/TopologyWidget.cpp
     src/ConnectionDialog.cpp
+    src/SimulationConnection.cpp
 )
 
 set(HEADERS
@@ -143,6 +144,7 @@ set(HEADERS
     src/BluetoothConnection.h
     src/TopologyWidget.h
     src/ConnectionDialog.h
+    src/SimulationConnection.h
 )
 
 # Resources
@@ -214,6 +216,10 @@ message(STATUS "Protobuf Version: ${Protobuf_VERSION}")
 message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Map: WebEngine + Leaflet")
 message(STATUS "========================================")
+
+# Tests
+enable_testing()
+add_subdirectory(tests)
 
 # CPack configuration for DEB package generation
 include(CPack)

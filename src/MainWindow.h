@@ -11,6 +11,8 @@
 #include <QHeaderView>
 #include <QSystemTrayIcon>
 #include <QLineEdit>
+#include <QMap>
+#include <QDateTime>
 
 #include "MeshtasticProtocol.h" // Need full include for nested type
 #include "NodeManager.h"        // For NodeInfo
@@ -32,13 +34,15 @@ class TelemetryGraphWidget;
 class MapWidget;
 class DashboardStatsWidget;
 class TopologyWidget;
+class SimulationConnection;
 
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    explicit MainWindow(bool experimentalMode = false, bool testMode = false, QWidget *parent = nullptr);
+    explicit MainWindow(bool experimentalMode = false, bool testMode = false,
+                       const QString &simulateScenario = QString(), QWidget *parent = nullptr);
     ~MainWindow();
 
 private slots:
@@ -86,6 +90,7 @@ private slots:
 private:
     // Config loading state
     uint32_t m_expectedConfigId = 0;
+    uint32_t m_openNodeNum = 0;   // node num the DB is currently open for
     QTimer *m_configHeartbeatTimer = nullptr;
     QTimer *m_connectionHeartbeatTimer = nullptr;  // Persistent heartbeat for long sessions
 
@@ -107,6 +112,7 @@ private:
     SerialConnection *m_serial;
     TcpConnection *m_tcp;
     BluetoothConnection *m_bluetooth;
+    SimulationConnection *m_simulation = nullptr;
     MeshtasticProtocol *m_protocol;
     NodeManager *m_nodeManager;
     Database *m_database;
@@ -152,6 +158,11 @@ private:
     void closeDatabase();
     void saveWindowState();
     void restoreWindowState();
+
+    // Autoresponder
+    QString handleAutoresponderCommand(const QString &command, uint32_t fromNode);
+    QMap<uint32_t, QDateTime> m_autoresponderCooldowns;
+    static const int AUTORESPONDER_COOLDOWN_SECS = 30;
 
     // Connection dialog
     void showConnectionDialog();

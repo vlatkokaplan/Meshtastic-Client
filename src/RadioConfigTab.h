@@ -18,6 +18,9 @@ class RadioConfigTab : public QWidget
 public:
     explicit RadioConfigTab(DeviceConfig *config, QWidget *parent = nullptr);
 
+public slots:
+    void notifySaved();
+
 signals:
     void configChanged();
     void saveRequested();

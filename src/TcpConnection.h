@@ -19,6 +19,7 @@ public:
     QString connectedAddress() const;
 
     bool sendData(const QByteArray &data);
+    bool isReconnecting() const { return m_reconnectTimer->isActive(); }
 
 signals:
     void connected();

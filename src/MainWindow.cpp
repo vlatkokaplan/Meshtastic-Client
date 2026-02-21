@@ -16,6 +16,7 @@
 #include "AppSettingsTab.h"
 #include "TopologyWidget.h"
 #include "ConnectionDialog.h"
+#include "SimulationConnection.h"
 
 #include "MapWidget.h"
 #include "DashboardStatsWidget.h"
@@ -39,11 +40,13 @@
 #include <QJsonObject>
 #include <QCloseEvent>
 #include <QSettings>
+#include <QApplication>
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
 
-MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
+MainWindow::MainWindow(bool experimentalMode, bool testMode,
+                       const QString &simulateScenario, QWidget *parent)
     : QMainWindow(parent), m_experimentalMode(experimentalMode), m_testMode(testMode)
 {
     // Explicitly set window flags to prevent them from being dropped
@@ -176,6 +179,27 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode, QWidget *parent)
     // Listen for settings changes
     connect(AppSettings::instance(), &AppSettings::settingChanged,
             this, &MainWindow::onSettingChanged);
+
+    // Simulation mode — skip real connections and use fake device
+    if (!simulateScenario.isEmpty()) {
+        m_simulation = new SimulationConnection(this);
+        connect(m_simulation, &SimulationConnection::connected,
+                this, &MainWindow::onConnected);
+        connect(m_simulation, &SimulationConnection::disconnected,
+                this, &MainWindow::onDisconnected);
+        connect(m_simulation, &SimulationConnection::dataReceived,
+                this, &MainWindow::onDataReceived);
+
+        SimulationConnection::Scenario sc = simulateScenario == "reconnect"
+            ? SimulationConnection::Scenario::Reconnect
+            : SimulationConnection::Scenario::Basic;
+
+        QTimer::singleShot(300, this, [this, sc]() {
+            m_connectButton->setEnabled(false);
+            m_disconnectButton->setEnabled(true);
+            m_simulation->start(sc);
+        });
+    }
 
     // Restore window state (geometry, splitter sizes)
     restoreWindowState();
@@ -521,6 +545,9 @@ void MainWindow::onConnected()
         }
     });
 
+    // Clear any stale partial frame from the previous session
+    m_protocol->resetParser();
+
     updateStatusLabel();
     statusBar()->showMessage("Connected", 3000);
 
@@ -530,6 +557,13 @@ void MainWindow::onConnected()
 
 void MainWindow::onDisconnected()
 {
+    // If TCP is auto-reconnecting, keep all state intact - just update status
+    if (m_tcp->isReconnecting()) {
+        m_statusLabel->setText("Reconnecting...");
+        statusBar()->showMessage("Connection lost, reconnecting...", 0);
+        return;
+    }
+
     // Only update UI if no transport is still connected
     if (isDeviceConnected())
         return;
@@ -544,6 +578,7 @@ void MainWindow::onDisconnected()
 
     // Close database and clear nodes
     closeDatabase();
+    m_openNodeNum = 0;
 
     updateStatusLabel();
     statusBar()->showMessage("Disconnected", 3000);
@@ -795,19 +830,49 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
                 msg.packetId = packet.fields.value("packetId", 0).toUInt();
                 m_messagesWidget->addMessage(msg);
 
-                // Auto-respond to ping if enabled (DMs only, not from self)
+                // Autoresponder: handle !commands in DMs
                 uint32_t myNode = m_nodeManager->myNodeNum();
                 bool isDM = (packet.to == myNode && packet.to != 0xFFFFFFFF);
                 bool isFromOther = (packet.from != myNode);
-                bool isPing = msg.text.trimmed().compare("ping", Qt::CaseInsensitive) == 0;
+                QString trimmed = msg.text.trimmed();
 
-                if (isDM && isFromOther && isPing && AppSettings::instance()->autoPingResponse())
+                if (isDM && isFromOther && AppSettings::instance()->autoPingResponse())
                 {
-                    qDebug() << "[MainWindow] Auto-responding to ping from" << QString::number(packet.from, 16);
-                    // Respond with "pong" after a short delay
-                    QTimer::singleShot(500, this, [this, fromNode = packet.from]() {
-                        onSendMessage("pong", fromNode, 0);
-                    });
+                    // Normalize: accept both "!ping" and "ping" (legacy)
+                    QString cmd = trimmed.toLower();
+                    if (!cmd.startsWith('!') && cmd == "ping")
+                        cmd = "!ping";
+
+                    if (cmd.startsWith('!'))
+                    {
+                        // Per-sender cooldown (except !ping which is always allowed)
+                        bool cooldownOk = true;
+                        if (cmd != "!ping")
+                        {
+                            QDateTime now = QDateTime::currentDateTime();
+                            if (m_autoresponderCooldowns.contains(packet.from))
+                            {
+                                int elapsed = m_autoresponderCooldowns[packet.from].secsTo(now);
+                                if (elapsed < AUTORESPONDER_COOLDOWN_SECS)
+                                    cooldownOk = false;
+                            }
+                            if (cooldownOk)
+                                m_autoresponderCooldowns[packet.from] = now;
+                        }
+
+                        if (cooldownOk)
+                        {
+                            QString response = handleAutoresponderCommand(cmd, packet.from);
+                            if (!response.isEmpty())
+                            {
+                                qDebug() << "[Autoresponder]" << cmd << "from"
+                                         << QString::number(packet.from, 16) << "->" << response;
+                                QTimer::singleShot(500, this, [this, response, fromNode = packet.from]() {
+                                    onSendMessage(response, fromNode, 0);
+                                });
+                            }
+                        }
+                    }
                 }
 
                 // Show notification for incoming messages (not from ourselves)
@@ -937,6 +1002,9 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
 
 void MainWindow::onSerialError(const QString &error)
 {
+    // Suppress button flicker during TCP auto-reconnect attempts
+    if (m_tcp->isReconnecting())
+        return;
     if (!isDeviceConnected())
         m_connectButton->setEnabled(true);
     statusBar()->showMessage("Error: " + error, 5000);
@@ -1416,6 +1484,10 @@ void MainWindow::updateNodeList()
 
 void MainWindow::updateStatusLabel()
 {
+    // Don't overwrite "Reconnecting..." while TCP is mid-reconnect
+    if (m_tcp->isReconnecting())
+        return;
+
     QString status;
     int nodeCount = m_nodeManager->allNodes().count();
     int dbCount = m_database && m_database->isOpen() ? m_database->nodeCount() : 0;
@@ -1465,7 +1537,17 @@ void MainWindow::requestConfig()
 
 void MainWindow::openDatabaseForNode(uint32_t nodeNum)
 {
+    // Reconnect to same node: DB is still open, just reload to merge any missed data
+    if (m_database && m_database->isOpen() && m_openNodeNum == nodeNum) {
+        qDebug() << "[MainWindow] Reconnected to same node, reloading DB (no clear)";
+        m_nodeManager->loadFromDatabase();
+        updateStatusLabel();
+        statusBar()->showMessage("Reconnected", 3000);
+        return;
+    }
+
     closeDatabase();
+    m_openNodeNum = nodeNum;
     QString nodeId = MeshtasticProtocol::nodeIdToString(nodeNum);
     QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(dataDir);
@@ -1639,6 +1721,9 @@ void MainWindow::showNotification(const QString &title, const QString &message)
     {
         m_trayIcon->showMessage(title, message, QSystemTrayIcon::Information, 5000);
     }
+
+    if (AppSettings::instance()->soundEnabled())
+        QApplication::beep();
 }
 
 void MainWindow::showTracerouteResult(const MeshtasticProtocol::DecodedPacket &packet)
@@ -1855,6 +1940,7 @@ void MainWindow::onSaveLoRaConfig()
     QByteArray packet = m_protocol->createLoRaConfigPacket(myNode, myNode, config);
     sendToDevice(packet);
 
+    m_configWidget->notifyLoRaSaved();
     statusBar()->showMessage("LoRa config saved to device", 3000);
 }
 
@@ -1889,6 +1975,7 @@ void MainWindow::onSaveDeviceConfig()
     QByteArray packet = m_protocol->createDeviceConfigPacket(myNode, myNode, config);
     sendToDevice(packet);
 
+    m_configWidget->notifyDeviceSaved();
     statusBar()->showMessage("Device config saved to device", 3000);
 }
 
@@ -1921,6 +2008,7 @@ void MainWindow::onSavePositionConfig()
     QByteArray packet = m_protocol->createPositionConfigPacket(myNode, myNode, config);
     sendToDevice(packet);
 
+    m_configWidget->notifyPositionSaved();
     statusBar()->showMessage("Position config saved to device", 3000);
 }
 
@@ -1969,6 +2057,7 @@ void MainWindow::onSaveChannelConfig(int channelIndex)
         m_messagesWidget->setChannel(channelIndex, ch.name, enabled);
     }
 
+    m_configWidget->notifyChannelSaved();
     statusBar()->showMessage(QString("Channel %1 config saved to device").arg(channelIndex), 3000);
 }
 
@@ -2223,11 +2312,14 @@ void MainWindow::drawTestNodeLines()
 
 bool MainWindow::isDeviceConnected() const
 {
-    return m_serial->isConnected() || m_tcp->isConnected() || m_bluetooth->isConnected();
+    return m_serial->isConnected() || m_tcp->isConnected() || m_bluetooth->isConnected()
+           || (m_simulation && m_simulation->isActive());
 }
 
 bool MainWindow::sendToDevice(const QByteArray &data)
 {
+    if (m_simulation && m_simulation->isActive())
+        return m_simulation->sendData(data);
     if (m_bluetooth->isConnected())
         return m_bluetooth->sendData(data);
     if (m_tcp->isConnected())
@@ -2239,6 +2331,8 @@ bool MainWindow::sendToDevice(const QByteArray &data)
 
 QString MainWindow::connectedDeviceName() const
 {
+    if (m_simulation && m_simulation->isActive())
+        return "Simulation";
     if (m_bluetooth->isConnected())
         return m_bluetooth->connectedDeviceName();
     if (m_tcp->isConnected())
@@ -2246,6 +2340,114 @@ QString MainWindow::connectedDeviceName() const
     if (m_serial->isConnected())
         return m_serial->connectedPortName();
     return QString();
+}
+
+QString MainWindow::handleAutoresponderCommand(const QString &command, uint32_t fromNode)
+{
+    if (command == "!ping")
+        return "pong";
+
+    if (command == "!nodes")
+    {
+        int count = m_nodeManager->allNodes().count();
+        return QString("%1 nodes seen on mesh").arg(count);
+    }
+
+    if (command == "!battery" || command == "!batt")
+    {
+        NodeInfo myInfo = m_nodeManager->getNode(m_nodeManager->myNodeNum());
+        QStringList parts;
+        if (myInfo.batteryLevel > 0)
+            parts << QString("%1%").arg(myInfo.batteryLevel);
+        if (myInfo.voltage > 0)
+            parts << QString("%1V").arg(myInfo.voltage, 0, 'f', 2);
+        if (myInfo.isExternalPower)
+            parts << "ext power";
+        return parts.isEmpty() ? "Battery: unknown" : "Battery: " + parts.join(", ");
+    }
+
+    if (command == "!uptime")
+    {
+        NodeInfo myInfo = m_nodeManager->getNode(m_nodeManager->myNodeNum());
+        if (myInfo.uptimeSeconds == 0)
+            return "Uptime: unknown";
+        uint32_t secs = myInfo.uptimeSeconds;
+        int days = secs / 86400;
+        int hours = (secs % 86400) / 3600;
+        int mins = (secs % 3600) / 60;
+        QStringList parts;
+        if (days > 0) parts << QString("%1d").arg(days);
+        if (hours > 0) parts << QString("%1h").arg(hours);
+        parts << QString("%1m").arg(mins);
+        return "Uptime: " + parts.join(" ");
+    }
+
+    if (command == "!weather" || command == "!wx")
+    {
+        NodeInfo myInfo = m_nodeManager->getNode(m_nodeManager->myNodeNum());
+        if (!myInfo.hasEnvironmentTelemetry)
+            return "No weather sensor data";
+        QStringList parts;
+        if (myInfo.temperature != 0.0f)
+            parts << QString("Temp: %1C").arg(myInfo.temperature, 0, 'f', 1);
+        if (myInfo.relativeHumidity != 0.0f)
+            parts << QString("Humidity: %1%").arg(myInfo.relativeHumidity, 0, 'f', 0);
+        if (myInfo.barometricPressure != 0.0f)
+            parts << QString("Pressure: %1hPa").arg(myInfo.barometricPressure, 0, 'f', 1);
+        return parts.isEmpty() ? "No weather sensor data" : parts.join(", ");
+    }
+
+    if (command == "!signal")
+    {
+        NodeInfo senderInfo = m_nodeManager->getNode(fromNode);
+        QStringList parts;
+        if (senderInfo.snr != 0.0f || senderInfo.rssi != 0)
+        {
+            parts << QString("SNR: %1dB").arg(senderInfo.snr, 0, 'f', 1);
+            parts << QString("RSSI: %1dBm").arg(senderInfo.rssi);
+        }
+        if (senderInfo.hopsAway >= 0)
+            parts << QString("%1 hop%2").arg(senderInfo.hopsAway).arg(senderInfo.hopsAway != 1 ? "s" : "");
+        return parts.isEmpty() ? "No signal data for your node" : "Your signal: " + parts.join(", ");
+    }
+
+    if (command == "!pos" || command == "!position")
+    {
+        NodeInfo myInfo = m_nodeManager->getNode(m_nodeManager->myNodeNum());
+        if (!myInfo.hasPosition)
+            return "No position available";
+        QString pos = QString("%1, %2").arg(myInfo.latitude, 0, 'f', 5).arg(myInfo.longitude, 0, 'f', 5);
+        if (myInfo.altitude != 0)
+            pos += QString(", alt %1m").arg(myInfo.altitude);
+        return "Position: " + pos;
+    }
+
+    if (command == "!time")
+    {
+        return QDateTime::currentDateTimeUtc().toString("yyyy-MM-dd HH:mm UTC");
+    }
+
+    if (command == "!info")
+    {
+        NodeInfo myInfo = m_nodeManager->getNode(m_nodeManager->myNodeNum());
+        QStringList parts;
+        if (!myInfo.longName.isEmpty())
+            parts << myInfo.longName;
+        if (!myInfo.hwModel.isEmpty())
+            parts << myInfo.hwModel;
+        if (myInfo.role != 0)
+            parts << m_nodeManager->roleToString(myInfo.role);
+        if (!m_firmwareVersion.isEmpty())
+            parts << "fw " + m_firmwareVersion;
+        return parts.isEmpty() ? "No device info" : parts.join(" / ");
+    }
+
+    if (command == "!help")
+    {
+        return "Commands: !ping !nodes !battery !uptime !weather !signal !pos !time !info !help";
+    }
+
+    return QString(); // Unknown command, ignore
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

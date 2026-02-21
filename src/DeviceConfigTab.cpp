@@ -139,6 +139,12 @@ void DeviceConfigTab::setupUI()
     mainLayout->addStretch();
 }
 
+void DeviceConfigTab::notifySaved()
+{
+    m_statusLabel->setText("Saved \u2713");
+    m_statusLabel->setStyleSheet("color: green;");
+}
+
 void DeviceConfigTab::onConfigReceived()
 {
     updateUIFromConfig();

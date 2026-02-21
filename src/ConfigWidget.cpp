@@ -52,3 +52,8 @@ void ConfigWidget::setupUI()
 
     layout->addWidget(m_tabWidget);
 }
+
+void ConfigWidget::notifyLoRaSaved()     { m_radioConfigTab->notifySaved(); }
+void ConfigWidget::notifyDeviceSaved()   { m_deviceConfigTab->notifySaved(); }
+void ConfigWidget::notifyPositionSaved() { m_positionConfigTab->notifySaved(); }
+void ConfigWidget::notifyChannelSaved()  { m_channelsConfigTab->notifySaved(); }

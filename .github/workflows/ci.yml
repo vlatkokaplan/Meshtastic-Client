@@ -34,6 +34,11 @@ jobs:
           cd build
           cmake --build . -- -j$(nproc)
 
+      - name: Test
+        run: |
+          cd build
+          ctest --output-on-failure
+
       - name: Build DEB Package
         if: startsWith(github.ref, 'refs/tags/')
         run: |

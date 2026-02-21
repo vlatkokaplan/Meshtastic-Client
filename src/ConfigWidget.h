@@ -21,6 +21,11 @@ public:
     DeviceConfig *deviceConfig() const { return m_deviceConfig; }
     AppSettingsTab *appSettingsTab() const { return m_appSettingsTab; }
 
+    void notifyLoRaSaved();
+    void notifyDeviceSaved();
+    void notifyPositionSaved();
+    void notifyChannelSaved();
+
 signals:
     void saveLoRaConfig();
     void saveDeviceConfig();

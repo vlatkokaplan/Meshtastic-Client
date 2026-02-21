@@ -39,12 +39,19 @@ bool TcpConnection::connectToHost(const QString &host, quint16 port)
 void TcpConnection::disconnectDevice()
 {
     m_intentionalDisconnect = true;
+    bool wasReconnecting = m_reconnectTimer->isActive();
     m_reconnectTimer->stop();
 
     if (m_socket->state() != QAbstractSocket::UnconnectedState)
     {
         m_socket->abort();
         qDebug() << "[TCP] Disconnected from" << m_lastHost << ":" << m_lastPort;
+        emit disconnected();
+    }
+    else if (wasReconnecting)
+    {
+        // Socket was already down (mid-reconnect loop) — still need to notify
+        qDebug() << "[TCP] Cancelled reconnect to" << m_lastHost << ":" << m_lastPort;
         emit disconnected();
     }
 }

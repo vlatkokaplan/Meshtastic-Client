@@ -17,6 +17,9 @@ class PositionConfigTab : public QWidget
 public:
     explicit PositionConfigTab(DeviceConfig *config, QWidget *parent = nullptr);
 
+public slots:
+    void notifySaved();
+
 signals:
     void configChanged();
     void saveRequested();

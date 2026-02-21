@@ -123,6 +123,12 @@ void PositionConfigTab::setupUI()
     mainLayout->addStretch();
 }
 
+void PositionConfigTab::notifySaved()
+{
+    m_statusLabel->setText("Saved \u2713");
+    m_statusLabel->setStyleSheet("color: green;");
+}
+
 void PositionConfigTab::onConfigReceived()
 {
     updateUIFromConfig();

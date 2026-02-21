@@ -150,8 +150,8 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode,
 
     updateStatusLabel();
 
-    // Auto-connect if enabled
-    if (AppSettings::instance()->autoConnect())
+    // Auto-connect if enabled (skip when running in simulation mode)
+    if (simulateScenario.isEmpty() && AppSettings::instance()->autoConnect())
     {
         QString lastPort = AppSettings::instance()->lastPort();
         if (!lastPort.isEmpty())
@@ -182,6 +182,7 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode,
 
     // Simulation mode — skip real connections and use fake device
     if (!simulateScenario.isEmpty()) {
+        m_simulateMode = true;
         m_simulation = new SimulationConnection(this);
         connect(m_simulation, &SimulationConnection::connected,
                 this, &MainWindow::onConnected);
@@ -1587,7 +1588,10 @@ void MainWindow::openDatabaseForNode(uint32_t nodeNum)
     QString nodeId = MeshtasticProtocol::nodeIdToString(nodeNum);
     QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(dataDir);
-    QString dbPath = QString("%1/meshtastic_%2.db").arg(dataDir, nodeId);
+    // Simulation mode uses an in-memory database so it never writes to disk
+    QString dbPath = m_simulateMode
+        ? ":memory:"
+        : QString("%1/meshtastic_%2.db").arg(dataDir, nodeId);
     m_database = new Database(this);
     if (m_database->open(dbPath))
     {

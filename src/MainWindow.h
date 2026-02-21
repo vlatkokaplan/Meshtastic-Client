@@ -113,6 +113,7 @@ private:
     TcpConnection *m_tcp;
     BluetoothConnection *m_bluetooth;
     SimulationConnection *m_simulation = nullptr;
+    bool m_simulateMode = false;  // true → use in-memory DB, skip auto-connect
     MeshtasticProtocol *m_protocol;
     NodeManager *m_nodeManager;
     Database *m_database;

@@ -2,6 +2,7 @@
 #define THEME_H
 
 #include <QColor>
+#include <QIcon>
 #include <QString>
 
 // Single source of truth for the application's visual design.
@@ -81,6 +82,12 @@ QColor batteryColor(int percent, bool externalPower = false);
 
 // SNR -> colour on the same success/warning/danger scale.
 QColor signalColor(float snr);
+
+// Small icons drawn in code rather than pulled from the desktop icon theme,
+// which is not guaranteed to carry any particular name (QIcon::fromTheme
+// silently yields a blank icon when it doesn't).
+QIcon positionPin(const QColor &color);
+QIcon batteryPip(int percent, bool externalPower);
 
 } // namespace Theme
 

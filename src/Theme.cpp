@@ -1,6 +1,9 @@
 #include "Theme.h"
 
 #include <QApplication>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPixmap>
 #include <QPalette>
 
 namespace Theme
@@ -116,6 +119,67 @@ QColor signalColor(float snr)
     if (snr >= 0.0f)
         return p.warning;
     return p.danger;
+}
+
+QIcon positionPin(const QColor &color)
+{
+    const int s = 12;
+    QPixmap pm(s * 2, s * 2);           // 2x for crisp edges on hidpi
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+
+    // Teardrop pin: circle head over a short point
+    QPainterPath path;
+    path.addEllipse(QPointF(s, s * 0.85), s * 0.55, s * 0.55);
+    path.moveTo(s - s * 0.33, s * 1.2);
+    path.lineTo(s, s * 1.85);
+    path.lineTo(s + s * 0.33, s * 1.2);
+    path.closeSubpath();
+
+    p.setPen(Qt::NoPen);
+    p.setBrush(color);
+    p.drawPath(path.simplified());
+
+    // hollow centre so it reads as a pin, not a blob
+    p.setBrush(palette().surface);
+    p.drawEllipse(QPointF(s, s * 0.85), s * 0.2, s * 0.2);
+    p.end();
+
+    return QIcon(pm);
+}
+
+QIcon batteryPip(int percent, bool externalPower)
+{
+    const int w = 26, h = 12;
+    QPixmap pm(w * 2, h * 2);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+
+    const QColor fill = batteryColor(percent, externalPower);
+    QRectF body(1, 1, w * 2 - 6, h * 2 - 2);
+
+    p.setPen(QPen(fill, 2));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(body, 3, 3);
+
+    // terminal nub
+    p.setPen(Qt::NoPen);
+    p.setBrush(fill);
+    p.drawRoundedRect(QRectF(body.right() + 1, h * 0.6, 3, h * 0.8), 1, 1);
+
+    // charge level, or a full bar when running on external power
+    double frac = externalPower ? 1.0 : qBound(0, percent, 100) / 100.0;
+    if (frac > 0.0)
+    {
+        QRectF inner = body.adjusted(3, 3, -3, -3);
+        inner.setWidth(inner.width() * frac);
+        p.drawRoundedRect(inner, 1, 1);
+    }
+    p.end();
+
+    return QIcon(pm);
 }
 
 QString styleSheet(bool dark)

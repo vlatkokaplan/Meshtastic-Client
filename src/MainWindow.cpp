@@ -1547,6 +1547,12 @@ void MainWindow::updateNodeList()
 
     uint32_t myNode = m_nodeManager->myNodeNum();
 
+    // Columns that no visible node has data for are hidden rather than left as
+    // a stripe of blank cells - on a real mesh only a couple of nodes report a
+    // battery, and roles are often unknown.
+    bool anyBattery = false;
+    bool anyRole = false;
+
     int row = 0;
     for (const NodeInfo &node : nodes)
     {
@@ -1583,22 +1589,48 @@ void MainWindow::updateNodeList()
         m_nodeTable->insertRow(row);
 
         // Col 0: Node Name
-        QString name = node.longName.isEmpty() ? node.nodeId : node.longName;
+        // Fall back through long name -> short name -> node id. A node showing
+        // only its id has never sent a NodeInfo, so it is set in italic muted
+        // text rather than reading as an equal of the named nodes.
+        bool unnamed = node.longName.isEmpty() && node.shortName.isEmpty();
+        QString name = node.longName;
+        if (name.isEmpty())
+            name = node.shortName;
+        if (name.isEmpty())
+            name = node.nodeId;
         if (node.isFavorite)
         {
-            name = "[*] " + name;
+            name = QStringLiteral("\u2605 ") + name;  // star
         }
+
         QTableWidgetItem *nameItem = new QTableWidgetItem(name);
         nameItem->setData(Qt::UserRole, node.nodeNum);
-        if (!node.hasPosition)
+
+        QFont nameFont = nameItem->font();
+        if (unnamed)
         {
+            nameFont.setItalic(true);
             nameItem->setForeground(QBrush(Theme::palette().textMuted));
         }
         if (isMyNode)
+            nameFont.setBold(true);
+        nameItem->setFont(nameFont);
+
+        // Only about a quarter of a real mesh's nodes report a position, and
+        // only those can ever appear on the map. Mark them so it is obvious
+        // which rows "Center on Map" will do anything for.
+        if (node.hasPosition)
         {
-            QFont boldFont = nameItem->font();
-            boldFont.setBold(true);
-            nameItem->setFont(boldFont);
+            nameItem->setIcon(Theme::positionPin(isMyNode ? Theme::palette().accent
+                                                          : Theme::palette().textMuted));
+            nameItem->setToolTip(QString("%1\nPosition: %2, %3")
+                                     .arg(node.nodeId)
+                                     .arg(node.latitude, 0, 'f', 5)
+                                     .arg(node.longitude, 0, 'f', 5));
+        }
+        else
+        {
+            nameItem->setToolTip(QString("%1\nNo position reported").arg(node.nodeId));
         }
         m_nodeTable->setItem(row, 0, nameItem);
 
@@ -1606,10 +1638,6 @@ void MainWindow::updateNodeList()
         QTableWidgetItem *shortItem = new QTableWidgetItem(node.shortName);
         shortItem->setData(Qt::UserRole, node.nodeNum);
         shortItem->setTextAlignment(Qt::AlignCenter);
-        if (!node.hasPosition)
-        {
-            shortItem->setForeground(QBrush(Theme::palette().textMuted));
-        }
         if (isMyNode)
         {
             QFont boldFont = shortItem->font();
@@ -1619,12 +1647,11 @@ void MainWindow::updateNodeList()
         m_nodeTable->setItem(row, 1, shortItem);
 
         // Col 2: Role
-        QTableWidgetItem *roleItem = new QTableWidgetItem(m_nodeManager->roleToString(node.role));
+        QString roleText = m_nodeManager->roleToString(node.role);
+        if (!roleText.isEmpty())
+            anyRole = true;
+        QTableWidgetItem *roleItem = new QTableWidgetItem(roleText);
         roleItem->setData(Qt::UserRole, node.nodeNum);
-        if (!node.hasPosition)
-        {
-            roleItem->setForeground(QBrush(Theme::palette().textMuted));
-        }
         m_nodeTable->setItem(row, 2, roleItem);
 
         // Col 3: Last Heard
@@ -1634,39 +1661,34 @@ void MainWindow::updateNodeList()
                                   : QStringLiteral("Never heard from this node"));
         // Sort on the real timestamp, not the "3m ago" text
         heardItem->setData(SortableTableItem::SortRole, node.lastHeard);
-        if (!node.hasPosition)
-        {
-            heardItem->setForeground(QBrush(Theme::palette().textMuted));
-        }
         m_nodeTable->setItem(row, 3, heardItem);
 
         // Col 4: Battery
         SortableTableItem *batteryItem = new SortableTableItem;
         batteryItem->setData(SortableTableItem::SortRole,
                              node.isExternalPower ? 1000 : node.batteryLevel);
-        if (!node.hasPosition)
-        {
-            batteryItem->setForeground(QBrush(Theme::palette().textMuted));
-        }
+        // QIcon::fromTheme silently returns a blank icon when the desktop icon
+        // theme lacks the name, which is why this column looked empty. Draw it.
         if (node.isExternalPower)
         {
-            batteryItem->setIcon(QIcon::fromTheme("battery-charging"));
-            batteryItem->setText("Plugged");
+            batteryItem->setIcon(Theme::batteryPip(100, true));
+            batteryItem->setToolTip("Running on external power");
+            anyBattery = true;
         }
-        else if (node.batteryLevel > 0 || node.voltage > 0)
+        else if (node.batteryLevel > 0)
         {
-            int level = node.batteryLevel;
-            if (level > 80)
-                batteryItem->setIcon(QIcon::fromTheme("battery-full"));
-            else if (level > 60)
-                batteryItem->setIcon(QIcon::fromTheme("battery-good"));
-            else if (level > 40)
-                batteryItem->setIcon(QIcon::fromTheme("battery-medium"));
-            else if (level > 20)
-                batteryItem->setIcon(QIcon::fromTheme("battery-low"));
-            else
-                batteryItem->setIcon(QIcon::fromTheme("battery-caution"));
-            batteryItem->setText(QString::number(level) + "%");
+            batteryItem->setIcon(Theme::batteryPip(node.batteryLevel, false));
+            batteryItem->setText(QString::number(node.batteryLevel) + "%");
+            if (node.voltage > 0)
+                batteryItem->setToolTip(QString("%1%  ·  %2 V")
+                                            .arg(node.batteryLevel)
+                                            .arg(node.voltage, 0, 'f', 2));
+            anyBattery = true;
+        }
+        else if (node.voltage > 0)
+        {
+            batteryItem->setText(QString("%1 V").arg(node.voltage, 0, 'f', 2));
+            anyBattery = true;
         }
         m_nodeTable->setItem(row, 4, batteryItem);
 
@@ -1719,6 +1741,9 @@ void MainWindow::updateNodeList()
         m_nodeTable->setItem(row, 5, signalItem);
         row++;
     }
+
+    m_nodeTable->setColumnHidden(2, !anyRole);      // Role
+    m_nodeTable->setColumnHidden(4, !anyBattery);   // Battery
 
     m_nodeTable->setSortingEnabled(sortingWasEnabled);
 

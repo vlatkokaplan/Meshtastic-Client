@@ -27,6 +27,7 @@ private slots:
     void onExportMessagesJson();
     void onAutoConnectChanged(bool checked);
     void onShowOfflineNodesChanged(bool checked);
+    void onHideNeverHeardChanged(bool checked);
     void onOfflineThresholdChanged(int value);
     void onNotificationsChanged(bool checked);
     void onSoundChanged(bool checked);
@@ -49,6 +50,7 @@ private:
 
     // Node display settings
     QCheckBox *m_showOfflineNodesCheck;
+    QCheckBox *m_hideNeverHeardCheck;
     QSpinBox *m_offlineThresholdSpin;
 
     // Map settings

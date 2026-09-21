@@ -301,6 +301,16 @@ void AppSettings::setPositionRefreshInterval(int seconds)
     setValue("map/position_refresh_interval", seconds);
 }
 
+bool AppSettings::hideNeverHeardNodes() const
+{
+    return value("nodes/hide_never_heard", true).toBool();
+}
+
+void AppSettings::setHideNeverHeardNodes(bool hide)
+{
+    setValue("nodes/hide_never_heard", hide);
+}
+
 int AppSettings::dataRetentionDays() const
 {
     return value("db/retention_days", 7).toInt();

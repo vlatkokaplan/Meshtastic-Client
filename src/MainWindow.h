@@ -101,6 +101,7 @@ private:
     QLabel *m_tracerouteCooldownLabel = nullptr;
     QTimer *m_positionRefreshTimer = nullptr;
     QLabel *m_connectionPill = nullptr;
+    QLabel *m_nodesLabel = nullptr;
     int m_dbNodeCount = 0;  // cached: SELECT COUNT(*) is too slow for per-packet status updates
 
     void refreshDbNodeCount();

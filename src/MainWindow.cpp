@@ -389,7 +389,8 @@ void MainWindow::setupMapTab()
     m_dashboardStats = new DashboardStatsWidget(m_nodeManager, m_configWidget->deviceConfig());
     sidebarLayout->addWidget(m_dashboardStats);
 
-    QLabel *nodesLabel = new QLabel("NODES");
+    m_nodesLabel = new QLabel("NODES");
+    QLabel *nodesLabel = m_nodesLabel;
     nodesLabel->setStyleSheet(QString("font-weight: 700; font-size: 11px; letter-spacing: 1px;"
                                       "color: %1; padding: %2px %3px 0 %3px;")
                                   .arg(Theme::palette().textMuted.name())
@@ -1511,6 +1512,7 @@ void MainWindow::updateNodeList()
 
     // Get offline filter settings
     bool showOffline = AppSettings::instance()->showOfflineNodes();
+    bool hideNeverHeard = AppSettings::instance()->hideNeverHeardNodes();
     int offlineThresholdMins = AppSettings::instance()->offlineThresholdMinutes();
     QDateTime offlineThreshold = QDateTime::currentDateTime().addSecs(-offlineThresholdMins * 60);
 
@@ -1522,8 +1524,20 @@ void MainWindow::updateNodeList()
     int row = 0;
     for (const NodeInfo &node : nodes)
     {
-        // Filter offline nodes if setting is disabled
-        if (!showOffline && node.lastHeard.isValid() && node.lastHeard < offlineThreshold)
+        // Nodes the device knows of but has never received a packet from. They
+        // carry no position, signal or telemetry, so they are noise in the list
+        // by default. Never hide our own node.
+        bool neverHeard = !node.lastHeard.isValid();
+        if (neverHeard && hideNeverHeard && node.nodeNum != myNode)
+        {
+            continue;
+        }
+
+        // Filter offline nodes if setting is disabled. A never-heard node used
+        // to slip through here because of the isValid() check - it was the one
+        // category that could never be hidden.
+        if (!showOffline && (neverHeard || node.lastHeard < offlineThreshold)
+            && node.nodeNum != myNode)
         {
             continue;
         }
@@ -1670,6 +1684,13 @@ void MainWindow::updateNodeList()
         }
         m_nodeTable->setItem(row, 5, signalItem);
         row++;
+    }
+
+    if (m_nodesLabel)
+    {
+        int total = nodes.size();
+        m_nodesLabel->setText(row == total ? QStringLiteral("NODES")
+                                           : QStringLiteral("NODES  %1 OF %2").arg(row).arg(total));
     }
 
     // Restore the selection and scroll position from before the rebuild

@@ -39,6 +39,14 @@ void AppSettingsTab::setupUI()
     connect(m_showOfflineNodesCheck, &QCheckBox::toggled, this, &AppSettingsTab::onShowOfflineNodesChanged);
     nodesLayout->addRow(m_showOfflineNodesCheck);
 
+    m_hideNeverHeardCheck = new QCheckBox("Hide nodes never heard from");
+    m_hideNeverHeardCheck->setToolTip(
+        "The device's node database also lists nodes it learned about second-hand "
+        "but has never received a packet from. They have no position, signal or "
+        "telemetry, so they are hidden by default.");
+    connect(m_hideNeverHeardCheck, &QCheckBox::toggled, this, &AppSettingsTab::onHideNeverHeardChanged);
+    nodesLayout->addRow(m_hideNeverHeardCheck);
+
     m_offlineThresholdSpin = new QSpinBox;
     m_offlineThresholdSpin->setRange(5, 1440);
     m_offlineThresholdSpin->setSuffix(" minutes");
@@ -257,6 +265,7 @@ void AppSettingsTab::loadSettings()
 
     m_autoConnectCheck->setChecked(settings->autoConnect());
     m_showOfflineNodesCheck->setChecked(settings->showOfflineNodes());
+    m_hideNeverHeardCheck->setChecked(settings->hideNeverHeardNodes());
     m_offlineThresholdSpin->setValue(settings->offlineThresholdMinutes());
     m_notificationsCheck->setChecked(settings->notificationsEnabled());
     m_soundCheck->setChecked(settings->soundEnabled());
@@ -304,6 +313,11 @@ void AppSettingsTab::onAutoConnectChanged(bool checked)
 void AppSettingsTab::onShowOfflineNodesChanged(bool checked)
 {
     AppSettings::instance()->setShowOfflineNodes(checked);
+}
+
+void AppSettingsTab::onHideNeverHeardChanged(bool checked)
+{
+    AppSettings::instance()->setHideNeverHeardNodes(checked);
 }
 
 void AppSettingsTab::onOfflineThresholdChanged(int value)

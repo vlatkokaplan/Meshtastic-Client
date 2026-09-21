@@ -78,6 +78,9 @@ public:
     int dataRetentionDays() const;
     void setDataRetentionDays(int days);
 
+    bool hideNeverHeardNodes() const;
+    void setHideNeverHeardNodes(bool hide);
+
 signals:
     void settingChanged(const QString &key, const QVariant &value);
 

@@ -415,8 +415,9 @@ void MainWindow::setupMapTab()
 
     // Node table setup
     m_nodeTable = new QTableWidget;
-    m_nodeTable->setColumnCount(6);
-    m_nodeTable->setHorizontalHeaderLabels({"Name", "Short", "Role", "Last Heard", "Battery", "Signal"});
+    m_nodeTable->setColumnCount(7);
+    m_nodeTable->setHorizontalHeaderLabels(
+        {"Name", "Short", "Role", "Last Heard", "Battery", "Signal", "Hops"});
     QHeaderView *nodeHeader = m_nodeTable->horizontalHeader();
     nodeHeader->setSectionResizeMode(QHeaderView::ResizeToContents);
     nodeHeader->setSectionResizeMode(0, QHeaderView::Stretch);  // Name takes the slack
@@ -1552,6 +1553,8 @@ void MainWindow::updateNodeList()
     // battery, and roles are often unknown.
     bool anyBattery = false;
     bool anyRole = false;
+    bool anySignal = false;
+    bool anyHops = false;
 
     int row = 0;
     for (const NodeInfo &node : nodes)
@@ -1692,58 +1695,66 @@ void MainWindow::updateNodeList()
         }
         m_nodeTable->setItem(row, 4, batteryItem);
 
-        // Col 5: Signal (bars for 0-hop, hop count for multi-hop)
+        // Col 5: Signal - SNR only. Hop count lives in its own column now;
+        // ranking both on one key meant every multi-hop node sorted below every
+        // node with any SNR at all, so neither could be sorted usefully.
         SortableTableItem *signalItem = new SortableTableItem;
-        double signalRank = -1000.0;
-        if (node.snr != 0.0f)
-            signalRank = node.snr;
-        else if (node.hopsAway > 0)
-            signalRank = -100.0 - node.hopsAway;  // fewer hops ranks higher
-        signalItem->setData(SortableTableItem::SortRole, signalRank);
         signalItem->setTextAlignment(Qt::AlignCenter);
-        if (node.hopsAway == 0 && (node.snr != 0.0f || node.rssi != 0))
+        bool hasSnr = (node.snr != 0.0f || node.rssi != 0);
+        // Unknown sorts last in the useful (descending, best first) direction
+        signalItem->setData(SortableTableItem::SortRole, hasSnr ? node.snr : -1000.0);
+        if (hasSnr)
         {
-            // Direct node with signal data - show signal bars based on SNR
-            QString bars;
-            QColor color;
             float snr = node.snr;
-            if (snr >= 10.0f) {
-                bars = "||||";
-                color = QColor("#2e7d32"); // green
-            } else if (snr >= 5.0f) {
-                bars = "|||";
-                color = QColor("#2e7d32"); // green
-            } else if (snr >= 0.0f) {
-                bars = "||";
-                color = QColor("#f57c00"); // orange
-            } else if (snr >= -5.0f) {
-                bars = "|";
-                color = QColor("#c62828"); // red
-            } else {
-                bars = " ";
-                color = QColor("#c62828"); // red
-            }
+            QString bars = snr >= 10.0f ? "||||"
+                         : snr >= 5.0f  ? "|||"
+                         : snr >= 0.0f  ? "||"
+                         : snr >= -5.0f ? "|"
+                                        : "\u00b7";
             signalItem->setText(bars);
-            signalItem->setForeground(QBrush(color));
-            signalItem->setToolTip(QString("SNR: %1 dB / RSSI: %2").arg(node.snr, 0, 'f', 1).arg(node.rssi));
-        }
-        else if (node.hopsAway > 0)
-        {
-            signalItem->setText(QString("%1 hop%2").arg(node.hopsAway).arg(node.hopsAway > 1 ? "s" : ""));
-            signalItem->setForeground(QBrush(QColor("#6c757d")));
+            signalItem->setForeground(QBrush(Theme::signalColor(snr)));
+            signalItem->setToolTip(QString("SNR %1 dB  \u00b7  RSSI %2 dBm")
+                                       .arg(node.snr, 0, 'f', 1).arg(node.rssi));
+            anySignal = true;
         }
         else
         {
             signalItem->setText("-");
-            if (!node.hasPosition)
-                signalItem->setForeground(QBrush(Theme::palette().textMuted));
+            signalItem->setForeground(QBrush(Theme::palette().textMuted));
         }
         m_nodeTable->setItem(row, 5, signalItem);
+
+        // Col 6: Hops - sorts on its own scale, 0 (direct) first, unknown last
+        SortableTableItem *hopsItem = new SortableTableItem;
+        hopsItem->setTextAlignment(Qt::AlignCenter);
+        if (node.hopsAway >= 0)
+        {
+            hopsItem->setData(SortableTableItem::SortRole, node.hopsAway);
+            hopsItem->setText(node.hopsAway == 0 ? QStringLiteral("direct")
+                                                 : QString::number(node.hopsAway));
+            hopsItem->setToolTip(node.hopsAway == 0
+                                     ? QStringLiteral("Heard directly, no relays")
+                                     : QString("%1 relay hop%2 away")
+                                           .arg(node.hopsAway)
+                                           .arg(node.hopsAway > 1 ? "s" : ""));
+            if (node.hopsAway == 0)
+                hopsItem->setForeground(QBrush(Theme::palette().success));
+            anyHops = true;
+        }
+        else
+        {
+            hopsItem->setData(SortableTableItem::SortRole, 999);  // unknown last
+            hopsItem->setText("-");
+            hopsItem->setForeground(QBrush(Theme::palette().textMuted));
+        }
+        m_nodeTable->setItem(row, 6, hopsItem);
         row++;
     }
 
     m_nodeTable->setColumnHidden(2, !anyRole);      // Role
     m_nodeTable->setColumnHidden(4, !anyBattery);   // Battery
+    m_nodeTable->setColumnHidden(5, !anySignal);    // Signal
+    m_nodeTable->setColumnHidden(6, !anyHops);      // Hops
 
     m_nodeTable->setSortingEnabled(sortingWasEnabled);
 

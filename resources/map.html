@@ -28,40 +28,53 @@
         }
 
         .node-pin {
-            width: 30px;
-            height: 30px;
+            width: 22px;
+            height: 22px;
             border-radius: 50%;
-            border: 2.5px solid rgba(255,255,255,0.85);
+            border: 2px solid rgba(255,255,255,0.9);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 11px;
+            font-size: 9px;
             font-weight: bold;
             color: white;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.45), 0 0 0 1px rgba(0,0,0,0.1);
         }
 
         .node-pin.my-node {
-            border: 3px solid #ffffff;
-            box-shadow: 0 2px 8px rgba(66,133,244,0.6), 0 0 12px rgba(66,133,244,0.3);
+            width: 26px;
+            height: 26px;
+            border: 2.5px solid #ffffff;
+            box-shadow: 0 2px 8px rgba(66,133,244,0.7), 0 0 12px rgba(66,133,244,0.35);
+        }
+
+        .node-pin.offline {
+            opacity: 0.45;
         }
 
         .node-pin.low-battery {
-            box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 0 0 3px rgba(244,67,54,0.5);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4), 0 0 0 3px rgba(244,67,54,0.5);
         }
 
         .node-pointer {
             width: 0;
             height: 0;
-            border-left: 7px solid transparent;
-            border-right: 7px solid transparent;
-            border-top: 9px solid rgba(255,255,255,0.85);
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 7px solid rgba(255,255,255,0.9);
             margin-top: -2px;
         }
 
         .node-pointer.my-node {
+            border-left-width: 6px;
+            border-right-width: 6px;
+            border-top-width: 8px;
             border-top-color: #ffffff;
+        }
+
+        .node-pointer.offline {
+            opacity: 0.45;
         }
 
         .node-label {
@@ -241,23 +254,31 @@
         var tracerouteLine = null;
         var tracerouteMarkers = [];
 
+        // Distinct palette — enough contrast between adjacent entries
+        var NODE_COLORS = [
+            '#e74c3c', // red
+            '#3498db', // blue
+            '#2ecc71', // green
+            '#e67e22', // orange
+            '#9b59b6', // purple
+            '#1abc9c', // teal
+            '#e91e63', // pink
+            '#f1c40f', // yellow
+            '#00bcd4', // cyan
+            '#ff5722', // deep orange
+            '#8bc34a', // lime green
+            '#673ab7', // deep purple
+        ];
+
         function getNodeColor(node) {
-            if (node.isMyNode) return '#4285f4'; // bright blue for my node
-            if (node.lastHeardSecs >= 0 && node.lastHeardSecs < 900) {
-                // Online (< 15 min) - green tones
-                return '#34a853';
-            }
-            if (node.lastHeardSecs >= 900) {
-                // Stale - muted gray
-                return '#9e9e9e';
-            }
-            // Fallback based on battery
-            if (node.batteryLevel > 0) {
-                if (node.batteryLevel < 20) return '#ea4335';
-                if (node.batteryLevel < 50) return '#fbbc04';
-                return '#34a853';
-            }
-            return '#5f6368';
+            if (node.isMyNode) return '#4285f4';
+            // Stable color derived from node number
+            var idx = (node.nodeNum >>> 0) % NODE_COLORS.length;
+            return NODE_COLORS[idx];
+        }
+
+        function isNodeOffline(node) {
+            return node.lastHeardSecs >= 900;
         }
 
         function formatRelativeTime(secs) {
@@ -346,32 +367,37 @@
             var color = getNodeColor(node);
             var shortName = node.shortName ? node.shortName.substring(0, 3) : '?';
             var isMyNode = node.isMyNode;
+            var offline = isNodeOffline(node);
             var isLowBat = (node.batteryLevel > 0 && node.batteryLevel < 20 && !node.isExternalPower);
             var displayName = node.longName || node.shortName || '';
 
             var pinClasses = 'node-pin';
             if (isMyNode) pinClasses += ' my-node';
             if (isLowBat) pinClasses += ' low-battery';
+            if (offline) pinClasses += ' offline';
 
-            var pointerClass = 'node-pointer' + (isMyNode ? ' my-node' : '');
+            var pointerClass = 'node-pointer' + (isMyNode ? ' my-node' : '') + (offline ? ' offline' : '');
+
+            var pointerColor = isMyNode ? '#ffffff' : 'rgba(255,255,255,0.9)';
 
             var html = '<div class="node-marker">' +
                 '<div class="' + pinClasses + '" style="background-color: ' + color + ';">' + shortName + '</div>' +
-                '<div class="' + pointerClass + '" style="border-top-color: ' + (isMyNode ? '#ffffff' : 'rgba(255,255,255,0.85)') + ';"></div>';
+                '<div class="' + pointerClass + '" style="border-top-color: ' + pointerColor + ';"></div>';
 
-            // Add name label
             if (displayName) {
                 html += '<div class="node-label">' + displayName + '</div>';
             }
 
             html += '</div>';
 
+            var pinSize = isMyNode ? 26 : 22;
+            var totalH = pinSize + 7 + 14; // pin + pointer + label gap
             return L.divIcon({
                 html: html,
                 className: '',
-                iconSize: [30, 52],
-                iconAnchor: [15, 42],
-                popupAnchor: [0, -42]
+                iconSize: [pinSize, totalH],
+                iconAnchor: [pinSize / 2, totalH - 14],
+                popupAnchor: [0, -(totalH - 14)]
             });
         }
 

@@ -80,6 +80,18 @@ bool Database::open(const QString &path)
         setSchemaVersion(SCHEMA_VERSION);
     }
 
+    // Tables added to createTables() after a database was first created never
+    // got a migration step of their own, so an older database can sit at the
+    // current schema version while still missing one entirely - "traceroutes"
+    // did exactly that, and every saveTraceroute() failed with "no such table".
+    // Every statement in createTables() is CREATE ... IF NOT EXISTS, so running
+    // it on each open is harmless and heals anything missing.
+    if (!createTables())
+    {
+        qWarning() << "Failed to ensure all tables exist";
+        return false;
+    }
+
     if (!prepareStatements())
     {
         qWarning() << "Failed to prepare database statements";

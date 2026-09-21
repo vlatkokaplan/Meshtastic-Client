@@ -24,6 +24,7 @@ class TcpConnection;
 class BluetoothConnection;
 class NodeManager;
 class AnalyticsWidget;
+class ReplayBar;
 class PacketListWidget;
 class Database;
 class MessagesWidget;
@@ -103,12 +104,14 @@ private:
     QTimer *m_positionRefreshTimer = nullptr;
     QLabel *m_connectionPill = nullptr;
     AnalyticsWidget *m_analyticsWidget = nullptr;
+    ReplayBar *m_replayBar = nullptr;
     QLabel *m_nodesLabel = nullptr;
     int m_dbNodeCount = 0;  // cached: SELECT COUNT(*) is too slow for per-packet status updates
 
     void refreshDbNodeCount();
     void setupAnalyticsTab();
     void showNodeTrack(uint32_t nodeNum);
+    void onPacketReplayed(uint32_t fromNode, uint32_t toNode, int portNum);
     void updateConnectionPill();
     int m_tracerouteCooldownRemaining = 0;
     static const int TRACEROUTE_COOLDOWN_MS = 30000; // 30 seconds

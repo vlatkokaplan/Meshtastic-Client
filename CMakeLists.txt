@@ -105,6 +105,7 @@ set(SOURCES
     src/Theme.cpp
     src/MeshAnalytics.cpp
     src/AnalyticsWidget.cpp
+    src/ReplayBar.cpp
     src/MainWindow.cpp
     src/PacketListWidget.cpp
     src/TracerouteWidget.cpp

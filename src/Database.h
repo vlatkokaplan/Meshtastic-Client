@@ -123,6 +123,8 @@ public:
     bool savePacket(const PacketRecord &record);
     QList<PacketRecord> loadPackets(int limit = 1000, int offset = 0);
     bool deleteOldPackets(int daysOld = 7);
+    // Mesh packets only, oldest first, for replaying recorded activity
+    QList<PacketRecord> loadPacketsInRange(qint64 fromMs, qint64 toMs, int limit = 20000);
 
     // Neighbor info operations (for topology)
     struct NeighborRecord

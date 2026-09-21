@@ -16,6 +16,7 @@
 #include "AppSettingsTab.h"
 #include "Theme.h"
 #include "AnalyticsWidget.h"
+#include "ReplayBar.h"
 #include "TopologyWidget.h"
 #include "ConnectionDialog.h"
 #include "SimulationConnection.h"
@@ -372,7 +373,11 @@ void MainWindow::updateConnectionPill()
 void MainWindow::setupMapTab()
 {
     QWidget *mapTab = new QWidget;
-    QHBoxLayout *layout = new QHBoxLayout(mapTab);
+    // Vertical: the map/node-list splitter fills the tab, with the replay bar
+    // stacked beneath it rather than beside it.
+    QVBoxLayout *layout = new QVBoxLayout(mapTab);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
 
     // Splitter for map and node list
     m_mapSplitter = new QSplitter(Qt::Horizontal);
@@ -454,7 +459,20 @@ void MainWindow::setupMapTab()
     m_mapSplitter->addWidget(sidebar);
     m_mapSplitter->setSizes({800, 200});
 
-    layout->addWidget(m_mapSplitter);
+    // Stretch 1 so the splitter takes all spare height and the replay bar below
+    // keeps only its natural size.
+    layout->addWidget(m_mapSplitter, 1);
+
+    // Replay of recorded activity, beneath the map. Reads the packet log only.
+    m_replayBar = new ReplayBar;
+    connect(m_replayBar, &ReplayBar::packetReplayed, this, &MainWindow::onPacketReplayed);
+    connect(m_replayBar, &ReplayBar::replayStarted, this, [this]() {
+        if (m_mapWidget)
+            m_mapWidget->clearTrack();
+        statusBar()->showMessage("Replaying recorded activity - nothing is transmitted", 4000);
+    });
+    layout->addWidget(m_replayBar);
+
     m_tabWidget->addTab(mapTab, "Map");
 
     // Connect node table signals
@@ -1581,6 +1599,31 @@ void MainWindow::showNodeTrack(uint32_t nodeNum)
         QString("%1 position fixes for %2").arg(records.size()).arg(name), 5000);
 }
 
+// Visualises one recorded packet during replay. Draws between nodes that have
+// a position, and blinks the sender otherwise, so activity still reads for the
+// three quarters of a mesh that never reports a location.
+void MainWindow::onPacketReplayed(uint32_t fromNode, uint32_t toNode, int portNum)
+{
+    Q_UNUSED(portNum);
+    if (!m_mapWidget)
+        return;
+
+    NodeInfo from = m_nodeManager->getNode(fromNode);
+    if (from.hasPosition)
+        m_mapWidget->blinkNode(fromNode, 1500);
+
+    if (toNode != 0 && toNode != 0xFFFFFFFF)
+    {
+        NodeInfo to = m_nodeManager->getNode(toNode);
+        if (from.hasPosition && to.hasPosition)
+        {
+            m_mapWidget->drawPacketFlow(fromNode, toNode,
+                                        from.latitude, from.longitude,
+                                        to.latitude, to.longitude);
+        }
+    }
+}
+
 void MainWindow::updateNodeList()
 {
     // The table is rebuilt from scratch below, which drops the selection and
@@ -1984,6 +2027,11 @@ void MainWindow::openDatabaseForNode(uint32_t nodeNum)
             m_analyticsWidget->setDatabase(m_database);
         }
 
+        if (m_replayBar)
+        {
+            m_replayBar->setDatabase(m_database);
+        }
+
         refreshDbNodeCount();
         statusBar()->showMessage(QString("Database loaded: %1 nodes").arg(m_dbNodeCount), 3000);
     }
@@ -2029,6 +2077,10 @@ void MainWindow::closeDatabase()
     if (m_analyticsWidget)
     {
         m_analyticsWidget->setDatabase(nullptr);
+    }
+    if (m_replayBar)
+    {
+        m_replayBar->setDatabase(nullptr);
     }
 
     // 2. Clear local node state

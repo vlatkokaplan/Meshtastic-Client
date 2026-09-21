@@ -1493,6 +1493,43 @@ bool Database::deleteOldNeighborInfo(int daysOld)
     return true;
 }
 
+QList<Database::PacketRecord> Database::loadPacketsInRange(qint64 fromMs, qint64 toMs,
+                                                           int limit)
+{
+    QList<PacketRecord> out;
+    if (!m_db.isOpen())
+        return out;
+
+    QSqlQuery query(m_db);
+    // packet_type 1 is PacketReceived: real over-the-air traffic, as opposed to
+    // the device-to-app frames this table also holds.
+    query.prepare("SELECT timestamp, from_node, to_node, port_num, channel, type_name "
+                  "FROM packets WHERE timestamp >= ? AND timestamp <= ? AND packet_type = 1 "
+                  "ORDER BY timestamp ASC LIMIT ?");
+    query.addBindValue(fromMs);
+    query.addBindValue(toMs);
+    query.addBindValue(limit);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to load packets in range:" << query.lastError().text();
+        return out;
+    }
+
+    while (query.next())
+    {
+        PacketRecord rec;
+        rec.timestamp = query.value(0).toLongLong();
+        rec.fromNode = query.value(1).toUInt();
+        rec.toNode = query.value(2).toUInt();
+        rec.portNum = query.value(3).toInt();
+        rec.channel = query.value(4).toInt();
+        rec.typeName = query.value(5).toString();
+        out.append(rec);
+    }
+    return out;
+}
+
 bool Database::deleteOldPackets(int daysOld)
 {
     if (!m_db.isOpen())

@@ -51,9 +51,8 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode,
                        const QString &simulateScenario, QWidget *parent)
     : QMainWindow(parent), m_experimentalMode(experimentalMode), m_testMode(testMode)
 {
-    // Explicitly set window flags to prevent them from being dropped
-    // (QWebEngineView GPU init can cause WM to re-evaluate decorations on Linux)
-    setWindowFlags(Qt::Window | Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint);
+    setWindowFlags(Qt::Window | Qt::WindowMinimizeButtonHint
+                   | Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint);
 
     // Initialize app settings
     AppSettings::instance()->open();
@@ -214,14 +213,6 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode,
     // Restore window state (geometry, splitter sizes)
     restoreWindowState();
 
-    // Workaround: QWebEngineView GPU init can strip window decoration flags on Linux.
-    // Re-assert flags after the event loop has processed the initial show.
-    QTimer::singleShot(0, this, [this]() {
-        if (!(windowFlags() & Qt::WindowMaximizeButtonHint)) {
-            setWindowFlags(windowFlags() | Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint | Qt::WindowCloseButtonHint);
-            show();
-        }
-    });
 }
 
 MainWindow::~MainWindow()

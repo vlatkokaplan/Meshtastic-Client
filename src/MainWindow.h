@@ -24,6 +24,7 @@ class TcpConnection;
 class BluetoothConnection;
 class NodeManager;
 class AnalyticsWidget;
+class NodeTableWidget;
 class ReplayBar;
 class PacketListWidget;
 class Database;
@@ -58,8 +59,7 @@ private slots:
     void onConfigCompleteIdReceived(uint32_t configId);
 
     // UI Setup
-    void onNodeSelected(QTableWidgetItem *item);
-    void onNodeContextMenu(const QPoint &pos);
+    void onNodeActivated(uint32_t nodeNum);
     void requestConfig();
     void requestTraceroute(uint32_t nodeNum);
     void onTracerouteCooldownTick();
@@ -105,11 +105,11 @@ private:
     QLabel *m_connectionPill = nullptr;
     AnalyticsWidget *m_analyticsWidget = nullptr;
     ReplayBar *m_replayBar = nullptr;
-    QLabel *m_nodesLabel = nullptr;
     int m_dbNodeCount = 0;  // cached: SELECT COUNT(*) is too slow for per-packet status updates
 
     void refreshDbNodeCount();
     void setupAnalyticsTab();
+    void centerMapOnNode(uint32_t nodeNum);
     void showNodeTrack(uint32_t nodeNum);
     void onPacketReplayed(uint32_t fromNode, uint32_t toNode, int portNum);
     void updateConnectionPill();
@@ -121,8 +121,6 @@ private:
     bool m_testMode = false;
 
     // Node list caching
-    QList<NodeInfo> m_sortedNodes;
-    bool m_nodesSortNeeded = true;
 
     // Core components
     SerialConnection *m_serial;
@@ -141,8 +139,7 @@ private:
     QPushButton *m_rebootButton;
     QLabel *m_statusLabel;
     PacketListWidget *m_packetList;
-    QTableWidget *m_nodeTable;
-    QLineEdit *m_nodeSearchEdit;
+    NodeTableWidget *m_nodeTableWidget = nullptr;
     MessagesWidget *m_messagesWidget;
     ConfigWidget *m_configWidget;
     TracerouteWidget *m_tracerouteWidget;

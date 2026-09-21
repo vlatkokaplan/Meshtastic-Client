@@ -16,6 +16,7 @@
 #include "AppSettingsTab.h"
 #include "Theme.h"
 #include "AnalyticsWidget.h"
+#include "NodeTableWidget.h"
 #include "ReplayBar.h"
 #include "TopologyWidget.h"
 #include "ConnectionDialog.h"
@@ -153,7 +154,8 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode,
 
     connect(m_nodeManager, &NodeManager::nodesChanged,
             this, [this]() {
-                m_nodesSortNeeded = true;
+                if (m_nodeTableWidget)
+                    m_nodeTableWidget->markSortStale();
                 refreshDbNodeCount();
                 updateNodeList();
             });
@@ -408,65 +410,35 @@ void MainWindow::setupMapTab()
     m_dashboardStats = new DashboardStatsWidget(m_nodeManager, m_configWidget->deviceConfig());
     sidebarLayout->addWidget(m_dashboardStats);
 
-    m_nodesLabel = new QLabel("NODES");
-    QLabel *nodesLabel = m_nodesLabel;
-    nodesLabel->setStyleSheet(QString("font-weight: 700; font-size: 11px; letter-spacing: 1px;"
-                                      "color: %1; padding: %2px %3px 0 %3px;")
-                                  .arg(Theme::palette().textMuted.name())
-                                  .arg(Theme::Space::sm)
-                                  .arg(Theme::Space::md));
-    sidebarLayout->addWidget(nodesLabel);
-
-    // Node search filter
-    m_nodeSearchEdit = new QLineEdit;
-    m_nodeSearchEdit->setPlaceholderText("Search nodes...");
-    m_nodeSearchEdit->setClearButtonEnabled(true);
-    // Restore saved search text
-    m_nodeSearchEdit->setText(AppSettings::instance()->value("nodeSearchText").toString());
-    connect(m_nodeSearchEdit, &QLineEdit::textChanged,
-            this, &MainWindow::updateNodeList);
-    // Persist search text across restarts
-    connect(m_nodeSearchEdit, &QLineEdit::textChanged, this, [](const QString &text) {
-        AppSettings::instance()->setValue("nodeSearchText", text);
+    m_nodeTableWidget = new NodeTableWidget(m_nodeManager);
+    connect(m_nodeTableWidget, &NodeTableWidget::nodeActivated,
+            this, &MainWindow::onNodeActivated);
+    connect(m_nodeTableWidget, &NodeTableWidget::directMessageRequested,
+            this, [this](uint32_t n) {
+                if (m_messagesWidget)
+                {
+                    m_messagesWidget->startDirectMessage(n);
+                    m_tabWidget->setCurrentWidget(m_messagesWidget);
+                }
+            });
+    connect(m_nodeTableWidget, &NodeTableWidget::tracerouteRequested,
+            this, &MainWindow::requestTraceroute);
+    connect(m_nodeTableWidget, &NodeTableWidget::nodeInfoRequested,
+            this, &MainWindow::requestNodeInfo);
+    connect(m_nodeTableWidget, &NodeTableWidget::telemetryRequested,
+            this, &MainWindow::requestTelemetry);
+    connect(m_nodeTableWidget, &NodeTableWidget::positionRequested,
+            this, &MainWindow::requestPosition);
+    connect(m_nodeTableWidget, &NodeTableWidget::trackRequested,
+            this, &MainWindow::showNodeTrack);
+    connect(m_nodeTableWidget, &NodeTableWidget::clearTrackRequested, this, [this]() {
+        if (m_mapWidget)
+            m_mapWidget->clearTrack();
+        statusBar()->showMessage("Movement history cleared", 3000);
     });
-    m_nodeSearchEdit->setContentsMargins(Theme::Space::md, 0, Theme::Space::md, 0);
-    sidebarLayout->addWidget(m_nodeSearchEdit);
-
-    // Node table setup
-    m_nodeTable = new QTableWidget;
-    m_nodeTable->setColumnCount(7);
-    m_nodeTable->setHorizontalHeaderLabels(
-        {"Name", "Short", "Role", "Last Heard", "Battery", "Signal", "Hops"});
-    QHeaderView *nodeHeader = m_nodeTable->horizontalHeader();
-    nodeHeader->setSectionResizeMode(QHeaderView::ResizeToContents);
-    nodeHeader->setSectionResizeMode(0, QHeaderView::Stretch);  // Name takes the slack
-    nodeHeader->setMinimumSectionSize(52);
-    m_nodeTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_nodeTable->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_nodeTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_nodeTable->setSortingEnabled(true);
-    m_nodeTable->setContextMenuPolicy(Qt::CustomContextMenu);
-    m_nodeTable->setShowGrid(false);
-    m_nodeTable->setAlternatingRowColors(true);
-    m_nodeTable->setFrameShape(QFrame::NoFrame);
-    m_nodeTable->verticalHeader()->setVisible(false);       // row numbers add nothing here
-    m_nodeTable->verticalHeader()->setDefaultSectionSize(28);
-    m_nodeTable->horizontalHeader()->setHighlightSections(false);
-    m_nodeTable->horizontalHeader()->setFixedHeight(28);
-    // Restore saved sort column/order
-    {
-        int col   = AppSettings::instance()->value("nodeSortColumn", -1).toInt();
-        int order = AppSettings::instance()->value("nodeSortOrder",   0).toInt();
-        if (col >= 0)
-            m_nodeTable->sortByColumn(col, static_cast<Qt::SortOrder>(order));
-    }
-    // Persist sort state across restarts
-    connect(m_nodeTable->horizontalHeader(), &QHeaderView::sortIndicatorChanged,
-            this, [](int col, Qt::SortOrder order) {
-        AppSettings::instance()->setValue("nodeSortColumn", col);
-        AppSettings::instance()->setValue("nodeSortOrder",  static_cast<int>(order));
-    });
-    sidebarLayout->addWidget(m_nodeTable);
+    connect(m_nodeTableWidget, &NodeTableWidget::centerOnMapRequested,
+            this, &MainWindow::centerMapOnNode);
+    sidebarLayout->addWidget(m_nodeTableWidget);
 
     m_mapSplitter->addWidget(sidebar);
     m_mapSplitter->setSizes({800, 200});
@@ -486,12 +458,6 @@ void MainWindow::setupMapTab()
     layout->addWidget(m_replayBar);
 
     m_tabWidget->addTab(mapTab, "Map");
-
-    // Connect node table signals
-    connect(m_nodeTable, &QTableWidget::itemClicked,
-            this, &MainWindow::onNodeSelected);
-    connect(m_nodeTable, &QTableWidget::customContextMenuRequested,
-            this, &MainWindow::onNodeContextMenu);
 }
 
 void MainWindow::setupMessagesTab()
@@ -1156,52 +1122,23 @@ void MainWindow::onSerialError(const QString &error)
     statusBar()->showMessage("Error: " + error, 5000);
 }
 
-void MainWindow::onNodeSelected(QTableWidgetItem *item)
+void MainWindow::onNodeActivated(uint32_t nodeNum)
 {
-    if (!item)
-        return;
-    int row = item->row();
-    QTableWidgetItem *firstCol = m_nodeTable->item(row, 0);
-    if (!firstCol)
-        return;
-    uint32_t nodeNum = firstCol->data(Qt::UserRole).toUInt();
-    if (m_mapWidget)
-    {
-        NodeInfo node = m_nodeManager->getNode(nodeNum);
-        if (node.hasPosition)
-        {
-            m_mapWidget->centerOnLocation(node.latitude, node.longitude);
-            m_mapWidget->setZoomLevel(15);
-            m_mapWidget->selectNode(nodeNum);
-            m_tabWidget->setCurrentIndex(0); // Switch to map tab
-        }
-    }
+    centerMapOnNode(nodeNum);
 }
 
 void MainWindow::navigateToNode(uint32_t nodeNum)
 {
-    // Switch to Map tab (index 0)
-    m_tabWidget->setCurrentIndex(0);
+    m_tabWidget->setCurrentIndex(0);   // Map tab
+    if (m_nodeTableWidget)
+        m_nodeTableWidget->selectNode(nodeNum);
 
-    // Find and select the node in the table
-    for (int row = 0; row < m_nodeTable->rowCount(); ++row)
+    NodeInfo node = m_nodeManager->getNode(nodeNum);
+    if (node.hasPosition && m_mapWidget)
     {
-        QTableWidgetItem *item = m_nodeTable->item(row, 0);
-        if (item && item->data(Qt::UserRole).toUInt() == nodeNum)
-        {
-            m_nodeTable->selectRow(row);
-            m_nodeTable->scrollToItem(item);
-
-            // Also center map on node if it has position
-            NodeInfo node = m_nodeManager->getNode(nodeNum);
-            if (node.hasPosition && m_mapWidget)
-            {
-                m_mapWidget->centerOnLocation(node.latitude, node.longitude);
-                m_mapWidget->setZoomLevel(14);
-                m_mapWidget->selectNode(nodeNum);
-            }
-            break;
-        }
+        m_mapWidget->centerOnLocation(node.latitude, node.longitude);
+        m_mapWidget->setZoomLevel(14);
+        m_mapWidget->selectNode(nodeNum);
     }
 }
 
@@ -1258,103 +1195,6 @@ void MainWindow::onTracerouteSelected(uint32_t fromNode, uint32_t toNode)
     }
 }
 
-void MainWindow::onNodeContextMenu(const QPoint &pos)
-{
-    QTableWidgetItem *item = m_nodeTable->itemAt(pos);
-    if (!item)
-        return;
-
-    // Get column 0 item which stores the nodeNum in UserRole
-    QTableWidgetItem *col0Item = m_nodeTable->item(item->row(), 0);
-    if (!col0Item)
-        return;
-
-    uint32_t nodeNum = col0Item->data(Qt::UserRole).toUInt();
-    if (nodeNum == 0)
-        return;
-
-    NodeInfo node = m_nodeManager->getNode(nodeNum);
-
-    QMenu menu(this);
-    QString nodeName = node.longName;
-    if (nodeName.isEmpty())
-        nodeName = node.nodeId;
-    QAction *headerAction = menu.addAction(nodeName);
-    headerAction->setEnabled(false);
-    QFont boldFont = headerAction->font();
-    boldFont.setBold(true);
-    headerAction->setFont(boldFont);
-    menu.addSeparator();
-
-    // Send DM option (only if not our own node)
-    QAction *sendDmAction = nullptr;
-    if (nodeNum != m_nodeManager->myNodeNum())
-    {
-        sendDmAction = menu.addAction("Send Direct Message");
-        sendDmAction->setIcon(QIcon::fromTheme("mail-message-new"));
-        menu.addSeparator();
-    }
-
-    QAction *tracerouteAction = menu.addAction("Traceroute");
-    tracerouteAction->setIcon(QIcon::fromTheme("network-wired"));
-    QAction *nodeInfoAction = menu.addAction("Request Node Info");
-    nodeInfoAction->setIcon(QIcon::fromTheme("user-identity"));
-    QAction *telemetryAction = menu.addAction("Request Telemetry");
-    telemetryAction->setIcon(QIcon::fromTheme("utilities-system-monitor"));
-    QAction *positionAction = menu.addAction("Request Position");
-    positionAction->setIcon(QIcon::fromTheme("find-location"));
-    menu.addSeparator();
-    QAction *centerMapAction = menu.addAction("Center on Map");
-    centerMapAction->setIcon(QIcon::fromTheme("zoom-fit-best"));
-    centerMapAction->setEnabled(node.hasPosition);
-
-    QAction *trackAction = menu.addAction("Show Movement History");
-    trackAction->setToolTip("Draw this node's recorded positions on the map");
-    QAction *clearTrackAction = menu.addAction("Clear Movement History");
-    QAction *selectedAction = menu.exec(m_nodeTable->viewport()->mapToGlobal(pos));
-
-    if (sendDmAction && selectedAction == sendDmAction)
-    {
-        // Switch to Messages tab and start DM with this node
-        if (m_messagesWidget)
-        {
-            m_messagesWidget->startDirectMessage(nodeNum);
-            m_tabWidget->setCurrentWidget(m_messagesWidget);
-        }
-    }
-    else if (selectedAction == tracerouteAction)
-    {
-        requestTraceroute(nodeNum);
-    }
-    else if (selectedAction == nodeInfoAction)
-    {
-        requestNodeInfo(nodeNum);
-    }
-    else if (selectedAction == telemetryAction)
-    {
-        requestTelemetry(nodeNum);
-    }
-    else if (selectedAction == positionAction)
-    {
-        requestPosition(nodeNum);
-    }
-    else if (selectedAction == trackAction)
-    {
-        showNodeTrack(nodeNum);
-    }
-    else if (selectedAction == clearTrackAction && m_mapWidget)
-    {
-        m_mapWidget->clearTrack();
-        statusBar()->showMessage("Movement history cleared", 3000);
-    }
-    else if (selectedAction == centerMapAction && node.hasPosition && m_mapWidget)
-    {
-        m_mapWidget->centerOnLocation(node.latitude, node.longitude);
-        m_mapWidget->setZoomLevel(15);
-        m_mapWidget->selectNode(nodeNum);
-        m_tabWidget->setCurrentIndex(0); // Switch to map tab
-    }
-}
 
 void MainWindow::requestTraceroute(uint32_t nodeNum)
 {
@@ -1517,51 +1357,6 @@ void MainWindow::onClearNodeDatabase()
 }
 
 
-// QTableWidgetItem sorts on its display text, which is wrong for any column
-// whose text is not lexically ordered - "1h ago" sorts before "20m ago", and
-// "Plugged" sorts against battery percentages. Columns that need a real
-// ordering stash the underlying value in SortRole and this compares that.
-class SortableTableItem : public QTableWidgetItem
-{
-public:
-    static constexpr int SortRole = Qt::UserRole + 1;
-    using QTableWidgetItem::QTableWidgetItem;
-
-    bool operator<(const QTableWidgetItem &other) const override
-    {
-        const QVariant mine = data(SortRole);
-        const QVariant theirs = other.data(SortRole);
-        if (mine.isValid() && theirs.isValid())
-        {
-            if (mine.typeId() == QMetaType::QDateTime || theirs.typeId() == QMetaType::QDateTime)
-                return mine.toDateTime() < theirs.toDateTime();
-            return mine.toDouble() < theirs.toDouble();
-        }
-        return QTableWidgetItem::operator<(other);
-    }
-};
-
-// "3m ago" instead of a full timestamp: shorter, and the age is what you
-// actually want to know at a glance. Full timestamp moves to the tooltip.
-static QString relativeTimeText(const QDateTime &when)
-{
-    // A device can also report a nonsense timestamp; anything at or before the
-    // Unix epoch is "never", not "20717 days ago".
-    if (!when.isValid() || when.toSecsSinceEpoch() <= 0)
-        return QStringLiteral("never");
-
-    qint64 secs = when.secsTo(QDateTime::currentDateTime());
-    if (secs < 0)
-        secs = 0;
-    if (secs < 60)
-        return QStringLiteral("just now");
-    if (secs < 3600)
-        return QStringLiteral("%1m ago").arg(secs / 60);
-    if (secs < 86400)
-        return QStringLiteral("%1h ago").arg(secs / 3600);
-    return QStringLiteral("%1d ago").arg(secs / 86400);
-}
-
 // Draws a node's recorded position fixes on the map. Reads position_history,
 // which has been collected all along but had nothing displaying it.
 void MainWindow::showNodeTrack(uint32_t nodeNum)
@@ -1636,289 +1431,27 @@ void MainWindow::onPacketReplayed(uint32_t fromNode, uint32_t toNode, int portNu
     }
 }
 
+
 void MainWindow::updateNodeList()
 {
-    // The table is rebuilt from scratch below, which drops the selection and
-    // jumps back to the top. Remember both and put them back afterwards.
-    uint32_t selectedNodeNum = 0;
-    if (QTableWidgetItem *sel = m_nodeTable->currentItem())
-    {
-        if (QTableWidgetItem *col0 = m_nodeTable->item(sel->row(), 0))
-            selectedNodeNum = col0->data(Qt::UserRole).toUInt();
-    }
-    int scrollPos = m_nodeTable->verticalScrollBar()->value();
+    if (m_nodeTableWidget)
+        m_nodeTableWidget->refresh();
 
-    m_nodeTable->setUpdatesEnabled(false);
-    const bool sortingWasEnabled = m_nodeTable->isSortingEnabled();
-    m_nodeTable->setSortingEnabled(false);
-    m_nodeTable->setRowCount(0);
-
-    // Only re-sort when node data has changed, not just filter changes
-    if (m_nodesSortNeeded)
-    {
-        m_sortedNodes = m_nodeManager->allNodes();
-        uint32_t myNode = m_nodeManager->myNodeNum();
-        std::sort(m_sortedNodes.begin(), m_sortedNodes.end(),
-                  [myNode](const NodeInfo &a, const NodeInfo &b)
-                  {
-                      if (a.nodeNum == myNode) return true;
-                      if (b.nodeNum == myNode) return false;
-                      return a.lastHeard > b.lastHeard;
-                  });
-        m_nodesSortNeeded = false;
-    }
-    const QList<NodeInfo> &nodes = m_sortedNodes;
-
-    // Get offline filter settings
-    bool showOffline = AppSettings::instance()->showOfflineNodes();
-    bool hideNeverHeard = AppSettings::instance()->hideNeverHeardNodes();
-    int offlineThresholdMins = AppSettings::instance()->offlineThresholdMinutes();
-    QDateTime offlineThreshold = QDateTime::currentDateTime().addSecs(-offlineThresholdMins * 60);
-
-    // Get search filter
-    QString searchTerm = m_nodeSearchEdit ? m_nodeSearchEdit->text().trimmed().toLower() : QString();
-
-    uint32_t myNode = m_nodeManager->myNodeNum();
-
-    // Columns that no visible node has data for are hidden rather than left as
-    // a stripe of blank cells - on a real mesh only a couple of nodes report a
-    // battery, and roles are often unknown.
-    bool anyBattery = false;
-    bool anyRole = false;
-    bool anySignal = false;
-    bool anyHops = false;
-
-    int row = 0;
-    for (const NodeInfo &node : nodes)
-    {
-        // Nodes the device knows of but has never received a packet from. They
-        // carry no position, signal or telemetry, so they are noise in the list
-        // by default. Never hide our own node.
-        bool neverHeard = !node.lastHeard.isValid();
-        if (neverHeard && hideNeverHeard && node.nodeNum != myNode)
-        {
-            continue;
-        }
-
-        // Filter offline nodes if setting is disabled. A never-heard node used
-        // to slip through here because of the isValid() check - it was the one
-        // category that could never be hidden.
-        if (!showOffline && (neverHeard || node.lastHeard < offlineThreshold)
-            && node.nodeNum != myNode)
-        {
-            continue;
-        }
-
-        // Filter by search term
-        if (!searchTerm.isEmpty())
-        {
-            bool matches = node.longName.toLower().contains(searchTerm) ||
-                           node.shortName.toLower().contains(searchTerm) ||
-                           node.nodeId.toLower().contains(searchTerm);
-            if (!matches)
-                continue;
-        }
-
-        bool isMyNode = (node.nodeNum == myNode);
-
-        m_nodeTable->insertRow(row);
-
-        // Col 0: Node Name
-        // Fall back through long name -> short name -> node id. A node showing
-        // only its id has never sent a NodeInfo, so it is set in italic muted
-        // text rather than reading as an equal of the named nodes.
-        bool unnamed = node.longName.isEmpty() && node.shortName.isEmpty();
-        QString name = node.longName;
-        if (name.isEmpty())
-            name = node.shortName;
-        if (name.isEmpty())
-            name = node.nodeId;
-        if (node.isFavorite)
-        {
-            name = QStringLiteral("\u2605 ") + name;  // star
-        }
-
-        QTableWidgetItem *nameItem = new QTableWidgetItem(name);
-        nameItem->setData(Qt::UserRole, node.nodeNum);
-
-        QFont nameFont = nameItem->font();
-        if (unnamed)
-        {
-            nameFont.setItalic(true);
-            nameItem->setForeground(QBrush(Theme::palette().textMuted));
-        }
-        if (isMyNode)
-            nameFont.setBold(true);
-        nameItem->setFont(nameFont);
-
-        // Only about a quarter of a real mesh's nodes report a position, and
-        // only those can ever appear on the map. Mark them so it is obvious
-        // which rows "Center on Map" will do anything for.
-        if (node.hasPosition)
-        {
-            nameItem->setIcon(Theme::positionPin(isMyNode ? Theme::palette().accent
-                                                          : Theme::palette().textMuted));
-            nameItem->setToolTip(QString("%1\nPosition: %2, %3")
-                                     .arg(node.nodeId)
-                                     .arg(node.latitude, 0, 'f', 5)
-                                     .arg(node.longitude, 0, 'f', 5));
-        }
-        else
-        {
-            nameItem->setToolTip(QString("%1\nNo position reported").arg(node.nodeId));
-        }
-        m_nodeTable->setItem(row, 0, nameItem);
-
-        // Col 1: Short Name
-        QTableWidgetItem *shortItem = new QTableWidgetItem(node.shortName);
-        shortItem->setData(Qt::UserRole, node.nodeNum);
-        shortItem->setTextAlignment(Qt::AlignCenter);
-        if (isMyNode)
-        {
-            QFont boldFont = shortItem->font();
-            boldFont.setBold(true);
-            shortItem->setFont(boldFont);
-        }
-        m_nodeTable->setItem(row, 1, shortItem);
-
-        // Col 2: Role
-        QString roleText = m_nodeManager->roleToString(node.role);
-        if (!roleText.isEmpty())
-            anyRole = true;
-        QTableWidgetItem *roleItem = new QTableWidgetItem(roleText);
-        roleItem->setData(Qt::UserRole, node.nodeNum);
-        m_nodeTable->setItem(row, 2, roleItem);
-
-        // Col 3: Last Heard
-        SortableTableItem *heardItem = new SortableTableItem(relativeTimeText(node.lastHeard));
-        heardItem->setToolTip(node.lastHeard.isValid()
-                                  ? node.lastHeard.toString("yyyy-MM-dd HH:mm:ss")
-                                  : QStringLiteral("Never heard from this node"));
-        // Sort on the real timestamp, not the "3m ago" text
-        heardItem->setData(SortableTableItem::SortRole, node.lastHeard);
-        m_nodeTable->setItem(row, 3, heardItem);
-
-        // Col 4: Battery
-        SortableTableItem *batteryItem = new SortableTableItem;
-        batteryItem->setData(SortableTableItem::SortRole,
-                             node.isExternalPower ? 1000 : node.batteryLevel);
-        // QIcon::fromTheme silently returns a blank icon when the desktop icon
-        // theme lacks the name, which is why this column looked empty. Draw it.
-        if (node.isExternalPower)
-        {
-            batteryItem->setIcon(Theme::batteryPip(100, true));
-            batteryItem->setToolTip("Running on external power");
-            anyBattery = true;
-        }
-        else if (node.batteryLevel > 0)
-        {
-            batteryItem->setIcon(Theme::batteryPip(node.batteryLevel, false));
-            batteryItem->setText(QString::number(node.batteryLevel) + "%");
-            if (node.voltage > 0)
-                batteryItem->setToolTip(QString("%1%  ·  %2 V")
-                                            .arg(node.batteryLevel)
-                                            .arg(node.voltage, 0, 'f', 2));
-            anyBattery = true;
-        }
-        else if (node.voltage > 0)
-        {
-            batteryItem->setText(QString("%1 V").arg(node.voltage, 0, 'f', 2));
-            anyBattery = true;
-        }
-        m_nodeTable->setItem(row, 4, batteryItem);
-
-        // Col 5: Signal - SNR only. Hop count lives in its own column now;
-        // ranking both on one key meant every multi-hop node sorted below every
-        // node with any SNR at all, so neither could be sorted usefully.
-        SortableTableItem *signalItem = new SortableTableItem;
-        signalItem->setTextAlignment(Qt::AlignCenter);
-        bool hasSnr = (node.snr != 0.0f || node.rssi != 0);
-        // Unknown sorts last in the useful (descending, best first) direction
-        signalItem->setData(SortableTableItem::SortRole, hasSnr ? node.snr : -1000.0);
-        if (hasSnr)
-        {
-            float snr = node.snr;
-            QString bars = snr >= 10.0f ? "||||"
-                         : snr >= 5.0f  ? "|||"
-                         : snr >= 0.0f  ? "||"
-                         : snr >= -5.0f ? "|"
-                                        : "\u00b7";
-            signalItem->setText(bars);
-            signalItem->setForeground(QBrush(Theme::signalColor(snr)));
-            signalItem->setToolTip(QString("SNR %1 dB  \u00b7  RSSI %2 dBm")
-                                       .arg(node.snr, 0, 'f', 1).arg(node.rssi));
-            anySignal = true;
-        }
-        else
-        {
-            signalItem->setText("-");
-            signalItem->setForeground(QBrush(Theme::palette().textMuted));
-        }
-        m_nodeTable->setItem(row, 5, signalItem);
-
-        // Col 6: Hops - sorts on its own scale, 0 (direct) first, unknown last
-        SortableTableItem *hopsItem = new SortableTableItem;
-        hopsItem->setTextAlignment(Qt::AlignCenter);
-        if (node.hopsAway >= 0)
-        {
-            hopsItem->setData(SortableTableItem::SortRole, node.hopsAway);
-            hopsItem->setText(node.hopsAway == 0 ? QStringLiteral("direct")
-                                                 : QString::number(node.hopsAway));
-            hopsItem->setToolTip(node.hopsAway == 0
-                                     ? QStringLiteral("Heard directly, no relays")
-                                     : QString("%1 relay hop%2 away")
-                                           .arg(node.hopsAway)
-                                           .arg(node.hopsAway > 1 ? "s" : ""));
-            if (node.hopsAway == 0)
-                hopsItem->setForeground(QBrush(Theme::palette().success));
-            anyHops = true;
-        }
-        else
-        {
-            hopsItem->setData(SortableTableItem::SortRole, 999);  // unknown last
-            hopsItem->setText("-");
-            hopsItem->setForeground(QBrush(Theme::palette().textMuted));
-        }
-        m_nodeTable->setItem(row, 6, hopsItem);
-        row++;
-    }
-
-    m_nodeTable->setColumnHidden(2, !anyRole);      // Role
-    m_nodeTable->setColumnHidden(4, !anyBattery);   // Battery
-    m_nodeTable->setColumnHidden(5, !anySignal);    // Signal
-    m_nodeTable->setColumnHidden(6, !anyHops);      // Hops
-
-    m_nodeTable->setSortingEnabled(sortingWasEnabled);
-
-    if (m_nodesLabel)
-    {
-        int total = nodes.size();
-        m_nodesLabel->setText(row == total ? QStringLiteral("NODES")
-                                           : QStringLiteral("NODES  %1 OF %2").arg(row).arg(total));
-    }
-
-    // Restore the selection and scroll position from before the rebuild
-    if (selectedNodeNum != 0)
-    {
-        for (int r = 0; r < m_nodeTable->rowCount(); ++r)
-        {
-            QTableWidgetItem *col0 = m_nodeTable->item(r, 0);
-            if (col0 && col0->data(Qt::UserRole).toUInt() == selectedNodeNum)
-            {
-                m_nodeTable->setCurrentCell(r, 0, QItemSelectionModel::Select | QItemSelectionModel::Rows);
-                break;
-            }
-        }
-    }
-    m_nodeTable->verticalScrollBar()->setValue(scrollPos);
-
-    m_nodeTable->setUpdatesEnabled(true);
-
-    // Draw test lines if test mode is enabled
     if (m_testMode && m_mapWidget)
-    {
         drawTestNodeLines();
-    }
+}
+
+void MainWindow::centerMapOnNode(uint32_t nodeNum)
+{
+    if (!m_mapWidget)
+        return;
+    NodeInfo node = m_nodeManager->getNode(nodeNum);
+    if (!node.hasPosition)
+        return;
+    m_mapWidget->centerOnLocation(node.latitude, node.longitude);
+    m_mapWidget->setZoomLevel(15);
+    m_mapWidget->selectNode(nodeNum);
+    m_tabWidget->setCurrentIndex(0);
 }
 
 void MainWindow::refreshDbNodeCount()

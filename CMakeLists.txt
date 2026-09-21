@@ -103,6 +103,7 @@ target_link_libraries(meshtastic_proto PUBLIC protobuf::libprotobuf)
 set(SOURCES
     src/main.cpp
     src/Theme.cpp
+    src/MeshAnalytics.cpp
     src/MainWindow.cpp
     src/PacketListWidget.cpp
     src/TracerouteWidget.cpp

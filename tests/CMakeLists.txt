@@ -57,3 +57,29 @@ target_link_libraries(test_nodemanager PRIVATE
 )
 
 add_test(NAME NodeManager COMMAND test_nodemanager)
+
+# ---- test_analytics ----
+add_executable(test_analytics
+    test_analytics.cpp
+    DatabaseStub.cpp
+    ${CMAKE_SOURCE_DIR}/src/Database.h
+    ${CMAKE_SOURCE_DIR}/src/MeshAnalytics.cpp
+    ${CMAKE_SOURCE_DIR}/src/NodeManager.cpp
+    ${CMAKE_SOURCE_DIR}/src/MeshtasticProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/DeviceConfig.cpp
+)
+
+target_include_directories(test_analytics PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+
+target_link_libraries(test_analytics PRIVATE
+    Qt6::Core
+    Qt6::Test
+    Qt6::Sql
+    meshtastic_proto
+    OpenSSL::Crypto
+)
+
+add_test(NAME Analytics COMMAND test_analytics)

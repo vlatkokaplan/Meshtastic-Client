@@ -142,6 +142,11 @@ public:
     bool deleteMessagesWithNode(uint32_t nodeNum);
     QList<ChatMessage> getAllMessages(); // For export
 
+    // Read-only access for MeshAnalytics, which runs its own aggregate queries
+    // rather than adding a dozen single-purpose methods here. Callers must not
+    // write through this.
+    QSqlDatabase connection() const { return m_db; }
+
 private:
     QSqlDatabase m_db;
     QString m_connectionName;

@@ -75,6 +75,9 @@ public:
     int positionRefreshInterval() const;
     void setPositionRefreshInterval(int seconds);
 
+    int dataRetentionDays() const;
+    void setDataRetentionDays(int days);
+
 signals:
     void settingChanged(const QString &key, const QVariant &value);
 

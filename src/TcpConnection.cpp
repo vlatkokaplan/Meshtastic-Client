@@ -86,11 +86,10 @@ bool TcpConnection::sendData(const QByteArray &data)
         return false;
     }
 
-    bool flushed = m_socket->flush();
-    if (!flushed) {
-        qWarning() << "[TCP] Socket flush failed";
-    }
-    return flushed;
+    // flush() returns false when the buffer was already empty, which is not an
+    // error - the write above is what determines success.
+    m_socket->flush();
+    return true;
 }
 
 void TcpConnection::onSocketConnected()

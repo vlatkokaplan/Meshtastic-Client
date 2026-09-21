@@ -2,6 +2,7 @@
 #include "DeviceConfig.h"
 #include <QDateTime>
 #include <QDebug>
+#include <QStringDecoder>
 #include <openssl/evp.h>
 
 // Include generated protobuf headers
@@ -201,6 +202,10 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
         result.to = packet.to();
         result.channelIndex = packet.channel();
         result.fields = decodeMeshPacket(packet, result.portNum);
+        // For encrypted packets the wire field is a channel hash, not an index;
+        // decodeMeshPacket resolves it when the hash matches a known channel.
+        if (result.fields.contains("resolvedChannel"))
+            result.channelIndex = result.fields["resolvedChannel"].toInt();
         result.fields["hopLimit"] = packet.hop_limit();
         result.fields["hopStart"] = packet.hop_start();
         if (packet.rx_time() > 0)
@@ -619,7 +624,14 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
 
         // Try to decrypt (will brute force simple keys if needed)
         int foundKeyByte = -1;
-        QByteArray decrypted = decryptPayload(encryptedData, packet.id(), packet.from(), packet.channel(), &foundKeyByte);
+        int matchedChannel = -1;
+        QByteArray decrypted = decryptPayload(encryptedData, packet.id(), packet.from(), packet.channel(),
+                                              &foundKeyByte, &matchedChannel);
+
+        // packet.channel() is a hash for encrypted packets; only a hash match
+        // against a configured channel gives us the real index.
+        if (matchedChannel >= 0)
+            fields["resolvedChannel"] = matchedChannel;
 
         if (!decrypted.isEmpty()) {
             // Try to parse as Data message
@@ -1319,6 +1331,27 @@ bool MeshtasticProtocol::isValidDecryptedData(const QByteArray &decrypted)
     if (port < 1 || port > 511)
         return false;
 
+    // Random bytes from a wrong key parse as protobuf more often than you'd
+    // like, so require the payload to be present and well-formed for its port.
+    const std::string &payload = data.payload();
+    if (payload.empty())
+        return false;
+
+    if (port == static_cast<int>(meshtastic::PortNum::TEXT_MESSAGE_APP))
+    {
+        QByteArray raw(payload.data(), static_cast<int>(payload.size()));
+        auto decoder = QStringDecoder(QStringDecoder::Utf8, QStringDecoder::Flag::Stateless);
+        QString text = decoder.decode(raw);
+        if (decoder.hasError())
+            return false;
+        // Control characters other than tab/newline mean this isn't real text
+        for (QChar c : text)
+        {
+            if (c.unicode() < 0x20 && c != '\t' && c != '\n' && c != '\r')
+                return false;
+        }
+    }
+
     return true;
 }
 
@@ -1378,31 +1411,86 @@ QByteArray MeshtasticProtocol::tryDecryptWithKey(const QByteArray &encrypted, ui
     return decrypted;
 }
 
-QByteArray MeshtasticProtocol::decryptPayload(const QByteArray &encrypted, uint32_t packetId, uint32_t fromNode, int channel, int *foundKeyByte)
+uint8_t MeshtasticProtocol::xorHash(const QByteArray &data)
+{
+    uint8_t code = 0;
+    for (char c : data)
+        code ^= static_cast<uint8_t>(c);
+    return code;
+}
+
+// Firmware channel names used when a channel has no explicit name. These feed the
+// hash, so they must match Channels::getName in the firmware exactly.
+static QString modemPresetChannelName(int modemPreset)
+{
+    switch (modemPreset) {
+    case 1: return QStringLiteral("LongSlow");
+    case 3: return QStringLiteral("MediumSlow");
+    case 4: return QStringLiteral("MediumFast");
+    case 5: return QStringLiteral("ShortSlow");
+    case 6: return QStringLiteral("ShortFast");
+    case 7: return QStringLiteral("LongMod");
+    case 8: return QStringLiteral("ShortTurbo");
+    case 0:  // LONG_FAST
+    default: return QStringLiteral("LongFast");
+    }
+}
+
+int MeshtasticProtocol::channelHashFor(int channelIndex) const
+{
+    if (!m_deviceConfig)
+        return -1;
+
+    DeviceConfig::ChannelConfig ch = m_deviceConfig->channel(channelIndex);
+    if (ch.role == 0)  // disabled
+        return -1;
+
+    QByteArray key;
+    if (ch.psk.size() == 1)
+        key = expandSimpleKey(static_cast<uint8_t>(ch.psk[0]));
+    else if (ch.psk.size() == 16 || ch.psk.size() == 32)
+        key = ch.psk;
+
+    if (key.isEmpty())
+        return -1;
+
+    // An unnamed primary channel takes its name from the modem preset
+    QString name = ch.name;
+    if (name.isEmpty() && channelIndex == 0)
+        name = modemPresetChannelName(m_deviceConfig->loraConfig().modemPreset);
+
+    return xorHash(name.toUtf8()) ^ xorHash(key);
+}
+
+QByteArray MeshtasticProtocol::decryptPayload(const QByteArray &encrypted, uint32_t packetId, uint32_t fromNode,
+                                              int channelHash, int *foundKeyByte, int *matchedChannel)
 {
     if (foundKeyByte)
         *foundKeyByte = -1;
+    if (matchedChannel)
+        *matchedChannel = -1;
 
-    // First, try with configured PSK if available
+    // The `channel` field on an encrypted MeshPacket is a hash (0-255), not the
+    // channel index, so find which configured channel that hash belongs to.
     if (m_deviceConfig) {
-        DeviceConfig::ChannelConfig chConfig = m_deviceConfig->channel(channel);
-        QByteArray psk = chConfig.psk;
+        for (int i = 0; i < m_deviceConfig->channels().size(); ++i) {
+            if (channelHashFor(i) != channelHash)
+                continue;
 
-        if (!psk.isEmpty()) {
+            DeviceConfig::ChannelConfig chConfig = m_deviceConfig->channel(i);
             QByteArray key;
-            if (psk.size() == 1) {
-                key = expandSimpleKey(static_cast<uint8_t>(psk[0]));
-            } else if (psk.size() == 16 || psk.size() == 32) {
-                key = psk;
-            }
+            if (chConfig.psk.size() == 1)
+                key = expandSimpleKey(static_cast<uint8_t>(chConfig.psk[0]));
+            else
+                key = chConfig.psk;
 
-            if (!key.isEmpty()) {
-                QByteArray decrypted = tryDecryptWithKey(encrypted, packetId, fromNode, key);
-                if (isValidDecryptedData(decrypted)) {
-                    if (foundKeyByte && psk.size() == 1)
-                        *foundKeyByte = static_cast<uint8_t>(psk[0]);
-                    return decrypted;
-                }
+            QByteArray decrypted = tryDecryptWithKey(encrypted, packetId, fromNode, key);
+            if (isValidDecryptedData(decrypted)) {
+                if (foundKeyByte && chConfig.psk.size() == 1)
+                    *foundKeyByte = static_cast<uint8_t>(chConfig.psk[0]);
+                if (matchedChannel)
+                    *matchedChannel = i;
+                return decrypted;
             }
         }
     }

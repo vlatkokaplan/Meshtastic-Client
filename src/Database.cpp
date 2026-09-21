@@ -48,6 +48,17 @@ bool Database::open(const QString &path)
         qWarning() << "Failed to enable foreign keys:" << query.lastError().text();
     }
 
+    // Write-ahead logging with relaxed sync: node/telemetry/packet rows are
+    // written one at a time as packets arrive, and the default rollback journal
+    // fsyncs on every one of them. Not applicable to the in-memory sim database.
+    if (dbPath != ":memory:")
+    {
+        if (!query.exec("PRAGMA journal_mode = WAL"))
+            qWarning() << "Failed to enable WAL mode:" << query.lastError().text();
+        if (!query.exec("PRAGMA synchronous = NORMAL"))
+            qWarning() << "Failed to set synchronous mode:" << query.lastError().text();
+    }
+
     // Create or migrate tables
     int version = getSchemaVersion();
     if (version < SCHEMA_VERSION)

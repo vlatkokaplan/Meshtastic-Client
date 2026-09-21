@@ -102,6 +102,7 @@ public:
     QList<NodeInfo> allNodes() const;
     QList<NodeInfo> nodesWithPosition() const;
     bool hasNode(uint32_t nodeNum) const;
+    int nodeCount() const;
 
     void clear();
 

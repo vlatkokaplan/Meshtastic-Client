@@ -1,6 +1,7 @@
 #include <QtTest/QtTest>
 #include <QSignalSpy>
 #include "MeshtasticProtocol.h"
+#include "DeviceConfig.h"
 #include "meshtastic/mesh.pb.h"
 
 // Build a valid framed FromRadio packet from a serialized protobuf
@@ -108,6 +109,74 @@ private slots:
         QCOMPARE(spy.count(), 1);
         auto pkt = spy[0][0].value<MeshtasticProtocol::DecodedPacket>();
         QCOMPARE(pkt.fields["myNodeNum"].toUInt(), 0x99999999u);
+    }
+
+    void xor_hash_matches_firmware()
+    {
+        // Firmware xorHash() is a plain XOR fold over the bytes
+        QCOMPARE(MeshtasticProtocol::xorHash(QByteArray()), static_cast<uint8_t>(0));
+        QCOMPARE(MeshtasticProtocol::xorHash(QByteArray("LongFast")), static_cast<uint8_t>(0x0A));
+        QCOMPARE(MeshtasticProtocol::xorHash(QByteArray::fromHex("d4f1bb3a20290759f0bcffabcf4e6901")),
+                 static_cast<uint8_t>(0x02));
+    }
+
+    void default_longfast_channel_hashes_to_8()
+    {
+        // The stock Meshtastic primary channel - unnamed, modem preset LONG_FAST,
+        // psk "AQ==" (the single byte 0x01 => the unmodified default PSK) - is
+        // well known to hash to 8. This is the value that arrives in the
+        // `channel` field of an encrypted MeshPacket.
+        DeviceConfig cfg;
+
+        DeviceConfig::LoRaConfig lora;
+        lora.modemPreset = 0;  // LONG_FAST
+        cfg.setLoRaConfig(lora);
+
+        DeviceConfig::ChannelConfig ch;
+        ch.index = 0;
+        ch.role = 1;  // primary
+        ch.name = QString();
+        ch.psk = QByteArray(1, 0x01);
+        cfg.setChannel(0, ch);
+
+        MeshtasticProtocol proto;
+        proto.setDeviceConfig(&cfg);
+
+        QCOMPARE(proto.channelHashFor(0), 8);
+    }
+
+    void channel_hash_is_minus_one_for_disabled_channel()
+    {
+        DeviceConfig cfg;
+        DeviceConfig::ChannelConfig ch;
+        ch.index = 1;
+        ch.role = 0;  // disabled
+        ch.name = QString("Secondary");
+        ch.psk = QByteArray(1, 0x01);
+        cfg.setChannel(1, ch);
+
+        MeshtasticProtocol proto;
+        proto.setDeviceConfig(&cfg);
+
+        QCOMPARE(proto.channelHashFor(1), -1);
+    }
+
+    void named_channel_hash_differs_from_default()
+    {
+        DeviceConfig cfg;
+        DeviceConfig::ChannelConfig ch;
+        ch.index = 0;
+        ch.role = 1;
+        ch.name = QString("admin");
+        ch.psk = QByteArray(1, 0x01);
+        cfg.setChannel(0, ch);
+
+        MeshtasticProtocol proto;
+        proto.setDeviceConfig(&cfg);
+
+        // xorHash("admin") ^ xorHash(defaultpsk)
+        uint8_t expected = MeshtasticProtocol::xorHash(QByteArray("admin")) ^ 0x02;
+        QCOMPARE(proto.channelHashFor(0), static_cast<int>(expected));
     }
 
     void ignores_garbage_bytes_before_sync()

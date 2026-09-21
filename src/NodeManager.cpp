@@ -91,6 +91,10 @@ void NodeManager::updateNodeFromPacket(const QVariantMap &fields)
 
                 if (m_database)
                 {
+                    // position_history has a foreign key on nodes(node_num), so the
+                    // node row has to exist before the history row is written.
+                    persistNode(nodeNum);
+
                     Database::PositionRecord rec;
                     rec.nodeNum = nodeNum;
                     rec.latitude = lat;
@@ -134,6 +138,10 @@ void NodeManager::updateNodePosition(uint32_t nodeNum, double lat, double lon, i
 
     if (m_database)
     {
+        // position_history has a foreign key on nodes(node_num), so the node row
+        // has to exist before the history row is written.
+        persistNode(nodeNum);
+
         Database::PositionRecord rec;
         rec.nodeNum = nodeNum;
         rec.latitude = lat;
@@ -305,6 +313,12 @@ bool NodeManager::hasNode(uint32_t nodeNum) const
 {
     QMutexLocker locker(&m_mutex);
     return m_nodes.contains(nodeNum);
+}
+
+int NodeManager::nodeCount() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_nodes.size();
 }
 
 void NodeManager::clear()

@@ -105,15 +105,24 @@ void BluetoothConnection::disconnectDevice()
     m_reconnectTimer->stop();
     m_connected = false;
 
-    if (m_service) {
-        delete m_service;
-        m_service = nullptr;
+    // Take local copies and null the members first: disconnectFromDevice() can
+    // emit disconnected() synchronously, which re-enters onControllerDisconnected().
+    QLowEnergyService *service = m_service;
+    QLowEnergyController *controller = m_controller;
+    m_service = nullptr;
+    m_controller = nullptr;
+
+    if (service) {
+        service->disconnect(this);
+        service->deleteLater();
     }
 
-    if (m_controller) {
-        m_controller->disconnectFromDevice();
-        delete m_controller;
-        m_controller = nullptr;
+    if (controller) {
+        controller->disconnect(this);
+        controller->disconnectFromDevice();
+        // deleteLater() rather than delete: we may be inside a signal emitted
+        // by this very object.
+        controller->deleteLater();
     }
 
     if (wasConnected)
@@ -197,7 +206,8 @@ void BluetoothConnection::onControllerDisconnected()
     m_connected = false;
 
     if (m_service) {
-        delete m_service;
+        m_service->disconnect(this);
+        m_service->deleteLater();
         m_service = nullptr;
     }
 
@@ -228,7 +238,8 @@ void BluetoothConnection::onServiceDiscoveryFinished()
 
     // Clean up old service if any (prevents duplicate signal connections)
     if (m_service) {
-        delete m_service;
+        m_service->disconnect(this);
+        m_service->deleteLater();
         m_service = nullptr;
     }
 

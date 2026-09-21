@@ -1,4 +1,6 @@
 #include "MapWidget.h"
+#include <QLabel>
+#include <QGuiApplication>
 #include "NodeManager.h"
 #include "AppSettings.h"
 #include <QVBoxLayout>
@@ -28,6 +30,19 @@ void MapWidget::setupUI()
 {
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
+
+    // QWebEngineView is built on QQuickWidget, whose software renderer segfaults
+    // under the offscreen platform plugin. Skip the map entirely there so the
+    // rest of the app can run headless (smoke tests, CI).
+    if (QGuiApplication::platformName() == QLatin1String("offscreen"))
+    {
+        m_webView = nullptr;
+        QLabel *placeholder = new QLabel("Map unavailable on the offscreen platform", this);
+        placeholder->setAlignment(Qt::AlignCenter);
+        layout->addWidget(placeholder);
+        qWarning() << "[Map] Offscreen platform detected - map view disabled";
+        return;
+    }
 
     m_webView = new QWebEngineView(this);
 

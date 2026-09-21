@@ -217,6 +217,19 @@ void AppSettingsTab::setupUI()
     clearNodeDbLabel->setStyleSheet("color: #888; font-size: 11px;");
     localDbLayout->addWidget(clearNodeDbLabel);
 
+    QFormLayout *retentionForm = new QFormLayout;
+    m_retentionDaysSpin = new QSpinBox;
+    m_retentionDaysSpin->setRange(0, 365);
+    m_retentionDaysSpin->setSuffix(" days");
+    m_retentionDaysSpin->setSpecialValueText("Keep forever");
+    m_retentionDaysSpin->setToolTip(
+        "How long to keep packets, telemetry, neighbor info and traceroutes. "
+        "Pruned on each connect. Nodes and messages are never pruned.");
+    connect(m_retentionDaysSpin, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, &AppSettingsTab::onRetentionDaysChanged);
+    retentionForm->addRow("History retention:", m_retentionDaysSpin);
+    localDbLayout->addLayout(retentionForm);
+
     QHBoxLayout *clearNodeDbRow = new QHBoxLayout;
     m_clearNodeDbBtn = new QPushButton("Clear Nodes && Resync");
     m_clearNodeDbBtn->setToolTip("Delete all locally saved nodes, then re-download them from the device");
@@ -252,6 +265,8 @@ void AppSettingsTab::loadSettings()
     m_nodeBlinkDurationSpin->setValue(settings->mapNodeBlinkDuration());
     m_showPacketFlowLinesCheck->setChecked(settings->showPacketFlowLines());
     m_autoPingResponseCheck->setChecked(settings->autoPingResponse());
+
+    m_retentionDaysSpin->setValue(settings->dataRetentionDays());
 
     int refreshSecs = settings->positionRefreshInterval();
     for (int i = 0; i < m_positionRefreshCombo->count(); i++) {
@@ -371,6 +386,11 @@ void AppSettingsTab::onPositionRefreshChanged(int index)
 void AppSettingsTab::onClearNodeDatabase()
 {
     emit clearNodeDatabaseRequested();
+}
+
+void AppSettingsTab::onRetentionDaysChanged(int value)
+{
+    AppSettings::instance()->setDataRetentionDays(value);
 }
 
 void AppSettingsTab::onExportNodesCsv()

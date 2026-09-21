@@ -157,7 +157,10 @@ bool SerialConnection::sendData(const QByteArray &data)
         return false;
     }
 
-    return m_serialPort->flush();
+    // flush() returns false when the buffer was already empty, which is not an
+    // error - the write above is what determines success.
+    m_serialPort->flush();
+    return true;
 }
 
 void SerialConnection::handleReadyRead()

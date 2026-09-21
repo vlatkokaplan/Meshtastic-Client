@@ -26,6 +26,7 @@
 #include <QToolBar>
 #include <QStatusBar>
 #include <QMessageBox>
+#include <QScrollBar>
 #include <QTimer>
 #include <QDebug>
 #include <QStandardPaths>
@@ -151,6 +152,7 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode,
     connect(m_nodeManager, &NodeManager::nodesChanged,
             this, [this]() {
                 m_nodesSortNeeded = true;
+                refreshDbNodeCount();
                 updateNodeList();
             });
 
@@ -571,9 +573,13 @@ void MainWindow::onConnected()
     // Clean up old data on connect (runs in background)
     QTimer::singleShot(5000, this, [this]() {
         if (m_database) {
-            m_database->deleteOldPackets(7);  // Delete packets older than 7 days
-            m_database->deleteTelemetryHistory(7);  // Delete telemetry older than 7 days
-            m_database->deleteOldNeighborInfo(7);  // Delete neighbor info older than 7 days
+            int days = AppSettings::instance()->dataRetentionDays();
+            if (days <= 0)
+                return;  // 0 = keep forever
+            m_database->deleteOldPackets(days);
+            m_database->deleteTelemetryHistory(days);
+            m_database->deleteOldNeighborInfo(days);
+            m_database->deleteTraceroutes(days);  // was never pruned before
         }
     });
 
@@ -1372,6 +1378,7 @@ void MainWindow::onClearNodeDatabase()
 
     // Drops the in-memory nodes and repaints the node list and map
     m_nodeManager->clear();
+    refreshDbNodeCount();
 
     if (isDeviceConnected())
     {
@@ -1386,6 +1393,16 @@ void MainWindow::onClearNodeDatabase()
 
 void MainWindow::updateNodeList()
 {
+    // The table is rebuilt from scratch below, which drops the selection and
+    // jumps back to the top. Remember both and put them back afterwards.
+    uint32_t selectedNodeNum = 0;
+    if (QTableWidgetItem *sel = m_nodeTable->currentItem())
+    {
+        if (QTableWidgetItem *col0 = m_nodeTable->item(sel->row(), 0))
+            selectedNodeNum = col0->data(Qt::UserRole).toUInt();
+    }
+    int scrollPos = m_nodeTable->verticalScrollBar()->value();
+
     m_nodeTable->setUpdatesEnabled(false);
     m_nodeTable->setRowCount(0);
 
@@ -1563,6 +1580,21 @@ void MainWindow::updateNodeList()
         row++;
     }
 
+    // Restore the selection and scroll position from before the rebuild
+    if (selectedNodeNum != 0)
+    {
+        for (int r = 0; r < m_nodeTable->rowCount(); ++r)
+        {
+            QTableWidgetItem *col0 = m_nodeTable->item(r, 0);
+            if (col0 && col0->data(Qt::UserRole).toUInt() == selectedNodeNum)
+            {
+                m_nodeTable->setCurrentCell(r, 0, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+                break;
+            }
+        }
+    }
+    m_nodeTable->verticalScrollBar()->setValue(scrollPos);
+
     m_nodeTable->setUpdatesEnabled(true);
 
     // Draw test lines if test mode is enabled
@@ -1572,6 +1604,11 @@ void MainWindow::updateNodeList()
     }
 }
 
+void MainWindow::refreshDbNodeCount()
+{
+    m_dbNodeCount = (m_database && m_database->isOpen()) ? m_database->nodeCount() : 0;
+}
+
 void MainWindow::updateStatusLabel()
 {
     // Don't overwrite "Reconnecting..." while TCP is mid-reconnect
@@ -1579,15 +1616,17 @@ void MainWindow::updateStatusLabel()
         return;
 
     QString status;
-    int nodeCount = m_nodeManager->allNodes().count();
-    int dbCount = m_database && m_database->isOpen() ? m_database->nodeCount() : 0;
+    // Called for every received packet, so neither of these may do real work:
+    // nodeCount() reads the map size instead of deep-copying every NodeInfo, and
+    // the DB count is cached rather than re-running SELECT COUNT(*) per packet.
+    int nodeCount = m_nodeManager->nodeCount();
 
     if (isDeviceConnected())
     {
         status = QString("Connected: %1 | Nodes: %2 (DB: %3)")
                      .arg(connectedDeviceName())
                      .arg(nodeCount)
-                     .arg(dbCount);
+                     .arg(m_dbNodeCount);
     }
     else
     {
@@ -1631,6 +1670,7 @@ void MainWindow::openDatabaseForNode(uint32_t nodeNum)
     if (m_database && m_database->isOpen() && m_openNodeNum == nodeNum) {
         qDebug() << "[MainWindow] Reconnected to same node, reloading DB (no clear)";
         m_nodeManager->loadFromDatabase();
+        refreshDbNodeCount();
         updateStatusLabel();
         statusBar()->showMessage("Reconnected", 3000);
         return;
@@ -1676,11 +1716,19 @@ void MainWindow::openDatabaseForNode(uint32_t nodeNum)
             m_topologyWidget->loadFromDatabase();
         }
 
-        statusBar()->showMessage(QString("Database loaded: %1 nodes").arg(m_database->nodeCount()), 3000);
+        refreshDbNodeCount();
+        statusBar()->showMessage(QString("Database loaded: %1 nodes").arg(m_dbNodeCount), 3000);
     }
     else
     {
-        statusBar()->showMessage("Failed to open database", 5000);
+        // Leaving a non-null but closed Database here would satisfy every
+        // `if (m_database)` guard in the app and silently fail every query.
+        qWarning() << "[MainWindow] Database open failed for" << dbPath;
+        delete m_database;
+        m_database = nullptr;
+        m_openNodeNum = 0;
+        m_dbNodeCount = 0;
+        statusBar()->showMessage("Failed to open database - data will not be saved", 8000);
     }
     updateStatusLabel();
 }
@@ -1718,6 +1766,7 @@ void MainWindow::closeDatabase()
     m_database->close();
     delete m_database;
     m_database = nullptr;
+    m_dbNodeCount = 0;
 }
 
 void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel)
@@ -1731,9 +1780,9 @@ void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel
     uint32_t myNode = m_nodeManager->myNodeNum();
     uint32_t packetId = 0;
     QByteArray packet = m_protocol->createTextMessagePacket(text, toNode, myNode, channel, 0, &packetId);
-    sendToDevice(packet);
+    bool sent = sendToDevice(packet);
 
-    qDebug() << "[MainWindow] Sent message with packetId:" << packetId;
+    qDebug() << "[MainWindow] Sent message with packetId:" << packetId << "ok:" << sent;
 
     // Add the outgoing message to our local display
     ChatMessage msg;
@@ -1744,6 +1793,9 @@ void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel
     msg.timestamp = QDateTime::currentDateTime();
     msg.isOutgoing = true;
     msg.packetId = packetId;
+    // A write that never reached the device will never be ACKed, so don't leave
+    // it spinning on "Sending..."
+    msg.status = sent ? MessageStatus::Sending : MessageStatus::Failed;
     m_messagesWidget->addMessage(msg);
 
     QString destName;
@@ -1756,7 +1808,9 @@ void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel
         NodeInfo node = m_nodeManager->getNode(toNode);
         destName = node.longName.isEmpty() ? node.nodeId : node.longName;
     }
-    statusBar()->showMessage(QString("Message sent to %1").arg(destName), 3000);
+    statusBar()->showMessage(sent
+        ? QString("Message sent to %1").arg(destName)
+        : QString("Failed to send message to %1 - check the connection").arg(destName), 5000);
 }
 
 void MainWindow::onSendReaction(const QString &emoji, uint32_t toNode, int channel, uint32_t replyId)
@@ -2035,7 +2089,11 @@ void MainWindow::onSaveLoRaConfig()
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     QByteArray packet = m_protocol->createLoRaConfigPacket(myNode, myNode, config);
-    sendToDevice(packet);
+    if (!sendToDevice(packet))
+    {
+        statusBar()->showMessage("Failed to send LoRa config - check the connection", 5000);
+        return;
+    }
 
     m_configWidget->notifyLoRaSaved();
     statusBar()->showMessage("LoRa config saved to device", 3000);
@@ -2070,7 +2128,11 @@ void MainWindow::onSaveDeviceConfig()
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     QByteArray packet = m_protocol->createDeviceConfigPacket(myNode, myNode, config);
-    sendToDevice(packet);
+    if (!sendToDevice(packet))
+    {
+        statusBar()->showMessage("Failed to send device config - check the connection", 5000);
+        return;
+    }
 
     m_configWidget->notifyDeviceSaved();
     statusBar()->showMessage("Device config saved to device", 3000);
@@ -2103,7 +2165,11 @@ void MainWindow::onSavePositionConfig()
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     QByteArray packet = m_protocol->createPositionConfigPacket(myNode, myNode, config);
-    sendToDevice(packet);
+    if (!sendToDevice(packet))
+    {
+        statusBar()->showMessage("Failed to send position config - check the connection", 5000);
+        return;
+    }
 
     m_configWidget->notifyPositionSaved();
     statusBar()->showMessage("Position config saved to device", 3000);
@@ -2144,7 +2210,12 @@ void MainWindow::onSaveChannelConfig(int channelIndex)
     QByteArray packet = m_protocol->createChannelConfigPacket(myNode, myNode, channelIndex, config);
     qDebug() << "Packet size:" << packet.size() << "bytes";
 
-    sendToDevice(packet);
+    if (!sendToDevice(packet))
+    {
+        statusBar()->showMessage(
+            QString("Failed to send channel %1 config - check the connection").arg(channelIndex), 5000);
+        return;
+    }
     qDebug() << "Packet sent to device";
 
     // Update MessagesWidget immediately (don't wait for device response)
@@ -2415,15 +2486,23 @@ bool MainWindow::isDeviceConnected() const
 
 bool MainWindow::sendToDevice(const QByteArray &data)
 {
+    bool ok = false;
+
     if (m_simulation && m_simulation->isActive())
-        return m_simulation->sendData(data);
-    if (m_bluetooth->isConnected())
-        return m_bluetooth->sendData(data);
-    if (m_tcp->isConnected())
-        return m_tcp->sendData(data);
-    if (m_serial->isConnected())
-        return m_serial->sendData(data);
-    return false;
+        ok = m_simulation->sendData(data);
+    else if (m_bluetooth->isConnected())
+        ok = m_bluetooth->sendData(data);
+    else if (m_tcp->isConnected())
+        ok = m_tcp->sendData(data);
+    else if (m_serial->isConnected())
+        ok = m_serial->sendData(data);
+    else
+        qWarning() << "[MainWindow] sendToDevice with no active connection";
+
+    if (!ok)
+        qWarning() << "[MainWindow] Failed to send" << data.size() << "bytes to device";
+
+    return ok;
 }
 
 QString MainWindow::connectedDeviceName() const

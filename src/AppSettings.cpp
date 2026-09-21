@@ -301,6 +301,16 @@ void AppSettings::setPositionRefreshInterval(int seconds)
     setValue("map/position_refresh_interval", seconds);
 }
 
+int AppSettings::dataRetentionDays() const
+{
+    return value("db/retention_days", 7).toInt();
+}
+
+void AppSettings::setDataRetentionDays(int days)
+{
+    setValue("db/retention_days", days);
+}
+
 void AppSettings::setSavePacketsToDb(bool enabled)
 {
     setValue("packets/save_to_db", enabled);

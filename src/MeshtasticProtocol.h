@@ -121,6 +121,13 @@ public:
     // Device config for packet decryption
     void setDeviceConfig(DeviceConfig *config) { m_deviceConfig = config; }
 
+    // Meshtastic channel hash: xorHash(name) ^ xorHash(key), matching firmware
+    // Channels::generateHash. The `channel` field of an encrypted MeshPacket
+    // carries this hash, not the channel index.
+    // channelHashFor() returns -1 when the channel is disabled or has no key.
+    static uint8_t xorHash(const QByteArray &data);
+    int channelHashFor(int channelIndex) const;
+
     // Create admin packets for config updates
     QByteArray createLoRaConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config);
     QByteArray createDeviceConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config);
@@ -179,8 +186,8 @@ private:
     DeviceConfig *m_deviceConfig = nullptr;
 
     // Decrypt encrypted packet payload
-    QByteArray decryptPayload(const QByteArray &encrypted, uint32_t packetId, uint32_t fromNode, int channel, int *foundKeyByte = nullptr);
-
+    QByteArray decryptPayload(const QByteArray &encrypted, uint32_t packetId, uint32_t fromNode,
+                              int channelHash, int *foundKeyByte = nullptr, int *matchedChannel = nullptr);
     // Helpers for decryption
     QByteArray tryDecryptWithKey(const QByteArray &encrypted, uint32_t packetId, uint32_t fromNode, const QByteArray &key);
     static QByteArray expandSimpleKey(uint8_t keyByte);

@@ -3,6 +3,9 @@
 #include "MeshtasticProtocol.h"
 #include "DeviceConfig.h"
 #include "meshtastic/mesh.pb.h"
+#include "meshtastic/portnums.pb.h"
+
+#include <openssl/evp.h>
 
 // Build a valid framed FromRadio packet from a serialized protobuf
 static QByteArray makeFrame(const std::string &payload)
@@ -177,6 +180,88 @@ private slots:
         // xorHash("admin") ^ xorHash(defaultpsk)
         uint8_t expected = MeshtasticProtocol::xorHash(QByteArray("admin")) ^ 0x02;
         QCOMPARE(proto.channelHashFor(0), static_cast<int>(expected));
+    }
+
+    // ---- decrypting a message on a configured channel ---------------------
+    // The app decrypts what the device hands over encrypted. A message on a
+    // channel we hold the key for must come out with the channel it belongs to,
+    // because that is what tells the UI it is ours rather than a stranger's
+    // traffic recovered by sweeping the default keys.
+
+    void encrypted_text_on_a_configured_channel_is_resolved()
+    {
+        DeviceConfig cfg;
+        DeviceConfig::LoRaConfig lora;
+        lora.modemPreset = 0;                    // LONG_FAST
+        cfg.setLoRaConfig(lora);
+
+        DeviceConfig::ChannelConfig ch;
+        ch.index = 0;
+        ch.role = 1;                             // primary
+        ch.psk = QByteArray(1, 0x01);            // the default key, "AQ=="
+        cfg.setChannel(0, ch);
+
+        MeshtasticProtocol proto;
+        proto.setDeviceConfig(&cfg);
+
+        const int hash = proto.channelHashFor(0);
+        QCOMPARE(hash, 8);                       // the well-known LongFast hash
+
+        // Build the Data payload the radio would have encrypted
+        meshtastic::Data data;
+        data.set_portnum(meshtastic::PortNum::TEXT_MESSAGE_APP);
+        data.set_payload("hello mesh");
+        std::string plain;
+        QVERIFY(data.SerializeToString(&plain));
+
+        const uint32_t packetId = 0x11223344;
+        const uint32_t fromNode = 0xb29c7344;
+
+        // Same nonce layout as the firmware: packetId as u64 LE, then fromNode
+        unsigned char nonce[16] = {0};
+        for (int i = 0; i < 4; ++i)
+            nonce[i] = (packetId >> (8 * i)) & 0xFF;
+        for (int i = 0; i < 4; ++i)
+            nonce[8 + i] = (fromNode >> (8 * i)) & 0xFF;
+
+        const QByteArray key = QByteArray::fromHex("d4f1bb3a20290759f0bcffabcf4e6901");
+        QByteArray cipher(static_cast<int>(plain.size()), 0);
+        int outLen = 0;
+        EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+        QVERIFY(ctx);
+        QVERIFY(EVP_EncryptInit_ex(ctx, EVP_aes_128_ctr(), nullptr,
+                                   reinterpret_cast<const unsigned char *>(key.constData()),
+                                   nonce) == 1);
+        QVERIFY(EVP_EncryptUpdate(ctx, reinterpret_cast<unsigned char *>(cipher.data()), &outLen,
+                                  reinterpret_cast<const unsigned char *>(plain.data()),
+                                  static_cast<int>(plain.size())) == 1);
+        EVP_CIPHER_CTX_free(ctx);
+        cipher.resize(outLen);
+
+        meshtastic::FromRadio fr;
+        auto *pkt = fr.mutable_packet();
+        pkt->set_id(packetId);
+        pkt->set_from(fromNode);
+        pkt->set_to(0xFFFFFFFF);                 // broadcast
+        pkt->set_channel(hash);                  // the wire carries the hash
+        pkt->set_encrypted(cipher.constData(), cipher.size());
+
+        std::string wire;
+        QVERIFY(fr.SerializeToString(&wire));
+
+        QSignalSpy spy(&proto, &MeshtasticProtocol::packetReceived);
+        proto.processIncomingData(makeFrame(wire));
+
+        QCOMPARE(spy.count(), 1);
+        auto decoded = spy[0][0].value<MeshtasticProtocol::DecodedPacket>();
+
+        QCOMPARE(decoded.fields["text"].toString(), QString("hello mesh"));
+        QVERIFY2(decoded.fields.contains("resolvedChannel"),
+                 "a message decrypted with a configured channel's key must say which channel");
+        QCOMPARE(decoded.fields["resolvedChannel"].toInt(), 0);
+        // channelIndex must be the real index, not the hash that arrived
+        QCOMPARE(decoded.channelIndex, 0);
+        QVERIFY(decoded.channelIndex != hash);
     }
 
     void ignores_garbage_bytes_before_sync()

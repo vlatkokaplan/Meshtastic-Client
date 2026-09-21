@@ -929,11 +929,24 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             break;
 
         case MeshtasticProtocol::PortNum::TextMessage:
-            if (m_messagesWidget && packet.fields.contains("text") && !packet.fields.contains("decrypted"))
+        {
+            // A message belongs in the Messages tab when we know which of our
+            // channels it arrived on: either the device decoded it, or we
+            // decrypted it with the key of a configured channel, which sets
+            // resolvedChannel.
+            //
+            // This used to exclude everything the app decrypted, because the
+            // only app-side path was a brute-force sweep of the default keys,
+            // whose results come from channels we are not configured for and
+            // belong in the Packet List alone. Matching the channel hash added a
+            // second, trustworthy path - and messages arriving on our own
+            // channels were being dropped with the brute-forced ones.
+            const bool deviceDecoded = !packet.fields.contains("decrypted");
+            const bool onKnownChannel = packet.fields.contains("resolvedChannel");
+
+            if (m_messagesWidget && packet.fields.contains("text")
+                && (deviceDecoded || onKnownChannel))
             {
-                // Only route device-decoded messages to Messages widget.
-                // Brute-force decrypted packets (fields["decrypted"]=true) are from
-                // unknown channels and should only appear in the Packet List.
                 ChatMessage msg;
                 msg.fromNode = packet.from;
                 msg.toNode = packet.to;
@@ -999,6 +1012,7 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
                 }
             }
             break;
+        }
 
         case MeshtasticProtocol::PortNum::Traceroute:
             if (packet.fields.contains("route") || packet.fields.contains("routeBack"))

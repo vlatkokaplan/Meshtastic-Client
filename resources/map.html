@@ -278,7 +278,8 @@
         }
 
         function isNodeOffline(node) {
-            return node.lastHeardSecs >= 900;
+            // -1 means never heard from; that is not fresh either
+            return node.lastHeardSecs < 0 || node.lastHeardSecs >= 900;
         }
 
         function formatRelativeTime(secs) {

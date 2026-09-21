@@ -27,6 +27,39 @@ private slots:
         QVERIFY(qAbs(n.longitude - (-0.1)) < 1e-6);
     }
 
+    void zero_last_heard_stays_invalid()
+    {
+        // The device reports last_heard = 0 for nodes it knows of but has never
+        // heard from. Converting that to a QDateTime gives the Unix epoch, which
+        // the UI renders as "20717 days ago" instead of "never".
+        NodeManager nm;
+        QVariantMap fields;
+        fields["nodeNum"]   = 0x2222u;
+        fields["longName"]  = "Never Heard";
+        fields["lastHeard"] = 0;
+
+        nm.updateNodeFromPacket(fields);
+
+        NodeInfo n = nm.getNode(0x2222u);
+        QVERIFY(!n.lastHeard.isValid());
+        QCOMPARE(n.toVariantMap()["lastHeardSecs"].toInt(), -1);
+    }
+
+    void real_last_heard_is_kept()
+    {
+        NodeManager nm;
+        qint64 when = QDateTime::currentDateTime().toSecsSinceEpoch() - 300;
+        QVariantMap fields;
+        fields["nodeNum"]   = 0x3333u;
+        fields["lastHeard"] = when;
+
+        nm.updateNodeFromPacket(fields);
+
+        NodeInfo n = nm.getNode(0x3333u);
+        QVERIFY(n.lastHeard.isValid());
+        QCOMPARE(n.lastHeard.toSecsSinceEpoch(), when);
+    }
+
     void update_position()
     {
         NodeManager nm;

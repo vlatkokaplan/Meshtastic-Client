@@ -1453,7 +1453,9 @@ void MainWindow::onClearNodeDatabase()
 // actually want to know at a glance. Full timestamp moves to the tooltip.
 static QString relativeTimeText(const QDateTime &when)
 {
-    if (!when.isValid())
+    // A device can also report a nonsense timestamp; anything at or before the
+    // Unix epoch is "never", not "20717 days ago".
+    if (!when.isValid() || when.toSecsSinceEpoch() <= 0)
         return QStringLiteral("never");
 
     qint64 secs = when.secsTo(QDateTime::currentDateTime());

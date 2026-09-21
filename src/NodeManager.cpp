@@ -72,7 +72,15 @@ void NodeManager::updateNodeFromPacket(const QVariantMap &fields)
         }
         if (fields.contains("lastHeard"))
         {
-            node.lastHeard = QDateTime::fromSecsSinceEpoch(fields["lastHeard"].toLongLong());
+            // The device reports 0 for nodes it knows of but has never heard
+            // from. Converting that gives a valid QDateTime at the Unix epoch,
+            // which renders as "20717 days ago"; leave it invalid instead so it
+            // reads as "never". Database::loadAllNodes already guards this way.
+            qint64 secs = fields["lastHeard"].toLongLong();
+            if (secs > 0)
+                node.lastHeard = QDateTime::fromSecsSinceEpoch(secs);
+            else
+                node.lastHeard = QDateTime();
         }
 
         if (fields.contains("latitude") && fields.contains("longitude"))

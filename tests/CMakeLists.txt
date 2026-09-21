@@ -83,3 +83,31 @@ target_link_libraries(test_analytics PRIVATE
 )
 
 add_test(NAME Analytics COMMAND test_analytics)
+
+# ---- test_database ----
+# Links the real Database, not DatabaseStub, and runs against real SQLite files
+# in a temporary directory.
+add_executable(test_database
+    test_database.cpp
+    ${CMAKE_SOURCE_DIR}/src/Database.cpp
+    ${CMAKE_SOURCE_DIR}/src/NodeManager.cpp
+    ${CMAKE_SOURCE_DIR}/src/MeshtasticProtocol.cpp
+    ${CMAKE_SOURCE_DIR}/src/DeviceConfig.cpp
+)
+
+target_include_directories(test_database PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+
+target_link_libraries(test_database PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Test
+    Qt6::Sql
+    meshtastic_proto
+    OpenSSL::Crypto
+)
+
+add_test(NAME DatabaseSql COMMAND test_database)

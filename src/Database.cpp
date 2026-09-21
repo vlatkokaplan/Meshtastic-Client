@@ -110,7 +110,13 @@ void Database::close()
     {
         m_db.close();
     }
-    QSqlDatabase::removeDatabase(m_connectionName);
+
+    // removeDatabase() warns "connection is still in use, all queries will
+    // cease to work" if any QSqlDatabase still references the connection - and
+    // m_db does. Drop our reference first, then remove by name.
+    const QString name = m_connectionName;
+    m_db = QSqlDatabase();
+    QSqlDatabase::removeDatabase(name);
 }
 
 bool Database::isOpen() const
@@ -903,6 +909,19 @@ QList<Database::Message> Database::loadMessages(int limit, int offset)
 
 bool Database::saveTraceroute(const Traceroute &tr)
 {
+    if (!m_db.isOpen())
+        return false;
+
+    // traceroutes foreign-keys both endpoints to nodes(node_num). A traceroute
+    // is an observation and has to be recorded whether or not we happen to hold
+    // a node row for the far end yet - tracerouting a node discovered moments
+    // ago would otherwise fail the constraint and be dropped silently, and
+    // traceroutes are the primary topology source. The endpoints re-associate
+    // by node_num when the node is stored. PRAGMA foreign_keys is a no-op
+    // inside a transaction, so it is toggled outside of one.
+    QSqlQuery pragma(m_db);
+    pragma.exec("PRAGMA foreign_keys = OFF");
+
     QSqlQuery query(m_db);
     query.prepare(R"(
         INSERT INTO traceroutes (from_node, to_node, route_to, route_back, snr_to, snr_back, timestamp, is_response)
@@ -920,7 +939,10 @@ bool Database::saveTraceroute(const Traceroute &tr)
     query.bindValue(":timestamp", timestamp);
     query.bindValue(":is_response", tr.isResponse ? 1 : 0);
 
-    if (!query.exec())
+    const bool ok = query.exec();
+    pragma.exec("PRAGMA foreign_keys = ON");
+
+    if (!ok)
     {
         qWarning() << "Failed to save traceroute:" << query.lastError().text();
         return false;

@@ -9,6 +9,32 @@
 #include <QLabel>
 #include <QFormLayout>
 
+NoScrollSpinBox::NoScrollSpinBox(QWidget *parent) : QSpinBox(parent)
+{
+    setFocusPolicy(Qt::StrongFocus);   // no wheel focus
+}
+
+void NoScrollSpinBox::wheelEvent(QWheelEvent *event)
+{
+    if (hasFocus())
+        QSpinBox::wheelEvent(event);
+    else
+        event->ignore();               // let the scroll area have it
+}
+
+NoScrollComboBox::NoScrollComboBox(QWidget *parent) : QComboBox(parent)
+{
+    setFocusPolicy(Qt::StrongFocus);
+}
+
+void NoScrollComboBox::wheelEvent(QWheelEvent *event)
+{
+    if (hasFocus())
+        QComboBox::wheelEvent(event);
+    else
+        event->ignore();
+}
+
 AppSettingsTab::AppSettingsTab(QWidget *parent)
     : QWidget(parent)
 {
@@ -47,7 +73,7 @@ void AppSettingsTab::setupUI()
     connect(m_hideNeverHeardCheck, &QCheckBox::toggled, this, &AppSettingsTab::onHideNeverHeardChanged);
     nodesLayout->addRow(m_hideNeverHeardCheck);
 
-    m_offlineThresholdSpin = new QSpinBox;
+    m_offlineThresholdSpin = new NoScrollSpinBox;
     m_offlineThresholdSpin->setRange(5, 1440);
     m_offlineThresholdSpin->setSuffix(" minutes");
     m_offlineThresholdSpin->setToolTip("Nodes not heard from within this time are considered offline");
@@ -61,7 +87,7 @@ void AppSettingsTab::setupUI()
     QGroupBox *mapGroup = new QGroupBox("Map");
     QFormLayout *mapLayout = new QFormLayout(mapGroup);
 
-    m_tileServerCombo = new QComboBox;
+    m_tileServerCombo = new NoScrollComboBox;
     m_tileServerCombo->addItem("OpenStreetMap", "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png");
     m_tileServerCombo->addItem("OpenTopoMap", "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png");
     m_tileServerCombo->addItem("Stamen Terrain", "https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}.jpg");
@@ -84,7 +110,7 @@ void AppSettingsTab::setupUI()
     connect(m_nodeBlinkCheck, &QCheckBox::toggled, this, &AppSettingsTab::onNodeBlinkEnabledChanged);
     mapLayout->addRow(m_nodeBlinkCheck);
 
-    m_nodeBlinkDurationSpin = new QSpinBox;
+    m_nodeBlinkDurationSpin = new NoScrollSpinBox;
     m_nodeBlinkDurationSpin->setRange(1, 60);
     m_nodeBlinkDurationSpin->setSuffix(" seconds");
     m_nodeBlinkDurationSpin->setToolTip("How long the blink animation lasts");
@@ -97,7 +123,7 @@ void AppSettingsTab::setupUI()
     connect(m_showPacketFlowLinesCheck, &QCheckBox::toggled, this, &AppSettingsTab::onShowPacketFlowLinesChanged);
     mapLayout->addRow(m_showPacketFlowLinesCheck);
 
-    m_positionRefreshCombo = new QComboBox;
+    m_positionRefreshCombo = new NoScrollComboBox;
     m_positionRefreshCombo->addItem("Off", 0);
     m_positionRefreshCombo->addItem("30 seconds", 30);
     m_positionRefreshCombo->addItem("1 minute", 60);
@@ -227,7 +253,7 @@ void AppSettingsTab::setupUI()
     localDbLayout->addWidget(clearNodeDbLabel);
 
     QFormLayout *retentionForm = new QFormLayout;
-    m_retentionDaysSpin = new QSpinBox;
+    m_retentionDaysSpin = new NoScrollSpinBox;
     m_retentionDaysSpin->setRange(0, 365);
     m_retentionDaysSpin->setSuffix(" days");
     m_retentionDaysSpin->setSpecialValueText("Keep forever");
@@ -240,7 +266,7 @@ void AppSettingsTab::setupUI()
             this, &AppSettingsTab::onRetentionDaysChanged);
     retentionForm->addRow("History retention:", m_retentionDaysSpin);
 
-    m_packetRetentionSpin = new QSpinBox;
+    m_packetRetentionSpin = new NoScrollSpinBox;
     m_packetRetentionSpin->setRange(0, 365);
     m_packetRetentionSpin->setSuffix(" days");
     m_packetRetentionSpin->setSpecialValueText("Keep forever");
@@ -258,8 +284,27 @@ void AppSettingsTab::setupUI()
     m_clearNodeDbBtn->setToolTip("Delete all locally saved nodes, then re-download them from the device");
     connect(m_clearNodeDbBtn, &QPushButton::clicked, this, &AppSettingsTab::onClearNodeDatabase);
     clearNodeDbRow->addWidget(m_clearNodeDbBtn);
+
+    m_forgetRadioBtn = new QPushButton("Forget This Radio");
+    m_forgetRadioBtn->setProperty("danger", true);
+    m_forgetRadioBtn->setToolTip(
+        "Delete everything stored for the connected radio - nodes, messages, "
+        "telemetry, positions, traceroutes and the packet log - and start over "
+        "as though it had never been connected.");
+    connect(m_forgetRadioBtn, &QPushButton::clicked, this, &AppSettingsTab::onForgetRadio);
+    clearNodeDbRow->addWidget(m_forgetRadioBtn);
+
     clearNodeDbRow->addStretch();
     localDbLayout->addLayout(clearNodeDbRow);
+
+    auto *forgetNote = new QLabel(
+        "\"Clear Nodes\" removes only the node list and pulls it back from the "
+        "radio, so anything still in the radio's own node database returns. "
+        "\"Forget This Radio\" deletes the whole local history for it, messages "
+        "included, and cannot be undone.");
+    forgetNote->setWordWrap(true);
+    forgetNote->setStyleSheet(Theme::mutedLabelStyle());
+    localDbLayout->addWidget(forgetNote);
 
     mainLayout->addWidget(localDbGroup);
 
@@ -416,6 +461,11 @@ void AppSettingsTab::onPositionRefreshChanged(int index)
 void AppSettingsTab::onClearNodeDatabase()
 {
     emit clearNodeDatabaseRequested();
+}
+
+void AppSettingsTab::onForgetRadio()
+{
+    emit forgetRadioRequested();
 }
 
 void AppSettingsTab::onRetentionDaysChanged(int value)

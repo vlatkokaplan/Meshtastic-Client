@@ -30,6 +30,9 @@
 #include <QToolBar>
 #include <QStatusBar>
 #include <QMessageBox>
+#include <QSqlQuery>
+#include <QFileInfo>
+#include <QFile>
 #include <QScrollBar>
 #include <QTimer>
 #include <QDebug>
@@ -523,6 +526,8 @@ void MainWindow::setupConfigTab()
                 this, &MainWindow::onExportMessages);
         connect(appSettings, &AppSettingsTab::clearNodeDatabaseRequested,
                 this, &MainWindow::onClearNodeDatabase);
+        connect(appSettings, &AppSettingsTab::forgetRadioRequested,
+                this, &MainWindow::onForgetRadio);
     }
 }
 
@@ -1431,6 +1436,112 @@ void MainWindow::onPacketReplayed(uint32_t fromNode, uint32_t toNode, int portNu
     }
 }
 
+
+// Deletes everything stored locally for the connected radio and starts over.
+//
+// "Clear Nodes" only empties the nodes table and then re-reads the radio's own
+// node database, so anything the radio still remembers comes straight back -
+// which is not what "start fresh" means to someone looking at a stale list.
+// This removes the database file itself, so nothing survives but what the radio
+// sends from now on.
+void MainWindow::onForgetRadio()
+{
+    if (m_simulateMode)
+    {
+        statusBar()->showMessage("Not available in simulation mode", 3000);
+        return;
+    }
+
+    const uint32_t nodeNum = m_openNodeNum != 0 ? m_openNodeNum : m_nodeManager->myNodeNum();
+    if (nodeNum == 0)
+    {
+        QMessageBox::information(this, "Forget This Radio",
+                                 "No radio database is open, so there is nothing to forget.");
+        return;
+    }
+
+    const QString nodeId = MeshtasticProtocol::nodeIdToString(nodeNum);
+    const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString dbPath = QString("%1/meshtastic_%2.db").arg(dataDir, nodeId);
+
+    // Count what is about to go, so the confirmation is specific rather than a
+    // vague warning about "all data".
+    int nodes = 0, messages = 0, packets = 0;
+    if (m_database && m_database->isOpen())
+    {
+        QSqlQuery q(m_database->connection());
+        if (q.exec("SELECT (SELECT COUNT(*) FROM nodes), (SELECT COUNT(*) FROM messages), "
+                   "(SELECT COUNT(*) FROM packets)") && q.next())
+        {
+            nodes = q.value(0).toInt();
+            messages = q.value(1).toInt();
+            packets = q.value(2).toInt();
+        }
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle("Forget This Radio");
+    box.setText(QString("Delete everything stored for %1?").arg(nodeId));
+    box.setInformativeText(
+        QString("This removes the local database for this radio:\n\n"
+                "    %1 nodes\n    %2 messages\n    %3 recorded packets\n"
+                "    telemetry, positions and traceroutes\n\n"
+                "It cannot be undone. The radio itself is not changed - its own "
+                "node database stays as it is, and whatever it reports after "
+                "reconnecting will be stored afresh.")
+            .arg(nodes).arg(messages).arg(packets));
+    box.setStandardButtons(QMessageBox::Cancel);
+    QPushButton *forget = box.addButton("Forget Everything", QMessageBox::DestructiveRole);
+    box.setDefaultButton(QMessageBox::Cancel);
+    box.exec();
+    if (box.clickedButton() != forget)
+        return;
+
+    // Close first: SQLite holds the file open, and the -wal/-shm companions are
+    // only removable once the connection is gone.
+    closeDatabase();
+    m_openNodeNum = 0;
+    m_nodeManager->clear();
+
+    QStringList failed;
+    for (const QString &suffix : {"", "-wal", "-shm"})
+    {
+        const QString path = dbPath + suffix;
+        if (QFile::exists(path) && !QFile::remove(path))
+            failed << QFileInfo(path).fileName();
+    }
+
+    if (!failed.isEmpty())
+    {
+        QMessageBox::warning(this, "Forget This Radio",
+                             QString("Could not delete:\n\n%1\n\nThe database has been "
+                                     "closed; the files can be removed by hand from\n%2")
+                                 .arg(failed.join("\n"), dataDir));
+        statusBar()->showMessage("Could not delete the radio database", 5000);
+        return;
+    }
+
+    AppSettings::instance()->setLastDatabaseNode(0);
+    qDebug() << "[MainWindow] Forgot radio" << nodeId << "- removed" << dbPath;
+
+    if (isDeviceConnected())
+    {
+        // A fresh database, then ask the radio for everything again
+        openDatabaseForNode(nodeNum);
+        requestConfig();
+        statusBar()->showMessage(
+            QString("Forgot %1 - resyncing from the radio").arg(nodeId), 5000);
+    }
+    else
+    {
+        refreshDbNodeCount();
+        updateStatusLabel();
+        updateNodeList();
+        statusBar()->showMessage(
+            QString("Forgot %1 - reconnect to start collecting again").arg(nodeId), 5000);
+    }
+}
 
 void MainWindow::updateNodeList()
 {

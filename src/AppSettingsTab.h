@@ -3,10 +3,33 @@
 
 #include <QWidget>
 #include <QCheckBox>
+#include <QWheelEvent>
 #include <QSpinBox>
 #include <QComboBox>
 #include <QLineEdit>
 #include <QPushButton>
+
+// A spin box that ignores the wheel unless it has focus. Inside a scroll area
+// the wheel would otherwise change the value while the user is only scrolling
+// past it - a silent settings change with no way to notice.
+class NoScrollSpinBox : public QSpinBox
+{
+    Q_OBJECT
+public:
+    explicit NoScrollSpinBox(QWidget *parent = nullptr);
+protected:
+    void wheelEvent(QWheelEvent *event) override;
+};
+
+// Same for combo boxes.
+class NoScrollComboBox : public QComboBox
+{
+    Q_OBJECT
+public:
+    explicit NoScrollComboBox(QWidget *parent = nullptr);
+protected:
+    void wheelEvent(QWheelEvent *event) override;
+};
 
 class AppSettingsTab : public QWidget
 {
@@ -19,6 +42,7 @@ signals:
     void exportNodesRequested(const QString &format);  // "csv" or "json"
     void exportMessagesRequested(const QString &format);
     void clearNodeDatabaseRequested();
+    void forgetRadioRequested();
 
 private slots:
     void onExportNodesCsv();
@@ -42,6 +66,7 @@ private slots:
     void onSavePacketsToDbChanged(bool checked);
     void onPositionRefreshChanged(int index);
     void onClearNodeDatabase();
+    void onForgetRadio();
     void onRetentionDaysChanged(int value);
     void onPacketRetentionChanged(int value);
 
@@ -84,6 +109,7 @@ private:
 
     // Local database maintenance
     QPushButton *m_clearNodeDbBtn;
+    QPushButton *m_forgetRadioBtn;
     QSpinBox *m_retentionDaysSpin;
     QSpinBox *m_packetRetentionSpin;
 

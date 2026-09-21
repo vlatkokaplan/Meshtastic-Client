@@ -640,13 +640,20 @@ void MainWindow::onConnected()
     // Clean up old data on connect (runs in background)
     QTimer::singleShot(5000, this, [this]() {
         if (m_database) {
-            int days = AppSettings::instance()->dataRetentionDays();
-            if (days <= 0)
-                return;  // 0 = keep forever
-            m_database->deleteOldPackets(days);
-            m_database->deleteTelemetryHistory(days);
-            m_database->deleteOldNeighborInfo(days);
-            m_database->deleteTraceroutes(days);  // was never pruned before
+            // The raw packet log grows fastest by far and is pruned on its own
+            // schedule; telemetry, traceroutes and neighbour info are small and
+            // feed the Analytics views, so they are kept much longer.
+            int packetDays = AppSettings::instance()->packetRetentionDays();
+            if (packetDays > 0)
+                m_database->deleteOldPackets(packetDays);
+
+            int historyDays = AppSettings::instance()->dataRetentionDays();
+            if (historyDays > 0)
+            {
+                m_database->deleteTelemetryHistory(historyDays);
+                m_database->deleteOldNeighborInfo(historyDays);
+                m_database->deleteTraceroutes(historyDays);
+            }
         }
     });
 
@@ -1270,6 +1277,10 @@ void MainWindow::onNodeContextMenu(const QPoint &pos)
     QAction *centerMapAction = menu.addAction("Center on Map");
     centerMapAction->setIcon(QIcon::fromTheme("zoom-fit-best"));
     centerMapAction->setEnabled(node.hasPosition);
+
+    QAction *trackAction = menu.addAction("Show Movement History");
+    trackAction->setToolTip("Draw this node's recorded positions on the map");
+    QAction *clearTrackAction = menu.addAction("Clear Movement History");
     QAction *selectedAction = menu.exec(m_nodeTable->viewport()->mapToGlobal(pos));
 
     if (sendDmAction && selectedAction == sendDmAction)
@@ -1296,6 +1307,15 @@ void MainWindow::onNodeContextMenu(const QPoint &pos)
     else if (selectedAction == positionAction)
     {
         requestPosition(nodeNum);
+    }
+    else if (selectedAction == trackAction)
+    {
+        showNodeTrack(nodeNum);
+    }
+    else if (selectedAction == clearTrackAction && m_mapWidget)
+    {
+        m_mapWidget->clearTrack();
+        statusBar()->showMessage("Movement history cleared", 3000);
     }
     else if (selectedAction == centerMapAction && node.hasPosition && m_mapWidget)
     {
@@ -1510,6 +1530,55 @@ static QString relativeTimeText(const QDateTime &when)
     if (secs < 86400)
         return QStringLiteral("%1h ago").arg(secs / 3600);
     return QStringLiteral("%1d ago").arg(secs / 86400);
+}
+
+// Draws a node's recorded position fixes on the map. Reads position_history,
+// which has been collected all along but had nothing displaying it.
+void MainWindow::showNodeTrack(uint32_t nodeNum)
+{
+    if (!m_mapWidget)
+        return;
+
+    if (!m_database || !m_database->isOpen())
+    {
+        statusBar()->showMessage("No database open", 3000);
+        return;
+    }
+
+    const int days = AppSettings::instance()->dataRetentionDays();
+    const qint64 since = days > 0
+        ? QDateTime::currentDateTime().addDays(-days).toSecsSinceEpoch()
+        : 0;
+
+    const auto records = m_database->loadPositionTrack(nodeNum, since);
+    NodeInfo node = m_nodeManager->getNode(nodeNum);
+    const QString name = node.longName.isEmpty() ? node.nodeId : node.longName;
+
+    if (records.size() < 2)
+    {
+        statusBar()->showMessage(
+            QString("Only %1 recorded position%2 for %3 - not enough for a track")
+                .arg(records.size()).arg(records.size() == 1 ? "" : "s").arg(name),
+            5000);
+        m_mapWidget->clearTrack();
+        return;
+    }
+
+    QList<MapWidget::TrackPoint> points;
+    points.reserve(records.size());
+    for (const auto &r : records)
+    {
+        MapWidget::TrackPoint p;
+        p.latitude = r.latitude;
+        p.longitude = r.longitude;
+        p.when = r.timestamp.toString("yyyy-MM-dd HH:mm");
+        points.append(p);
+    }
+
+    m_mapWidget->drawTrack(nodeNum, points, Theme::palette().accent);
+    m_tabWidget->setCurrentIndex(0);
+    statusBar()->showMessage(
+        QString("%1 position fixes for %2").arg(records.size()).arg(name), 5000);
 }
 
 void MainWindow::updateNodeList()

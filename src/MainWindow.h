@@ -108,6 +108,7 @@ private:
 
     void refreshDbNodeCount();
     void setupAnalyticsTab();
+    void showNodeTrack(uint32_t nodeNum);
     void updateConnectionPill();
     int m_tracerouteCooldownRemaining = 0;
     static const int TRACEROUTE_COOLDOWN_MS = 30000; // 30 seconds

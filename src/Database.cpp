@@ -1299,6 +1299,40 @@ Database::PositionRecord Database::loadPositionAt(uint32_t nodeNum, qint64 times
     return rec;
 }
 
+QList<Database::PositionRecord> Database::loadPositionTrack(uint32_t nodeNum,
+                                                            qint64 sinceSecs, int limit)
+{
+    QList<PositionRecord> track;
+    if (!m_db.isOpen())
+        return track;
+
+    QSqlQuery query(m_db);
+    query.prepare("SELECT node_num, latitude, longitude, altitude, timestamp "
+                  "FROM position_history WHERE node_num = ? AND timestamp >= ? "
+                  "ORDER BY timestamp ASC LIMIT ?");
+    query.addBindValue(nodeNum);
+    query.addBindValue(sinceSecs);
+    query.addBindValue(limit);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to load position track:" << query.lastError().text();
+        return track;
+    }
+
+    while (query.next())
+    {
+        PositionRecord rec;
+        rec.nodeNum = query.value(0).toUInt();
+        rec.latitude = query.value(1).toDouble();
+        rec.longitude = query.value(2).toDouble();
+        rec.altitude = query.value(3).toInt();
+        rec.timestamp = QDateTime::fromSecsSinceEpoch(query.value(4).toLongLong());
+        track.append(rec);
+    }
+    return track;
+}
+
 bool Database::savePacket(const PacketRecord &record)
 {
     if (!m_db.isOpen())

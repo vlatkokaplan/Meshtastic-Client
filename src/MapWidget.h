@@ -49,6 +49,15 @@ public:
     void drawTraceroute(const QList<RoutePoint> &routePoints);
     void clearTraceroute();
 
+    struct TrackPoint
+    {
+        double latitude = 0.0;
+        double longitude = 0.0;
+        QString when;
+    };
+    void drawTrack(uint32_t nodeNum, const QList<TrackPoint> &points, const QColor &color);
+    void clearTrack();
+
 signals:
     void nodeClicked(uint32_t nodeNum);
 

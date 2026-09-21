@@ -75,8 +75,14 @@ public:
     int positionRefreshInterval() const;
     void setPositionRefreshInterval(int seconds);
 
+    // Raw packet rows are the high-volume table; telemetry, traceroutes and
+    // neighbour info are small and are what trend analysis needs, so they get a
+    // separate, much longer retention.
     int dataRetentionDays() const;
     void setDataRetentionDays(int days);
+
+    int packetRetentionDays() const;
+    void setPacketRetentionDays(int days);
 
     bool hideNeverHeardNodes() const;
     void setHideNeverHeardNodes(bool hide);

@@ -313,7 +313,19 @@ void AppSettings::setHideNeverHeardNodes(bool hide)
 
 int AppSettings::dataRetentionDays() const
 {
-    return value("db/retention_days", 7).toInt();
+    // Telemetry, traceroutes and neighbour info: small tables, and the source
+    // for every trend view, so keep them far longer than the raw packet log.
+    return value("db/retention_days", 90).toInt();
+}
+
+int AppSettings::packetRetentionDays() const
+{
+    return value("db/packet_retention_days", 7).toInt();
+}
+
+void AppSettings::setPacketRetentionDays(int days)
+{
+    setValue("db/packet_retention_days", days);
 }
 
 void AppSettings::setDataRetentionDays(int days)

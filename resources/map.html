@@ -278,6 +278,8 @@
         // Store traceroute line
         var tracerouteLine = null;
         var tracerouteMarkers = [];
+        var trackLine = null;
+        var trackDots = [];
 
         // Nodes bunch up tightly in a town, which turned a dozen pins into an
         // unreadable pile. Cluster them, but fall back to plain markers if the
@@ -677,6 +679,46 @@
 
                 // Fit map to show entire route
                 map.fitBounds(latlngs, { padding: [50, 50], maxZoom: 14 });
+            },
+
+            // Movement history for one node, oldest point first. Drawn as a
+            // fading polyline so direction of travel reads without an arrow.
+            drawTrack: function (nodeNum, points, color) {
+                this.clearTrack();
+                if (!points || points.length < 2) return;
+
+                var latlngs = points.map(function (p) { return [p.lat, p.lon]; });
+
+                trackLine = L.polyline(latlngs, {
+                    color: color || '#4d8ee6',
+                    weight: 3,
+                    opacity: 0.75,
+                    dashArray: '6,4'
+                }).addTo(map);
+
+                // Small dots at each recorded fix, brighter towards the newest
+                for (var i = 0; i < points.length; i++) {
+                    var age = i / Math.max(points.length - 1, 1);
+                    var dot = L.circleMarker([points[i].lat, points[i].lon], {
+                        radius: i === points.length - 1 ? 5 : 3,
+                        color: color || '#4d8ee6',
+                        fillColor: color || '#4d8ee6',
+                        fillOpacity: 0.25 + 0.65 * age,
+                        opacity: 0.25 + 0.65 * age,
+                        weight: 1
+                    }).addTo(map);
+                    if (points[i].when)
+                        dot.bindTooltip(points[i].when, { direction: 'top' });
+                    trackDots.push(dot);
+                }
+
+                map.fitBounds(latlngs, { padding: [60, 60], maxZoom: 15 });
+            },
+
+            clearTrack: function () {
+                if (trackLine) { map.removeLayer(trackLine); trackLine = null; }
+                for (var i = 0; i < trackDots.length; i++) map.removeLayer(trackDots[i]);
+                trackDots = [];
             },
 
             clearTraceroute: function () {

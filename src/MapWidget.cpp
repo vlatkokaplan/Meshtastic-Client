@@ -312,6 +312,36 @@ void MapWidget::drawTraceroute(const QList<RoutePoint> &routePoints)
     runJavaScript(script);
 }
 
+void MapWidget::drawTrack(uint32_t nodeNum, const QList<TrackPoint> &points,
+                         const QColor &color)
+{
+    if (!m_mapReady)
+        return;
+
+    QJsonArray arr;
+    for (const TrackPoint &p : points)
+    {
+        QJsonObject o;
+        o["lat"] = p.latitude;
+        o["lon"] = p.longitude;
+        o["when"] = p.when;
+        arr.append(o);
+    }
+
+    const QString json = QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));
+    runJavaScript(QString("window.mapAPI.drawTrack(%1, %2, '%3');")
+                      .arg(nodeNum)
+                      .arg(json)
+                      .arg(color.name()));
+}
+
+void MapWidget::clearTrack()
+{
+    if (!m_mapReady)
+        return;
+    runJavaScript("window.mapAPI.clearTrack();");
+}
+
 void MapWidget::clearTraceroute()
 {
     if (!m_mapReady)

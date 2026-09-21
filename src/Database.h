@@ -102,6 +102,8 @@ public:
 
     bool savePosition(const PositionRecord &record);
     PositionRecord loadPositionAt(uint32_t nodeNum, qint64 timestamp);
+    // Ordered oldest-first; used to draw movement tracks on the map
+    QList<PositionRecord> loadPositionTrack(uint32_t nodeNum, qint64 sinceSecs, int limit = 2000);
 
     // Raw packet storage (for long-running sessions)
     struct PacketRecord

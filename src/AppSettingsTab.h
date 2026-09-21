@@ -43,6 +43,7 @@ private slots:
     void onPositionRefreshChanged(int index);
     void onClearNodeDatabase();
     void onRetentionDaysChanged(int value);
+    void onPacketRetentionChanged(int value);
 
 private:
     // Connection settings
@@ -84,6 +85,7 @@ private:
     // Local database maintenance
     QPushButton *m_clearNodeDbBtn;
     QSpinBox *m_retentionDaysSpin;
+    QSpinBox *m_packetRetentionSpin;
 
     void setupUI();
     void loadSettings();

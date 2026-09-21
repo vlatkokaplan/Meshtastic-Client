@@ -232,11 +232,25 @@ void AppSettingsTab::setupUI()
     m_retentionDaysSpin->setSuffix(" days");
     m_retentionDaysSpin->setSpecialValueText("Keep forever");
     m_retentionDaysSpin->setToolTip(
-        "How long to keep packets, telemetry, neighbor info and traceroutes. "
-        "Pruned on each connect. Nodes and messages are never pruned.");
+        "How long to keep telemetry, traceroutes and neighbour info. These are "
+        "small tables and are what the Analytics tab trends over, so a long "
+        "window costs little. Pruned on each connect; nodes and messages are "
+        "never pruned.");
     connect(m_retentionDaysSpin, QOverload<int>::of(&QSpinBox::valueChanged),
             this, &AppSettingsTab::onRetentionDaysChanged);
     retentionForm->addRow("History retention:", m_retentionDaysSpin);
+
+    m_packetRetentionSpin = new QSpinBox;
+    m_packetRetentionSpin->setRange(0, 365);
+    m_packetRetentionSpin->setSuffix(" days");
+    m_packetRetentionSpin->setSpecialValueText("Keep forever");
+    m_packetRetentionSpin->setToolTip(
+        "How long to keep the raw packet log. This is by far the largest table - "
+        "a busy mesh writes on the order of a million rows a month - so it is "
+        "kept for much less time than the history above.");
+    connect(m_packetRetentionSpin, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, &AppSettingsTab::onPacketRetentionChanged);
+    retentionForm->addRow("Packet log retention:", m_packetRetentionSpin);
     localDbLayout->addLayout(retentionForm);
 
     QHBoxLayout *clearNodeDbRow = new QHBoxLayout;
@@ -277,6 +291,7 @@ void AppSettingsTab::loadSettings()
     m_autoPingResponseCheck->setChecked(settings->autoPingResponse());
 
     m_retentionDaysSpin->setValue(settings->dataRetentionDays());
+    m_packetRetentionSpin->setValue(settings->packetRetentionDays());
 
     int refreshSecs = settings->positionRefreshInterval();
     for (int i = 0; i < m_positionRefreshCombo->count(); i++) {
@@ -406,6 +421,11 @@ void AppSettingsTab::onClearNodeDatabase()
 void AppSettingsTab::onRetentionDaysChanged(int value)
 {
     AppSettings::instance()->setDataRetentionDays(value);
+}
+
+void AppSettingsTab::onPacketRetentionChanged(int value)
+{
+    AppSettings::instance()->setPacketRetentionDays(value);
 }
 
 void AppSettingsTab::onExportNodesCsv()

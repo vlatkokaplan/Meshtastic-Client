@@ -220,6 +220,11 @@ void NodeTableWidget::refresh()
     bool anySignal = false;
     bool anyHops = false;
 
+    // Why nodes were left out, so "11 of 41" does not leave the user guessing
+    int hiddenNeverHeard = 0;
+    int hiddenOffline = 0;
+    int hiddenBySearch = 0;
+
     int row = 0;
     for (const NodeInfo &node : nodes)
     {
@@ -229,6 +234,7 @@ void NodeTableWidget::refresh()
         bool neverHeard = !node.lastHeard.isValid();
         if (neverHeard && hideNeverHeard && node.nodeNum != myNode)
         {
+            hiddenNeverHeard++;
             continue;
         }
 
@@ -238,6 +244,7 @@ void NodeTableWidget::refresh()
         if (!showOffline && (neverHeard || node.lastHeard < offlineThreshold)
             && node.nodeNum != myNode)
         {
+            hiddenOffline++;
             continue;
         }
 
@@ -248,7 +255,10 @@ void NodeTableWidget::refresh()
                            node.shortName.toLower().contains(searchTerm) ||
                            node.nodeId.toLower().contains(searchTerm);
             if (!matches)
+            {
+                hiddenBySearch++;
                 continue;
+            }
         }
 
         bool isMyNode = (node.nodeNum == myNode);
@@ -424,9 +434,32 @@ void NodeTableWidget::refresh()
 
     if (m_heading)
     {
-        int total = nodes.size();
+        const int total = nodes.size();
         m_heading->setText(row == total ? QStringLiteral("NODES")
-                                           : QStringLiteral("NODES  %1 OF %2").arg(row).arg(total));
+                                        : QStringLiteral("NODES  %1 OF %2").arg(row).arg(total));
+
+        // Spell out what is missing and where to change it, rather than leaving
+        // a bare "11 of 41" to be puzzled over.
+        QStringList reasons;
+        if (hiddenNeverHeard > 0)
+            reasons << QString("%1 never heard from - this radio knows of them but has "
+                               "not received a packet from them").arg(hiddenNeverHeard);
+        if (hiddenOffline > 0)
+            reasons << QString("%1 not heard from recently").arg(hiddenOffline);
+        if (hiddenBySearch > 0)
+            reasons << QString("%1 do not match the search").arg(hiddenBySearch);
+
+        if (reasons.isEmpty())
+        {
+            m_heading->setToolTip(QString("%1 nodes, all shown").arg(total));
+        }
+        else
+        {
+            m_heading->setToolTip(
+                QString("Showing %1 of %2 nodes.\n\nHidden:\n  %3\n\n"
+                        "Change what is hidden in Config > App Settings > Node Display.")
+                    .arg(row).arg(total).arg(reasons.join("\n  ")));
+        }
     }
 
     // Restore the selection and scroll position from before the rebuild

@@ -103,6 +103,12 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode,
             sendToDevice(heartbeat);
         } });
 
+    m_positionRefreshTimer = new QTimer(this);
+    connect(m_positionRefreshTimer, &QTimer::timeout, this, &MainWindow::onPositionRefreshTick);
+    int refreshSecs = AppSettings::instance()->positionRefreshInterval();
+    if (refreshSecs > 0)
+        m_positionRefreshTimer->start(refreshSecs * 1000);
+
     // Connect signals
     connect(m_serial, &SerialConnection::connected,
             this, &MainWindow::onConnected);
@@ -1331,6 +1337,17 @@ void MainWindow::requestPosition(uint32_t nodeNum)
     statusBar()->showMessage("Position request sent...", 3000);
 }
 
+void MainWindow::onPositionRefreshTick()
+{
+    if (!isDeviceConnected())
+        return;
+
+    uint32_t myNode = m_nodeManager->myNodeNum();
+    QByteArray packet = m_protocol->createPositionRequestPacket(0xFFFFFFFF, myNode);
+    sendToDevice(packet);
+    qDebug() << "[MainWindow] Auto position refresh broadcast sent";
+}
+
 void MainWindow::updateNodeList()
 {
     m_nodeTable->setUpdatesEnabled(false);
@@ -1742,11 +1759,15 @@ void MainWindow::onSettingChanged(const QString &key, const QVariant &value)
     }
     else if (key == "map/tile_server")
     {
-        // Update map tile server
         if (m_mapWidget)
-        {
             m_mapWidget->setTileServer(value.toString());
-        }
+    }
+    else if (key == "map/position_refresh_interval")
+    {
+        int secs = value.toInt();
+        m_positionRefreshTimer->stop();
+        if (secs > 0)
+            m_positionRefreshTimer->start(secs * 1000);
     }
 }
 

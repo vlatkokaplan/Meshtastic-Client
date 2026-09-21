@@ -291,6 +291,16 @@ bool AppSettings::savePacketsToDb() const
     return value("packets/save_to_db", false).toBool();
 }
 
+int AppSettings::positionRefreshInterval() const
+{
+    return value("map/position_refresh_interval", 0).toInt();
+}
+
+void AppSettings::setPositionRefreshInterval(int seconds)
+{
+    setValue("map/position_refresh_interval", seconds);
+}
+
 void AppSettings::setSavePacketsToDb(bool enabled)
 {
     setValue("packets/save_to_db", enabled);

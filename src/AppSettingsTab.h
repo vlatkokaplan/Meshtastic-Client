@@ -38,6 +38,7 @@ private slots:
     void onAutoPingResponseChanged(bool checked);
     void onShowPacketFlowLinesChanged(bool checked);
     void onSavePacketsToDbChanged(bool checked);
+    void onPositionRefreshChanged(int index);
 
 private:
     // Connection settings
@@ -53,6 +54,7 @@ private:
     QCheckBox *m_nodeBlinkCheck;
     QSpinBox *m_nodeBlinkDurationSpin;
     QCheckBox *m_showPacketFlowLinesCheck;
+    QComboBox *m_positionRefreshCombo;
 
     // Message settings
     QCheckBox *m_autoPingResponseCheck;

@@ -72,6 +72,9 @@ public:
     bool savePacketsToDb() const;
     void setSavePacketsToDb(bool enabled);
 
+    int positionRefreshInterval() const;
+    void setPositionRefreshInterval(int seconds);
+
 signals:
     void settingChanged(const QString &key, const QVariant &value);
 

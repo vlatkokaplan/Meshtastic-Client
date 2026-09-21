@@ -88,6 +88,18 @@ void AppSettingsTab::setupUI()
     connect(m_showPacketFlowLinesCheck, &QCheckBox::toggled, this, &AppSettingsTab::onShowPacketFlowLinesChanged);
     mapLayout->addRow(m_showPacketFlowLinesCheck);
 
+    m_positionRefreshCombo = new QComboBox;
+    m_positionRefreshCombo->addItem("Off", 0);
+    m_positionRefreshCombo->addItem("30 seconds", 30);
+    m_positionRefreshCombo->addItem("1 minute", 60);
+    m_positionRefreshCombo->addItem("2 minutes", 120);
+    m_positionRefreshCombo->addItem("5 minutes", 300);
+    m_positionRefreshCombo->addItem("10 minutes", 600);
+    m_positionRefreshCombo->setToolTip("Periodically request fresh GPS positions from all nodes");
+    connect(m_positionRefreshCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &AppSettingsTab::onPositionRefreshChanged);
+    mapLayout->addRow("Auto refresh positions:", m_positionRefreshCombo);
+
     mainLayout->addWidget(mapGroup);
 
     // Messages Settings Group
@@ -219,6 +231,14 @@ void AppSettingsTab::loadSettings()
     m_nodeBlinkDurationSpin->setValue(settings->mapNodeBlinkDuration());
     m_showPacketFlowLinesCheck->setChecked(settings->showPacketFlowLines());
     m_autoPingResponseCheck->setChecked(settings->autoPingResponse());
+
+    int refreshSecs = settings->positionRefreshInterval();
+    for (int i = 0; i < m_positionRefreshCombo->count(); i++) {
+        if (m_positionRefreshCombo->itemData(i).toInt() == refreshSecs) {
+            m_positionRefreshCombo->setCurrentIndex(i);
+            break;
+        }
+    }
     m_darkThemeCheck->setChecked(settings->darkTheme());
     applyTheme(settings->darkTheme());
 
@@ -319,6 +339,12 @@ void AppSettingsTab::onShowPacketFlowLinesChanged(bool checked)
 void AppSettingsTab::onSavePacketsToDbChanged(bool checked)
 {
     AppSettings::instance()->setSavePacketsToDb(checked);
+}
+
+void AppSettingsTab::onPositionRefreshChanged(int index)
+{
+    int secs = m_positionRefreshCombo->itemData(index).toInt();
+    AppSettings::instance()->setPositionRefreshInterval(secs);
 }
 
 void AppSettingsTab::onExportNodesCsv()

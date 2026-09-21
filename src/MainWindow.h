@@ -64,6 +64,7 @@ private slots:
     void requestNodeInfo(uint32_t nodeNum);
     void requestTelemetry(uint32_t nodeNum);
     void requestPosition(uint32_t nodeNum);
+    void onPositionRefreshTick();
     void onSendMessage(const QString &text, uint32_t toNode, int channel);
     void onSendReaction(const QString &emoji, uint32_t toNode, int channel, uint32_t replyId);
     void onSettingChanged(const QString &key, const QVariant &value);
@@ -97,6 +98,7 @@ private:
     // Traceroute cooldown state
     QTimer *m_tracerouteCooldownTimer = nullptr;
     QLabel *m_tracerouteCooldownLabel = nullptr;
+    QTimer *m_positionRefreshTimer = nullptr;
     int m_tracerouteCooldownRemaining = 0;
     static const int TRACEROUTE_COOLDOWN_MS = 30000; // 30 seconds
 

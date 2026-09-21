@@ -206,6 +206,27 @@ void AppSettingsTab::setupUI()
 
     mainLayout->addWidget(exportGroup);
 
+    // Local Database Group
+    QGroupBox *localDbGroup = new QGroupBox("Local Database");
+    QVBoxLayout *localDbLayout = new QVBoxLayout(localDbGroup);
+
+    QLabel *clearNodeDbLabel = new QLabel(
+        "Remove every node stored on this PC. The node list is rebuilt from the "
+        "device's own node database on the next sync.");
+    clearNodeDbLabel->setWordWrap(true);
+    clearNodeDbLabel->setStyleSheet("color: #888; font-size: 11px;");
+    localDbLayout->addWidget(clearNodeDbLabel);
+
+    QHBoxLayout *clearNodeDbRow = new QHBoxLayout;
+    m_clearNodeDbBtn = new QPushButton("Clear Nodes && Resync");
+    m_clearNodeDbBtn->setToolTip("Delete all locally saved nodes, then re-download them from the device");
+    connect(m_clearNodeDbBtn, &QPushButton::clicked, this, &AppSettingsTab::onClearNodeDatabase);
+    clearNodeDbRow->addWidget(m_clearNodeDbBtn);
+    clearNodeDbRow->addStretch();
+    localDbLayout->addLayout(clearNodeDbRow);
+
+    mainLayout->addWidget(localDbGroup);
+
     // Spacer
     mainLayout->addStretch();
 
@@ -345,6 +366,11 @@ void AppSettingsTab::onPositionRefreshChanged(int index)
 {
     int secs = m_positionRefreshCombo->itemData(index).toInt();
     AppSettings::instance()->setPositionRefreshInterval(secs);
+}
+
+void AppSettingsTab::onClearNodeDatabase()
+{
+    emit clearNodeDatabaseRequested();
 }
 
 void AppSettingsTab::onExportNodesCsv()

@@ -741,6 +741,20 @@ bool Database::deleteNode(uint32_t nodeNum)
     return query.exec();
 }
 
+bool Database::deleteAllNodes()
+{
+    QSqlQuery query(m_db);
+
+    if (!query.exec("DELETE FROM nodes"))
+    {
+        qWarning() << "Failed to delete all nodes:" << query.lastError().text();
+        return false;
+    }
+
+    qDebug() << "Deleted all nodes from database";
+    return true;
+}
+
 int Database::nodeCount()
 {
     QSqlQuery query(m_db);

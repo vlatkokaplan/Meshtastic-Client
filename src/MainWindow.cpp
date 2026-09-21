@@ -456,6 +456,8 @@ void MainWindow::setupConfigTab()
                 this, &MainWindow::onExportNodes);
         connect(appSettings, &AppSettingsTab::exportMessagesRequested,
                 this, &MainWindow::onExportMessages);
+        connect(appSettings, &AppSettingsTab::clearNodeDatabaseRequested,
+                this, &MainWindow::onClearNodeDatabase);
     }
 }
 
@@ -1346,6 +1348,40 @@ void MainWindow::onPositionRefreshTick()
     QByteArray packet = m_protocol->createPositionRequestPacket(0xFFFFFFFF, myNode);
     sendToDevice(packet);
     qDebug() << "[MainWindow] Auto position refresh broadcast sent";
+}
+
+void MainWindow::onClearNodeDatabase()
+{
+    int savedNodes = m_database ? m_database->nodeCount() : 0;
+
+    QString detail = isDeviceConnected()
+        ? "The node list will be re-downloaded from the device immediately."
+        : "The node list will be re-downloaded the next time you connect.";
+
+    QMessageBox::StandardButton reply = QMessageBox::question(
+        this, "Clear Nodes",
+        QString("Delete all %1 node(s) saved on this PC?\n\nThis cannot be undone. %2")
+            .arg(savedNodes).arg(detail),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+
+    if (reply != QMessageBox::Yes)
+        return;
+
+    if (m_database)
+        m_database->deleteAllNodes();
+
+    // Drops the in-memory nodes and repaints the node list and map
+    m_nodeManager->clear();
+
+    if (isDeviceConnected())
+    {
+        statusBar()->showMessage("Nodes cleared, resyncing from device...", 5000);
+        requestConfig();
+    }
+    else
+    {
+        statusBar()->showMessage("Nodes cleared", 3000);
+    }
 }
 
 void MainWindow::updateNodeList()

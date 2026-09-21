@@ -18,6 +18,7 @@ public:
 signals:
     void exportNodesRequested(const QString &format);  // "csv" or "json"
     void exportMessagesRequested(const QString &format);
+    void clearNodeDatabaseRequested();
 
 private slots:
     void onExportNodesCsv();
@@ -39,6 +40,7 @@ private slots:
     void onShowPacketFlowLinesChanged(bool checked);
     void onSavePacketsToDbChanged(bool checked);
     void onPositionRefreshChanged(int index);
+    void onClearNodeDatabase();
 
 private:
     // Connection settings
@@ -75,6 +77,9 @@ private:
     QPushButton *m_exportNodesJsonBtn;
     QPushButton *m_exportMessagesCsvBtn;
     QPushButton *m_exportMessagesJsonBtn;
+
+    // Local database maintenance
+    QPushButton *m_clearNodeDbBtn;
 
     void setupUI();
     void loadSettings();

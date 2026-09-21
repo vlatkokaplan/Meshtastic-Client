@@ -17,6 +17,7 @@ bool Database::saveNodes(const QList<NodeInfo> &) { return false; }
 NodeInfo Database::loadNode(uint32_t)            { return {}; }
 QList<NodeInfo> Database::loadAllNodes()         { return {}; }
 bool Database::deleteNode(uint32_t)              { return false; }
+bool Database::deleteAllNodes()                  { return false; }
 int  Database::nodeCount()                       { return 0; }
 
 bool Database::saveMessage(const Message &)              { return false; }

@@ -28,6 +28,7 @@ public:
     NodeInfo loadNode(uint32_t nodeNum);
     QList<NodeInfo> loadAllNodes();
     bool deleteNode(uint32_t nodeNum);
+    bool deleteAllNodes();
     int nodeCount();
 
     // Message operations (for future use)

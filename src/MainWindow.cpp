@@ -158,6 +158,18 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode,
                 updateNodeList();
             });
 
+    // Open the last-used database straight away. The analyst views - Analytics
+    // and replay - work entirely on stored rows, and previously they were dead
+    // until a radio attached, which is backwards: reviewing history is most
+    // useful when away from the mesh. If a device does connect later,
+    // openDatabaseForNode() either reloads this same database or switches.
+    if (simulateScenario.isEmpty())
+    {
+        uint32_t lastNode = AppSettings::instance()->lastDatabaseNode();
+        if (lastNode != 0)
+            openDatabaseForNode(lastNode);
+    }
+
     updateStatusLabel();
 
     // Auto-connect if enabled (skip when running in simulation mode)
@@ -2033,6 +2045,8 @@ void MainWindow::openDatabaseForNode(uint32_t nodeNum)
         }
 
         refreshDbNodeCount();
+        if (!m_simulateMode)
+            AppSettings::instance()->setLastDatabaseNode(nodeNum);
         statusBar()->showMessage(QString("Database loaded: %1 nodes").arg(m_dbNodeCount), 3000);
     }
     else

@@ -22,6 +22,10 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext &context, con
     if (type == QtDebugMsg && debugEnabled)
     {
         fprintf(stdout, "[DEBUG] %s\n", msg.toLocal8Bit().constData());
+        // stdout is block-buffered when redirected to a file, so a quiet run
+        // shows nothing until 4KB has accumulated - which reads as "the app
+        // produced no output" when diagnosing.
+        fflush(stdout);
     }
 }
 

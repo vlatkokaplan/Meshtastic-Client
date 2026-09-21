@@ -84,6 +84,11 @@ public:
     int packetRetentionDays() const;
     void setPacketRetentionDays(int days);
 
+    // Node whose database was open last, so history can be browsed without a
+    // radio attached.
+    uint32_t lastDatabaseNode() const;
+    void setLastDatabaseNode(uint32_t nodeNum);
+
     bool hideNeverHeardNodes() const;
     void setHideNeverHeardNodes(bool hide);
 

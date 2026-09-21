@@ -318,6 +318,22 @@ int AppSettings::dataRetentionDays() const
     return value("db/retention_days", 90).toInt();
 }
 
+uint32_t AppSettings::lastDatabaseNode() const
+{
+    // Read as a string, not with an int default: value() coerces on the
+    // default's type, and a node number above INT_MAX - which is any id with
+    // the high bit set, so about half of them - fails QString::toInt() and
+    // comes back as 0.
+    bool ok = false;
+    const uint32_t n = value("db/last_node", QString()).toString().toUInt(&ok);
+    return ok ? n : 0;
+}
+
+void AppSettings::setLastDatabaseNode(uint32_t nodeNum)
+{
+    setValue("db/last_node", nodeNum);
+}
+
 int AppSettings::packetRetentionDays() const
 {
     return value("db/packet_retention_days", 7).toInt();

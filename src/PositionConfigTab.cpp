@@ -1,4 +1,5 @@
 #include "PositionConfigTab.h"
+#include "Theme.h"
 #include "DeviceConfig.h"
 
 #include <QTimer>
@@ -109,7 +110,7 @@ void PositionConfigTab::setupUI()
     QHBoxLayout *bottomLayout = new QHBoxLayout;
 
     m_statusLabel = new QLabel("Waiting for device config...");
-    m_statusLabel->setStyleSheet("color: gray;");
+    m_statusLabel->setStyleSheet(Theme::statusLabelStyle());
     bottomLayout->addWidget(m_statusLabel);
 
     bottomLayout->addStretch();

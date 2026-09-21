@@ -1,4 +1,5 @@
 #include "AppSettingsTab.h"
+#include "Theme.h"
 #include "AppSettings.h"
 
 #include <QApplication>
@@ -214,7 +215,7 @@ void AppSettingsTab::setupUI()
         "Remove every node stored on this PC. The node list is rebuilt from the "
         "device's own node database on the next sync.");
     clearNodeDbLabel->setWordWrap(true);
-    clearNodeDbLabel->setStyleSheet("color: #888; font-size: 11px;");
+    clearNodeDbLabel->setStyleSheet(Theme::mutedLabelStyle());
     localDbLayout->addWidget(clearNodeDbLabel);
 
     QFormLayout *retentionForm = new QFormLayout;
@@ -245,7 +246,7 @@ void AppSettingsTab::setupUI()
 
     // Version info at bottom
     QLabel *versionLabel = new QLabel("Meshtastic Vibe Client v0.1.0");
-    versionLabel->setStyleSheet("color: #888; font-size: 11px;");
+    versionLabel->setStyleSheet(Theme::mutedLabelStyle());
     versionLabel->setAlignment(Qt::AlignCenter);
     mainLayout->addWidget(versionLabel);
 }
@@ -415,127 +416,5 @@ void AppSettingsTab::onExportMessagesJson()
 
 void AppSettingsTab::applyTheme(bool dark)
 {
-    if (dark) {
-        qApp->setStyleSheet(R"(
-            QMainWindow, QWidget {
-                background-color: #1e1e1e;
-                color: #d4d4d4;
-            }
-            QTabWidget::pane {
-                border: 1px solid #3c3c3c;
-                background-color: #252526;
-            }
-            QTabBar::tab {
-                background-color: #2d2d2d;
-                color: #d4d4d4;
-                padding: 8px 16px;
-                border: 1px solid #3c3c3c;
-            }
-            QTabBar::tab:selected {
-                background-color: #1e1e1e;
-                border-bottom-color: #1e1e1e;
-            }
-            QTableWidget, QListWidget, QTreeWidget {
-                background-color: #252526;
-                color: #d4d4d4;
-                border: 1px solid #3c3c3c;
-                gridline-color: #3c3c3c;
-            }
-            QTableWidget::item, QListWidget::item, QTreeWidget::item {
-                color: #d4d4d4;
-            }
-            QTableWidget::item:selected, QListWidget::item:selected, QTreeWidget::item:selected {
-                background-color: #094771;
-            }
-            QHeaderView::section {
-                background-color: #2d2d2d;
-                color: #d4d4d4;
-                border: 1px solid #3c3c3c;
-                padding: 4px;
-            }
-            QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {
-                background-color: #3c3c3c;
-                color: #d4d4d4;
-                border: 1px solid #555;
-                padding: 4px;
-                border-radius: 3px;
-            }
-            QPushButton {
-                background-color: #0e639c;
-                color: white;
-                border: none;
-                padding: 6px 16px;
-                border-radius: 3px;
-            }
-            QPushButton:hover {
-                background-color: #1177bb;
-            }
-            QPushButton:pressed {
-                background-color: #094771;
-            }
-            QPushButton:disabled {
-                background-color: #3c3c3c;
-                color: #888;
-            }
-            QGroupBox {
-                border: 1px solid #3c3c3c;
-                border-radius: 4px;
-                margin-top: 8px;
-                padding-top: 8px;
-                color: #d4d4d4;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-            QCheckBox, QRadioButton {
-                color: #d4d4d4;
-            }
-            QLabel {
-                color: #d4d4d4;
-            }
-            QToolBar {
-                background-color: #2d2d2d;
-                border: none;
-                spacing: 4px;
-            }
-            QStatusBar {
-                background-color: #007acc;
-                color: white;
-            }
-            QMenuBar {
-                background-color: #2d2d2d;
-                color: #d4d4d4;
-            }
-            QMenuBar::item:selected {
-                background-color: #094771;
-            }
-            QMenu {
-                background-color: #252526;
-                color: #d4d4d4;
-                border: 1px solid #3c3c3c;
-            }
-            QMenu::item:selected {
-                background-color: #094771;
-            }
-            QScrollBar:vertical {
-                background-color: #1e1e1e;
-                width: 12px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #5a5a5a;
-                border-radius: 4px;
-                min-height: 20px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background-color: #787878;
-            }
-            QSplitter::handle {
-                background-color: #3c3c3c;
-            }
-        )");
-    } else {
-        qApp->setStyleSheet("");  // Reset to default light theme
-    }
+    Theme::apply(dark);
 }

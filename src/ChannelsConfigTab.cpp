@@ -1,4 +1,5 @@
 #include "ChannelsConfigTab.h"
+#include "Theme.h"
 #include "DeviceConfig.h"
 
 #include <QDebug>
@@ -60,7 +61,7 @@ void ChannelsConfigTab::setupUI()
     QVBoxLayout *phLayout = new QVBoxLayout(m_placeholderWidget);
     QLabel *phLabel = new QLabel("Select a channel to edit");
     phLabel->setAlignment(Qt::AlignCenter);
-    phLabel->setStyleSheet("color: gray;");
+    phLabel->setStyleSheet(Theme::statusLabelStyle());
     phLayout->addWidget(phLabel);
     m_stackedWidget->addWidget(m_placeholderWidget);
 
@@ -109,7 +110,7 @@ void ChannelsConfigTab::setupUI()
 
     QLabel *pskHint = new QLabel("Use 'AQ==' for the default key, or generate a unique key for private channels.");
     pskHint->setWordWrap(true);
-    pskHint->setStyleSheet("color: gray; font-size: 10px;");
+    pskHint->setStyleSheet(Theme::mutedLabelStyle(10));
     pskLayout->addWidget(pskHint);
 
     editorLayout->addWidget(pskGroup);
@@ -132,7 +133,7 @@ void ChannelsConfigTab::setupUI()
     QHBoxLayout *bottomLayout = new QHBoxLayout;
 
     m_statusLabel = new QLabel;
-    m_statusLabel->setStyleSheet("color: gray;");
+    m_statusLabel->setStyleSheet(Theme::statusLabelStyle());
     bottomLayout->addWidget(m_statusLabel);
 
     bottomLayout->addStretch();
@@ -217,7 +218,7 @@ void ChannelsConfigTab::updateEditorFromConfig(int index)
     m_downlinkCheck->setChecked(ch.downlinkEnabled);
 
     m_statusLabel->setText(QString("Editing channel %1").arg(index));
-    m_statusLabel->setStyleSheet("color: gray;");
+    m_statusLabel->setStyleSheet(Theme::statusLabelStyle());
 }
 
 void ChannelsConfigTab::notifySaved()
@@ -395,7 +396,7 @@ void ChannelsConfigTab::onShowQrClicked()
     QLabel *urlLabel = new QLabel(url);
     urlLabel->setWordWrap(true);
     urlLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    urlLabel->setStyleSheet("color: gray; font-size: 10px; margin-top: 8px;");
+    urlLabel->setStyleSheet(Theme::mutedLabelStyle(10) + "margin-top: 8px;");
     layout->addWidget(urlLabel);
 
     QPushButton *copyButton = new QPushButton("Copy URL");

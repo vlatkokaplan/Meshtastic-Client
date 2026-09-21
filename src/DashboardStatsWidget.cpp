@@ -1,4 +1,6 @@
 #include "DashboardStatsWidget.h"
+#include "Theme.h"
+#include <QSizePolicy>
 #include "NodeManager.h"
 #include "DeviceConfig.h"
 #include <QFrame>
@@ -30,35 +32,75 @@ DashboardStatsWidget::DashboardStatsWidget(NodeManager *nodeManager, DeviceConfi
             this, &DashboardStatsWidget::onDeviceConfigChanged);
 }
 
+
+namespace {
+
+// A thin, flush metric bar. Colour comes from Theme so light/dark stay in sync.
+QString meterStyle(const QColor &fill)
+{
+    const auto &p = Theme::palette();
+    return QString(
+        "QProgressBar {"
+        "  border: none;"
+        "  border-radius: 3px;"
+        "  background-color: %1;"
+        "  height: 7px;"
+        "  text-align: center;"
+        "}"
+        "QProgressBar::chunk {"
+        "  border-radius: 3px;"
+        "  background-color: %2;"
+        "}")
+        // The track must read against the panel in both modes: a dark-on-dark
+        // track disappears entirely at 0%.
+        .arg(Theme::isDark() ? p.borderStrong.name() : p.border.name(), fill.name());
+}
+
+QString captionStyle()
+{
+    return QString("color: %1; font-size: 11px;").arg(Theme::palette().textMuted.name());
+}
+
+QString valueStyle()
+{
+    return QString("color: %1; font-size: 11px; font-weight: 600;").arg(Theme::palette().text.name());
+}
+
+} // namespace
+
 void DashboardStatsWidget::setupUI()
 {
     auto *mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(4, 4, 4, 4);
-    mainLayout->setSpacing(0);
+    mainLayout->setContentsMargins(Theme::Space::md, Theme::Space::md,
+                                  Theme::Space::md, Theme::Space::md);
+    mainLayout->setSpacing(Theme::Space::md);
 
     // --- Section 1: Identity ---
     auto *identityLayout = new QGridLayout;
-    identityLayout->setContentsMargins(4, 4, 4, 4);
-    identityLayout->setSpacing(2);
+    identityLayout->setContentsMargins(0, 0, 0, 0);
+    identityLayout->setSpacing(Theme::Space::xs);
 
     m_nameLabel = new QLabel("--");
-    m_nameLabel->setStyleSheet("font-weight: bold;");
+    m_nameLabel->setStyleSheet(QString("font-size: 15px; font-weight: 700; color: %1;")
+                                   .arg(Theme::palette().text.name()));
     m_hwModelLabel = new QLabel;
-    m_hwModelLabel->setAlignment(Qt::AlignRight);
+    m_hwModelLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_hwModelLabel->setStyleSheet(captionStyle());
     m_nodeIdLabel = new QLabel;
-    m_nodeIdLabel->setStyleSheet("color: gray; font-size: 11px;");
+    m_nodeIdLabel->setStyleSheet(QString("color: %1; font-size: 11px; font-family: monospace;")
+                                     .arg(Theme::palette().textMuted.name()));
     m_fwVersionLabel = new QLabel;
     m_fwVersionLabel->setAlignment(Qt::AlignRight);
-    m_fwVersionLabel->setStyleSheet("color: gray; font-size: 11px;");
+    m_fwVersionLabel->setStyleSheet(captionStyle());
 
     m_checkFirmwareButton = new QPushButton("Check Updates");
-    m_checkFirmwareButton->setFixedHeight(20);
-    m_checkFirmwareButton->setStyleSheet("font-size: 10px; padding: 1px 6px;");
+    m_checkFirmwareButton->setStyleSheet("font-size: 11px; padding: 4px 10px;");
+    m_checkFirmwareButton->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
     m_checkFirmwareButton->setToolTip("Check for firmware updates on GitHub");
     connect(m_checkFirmwareButton, &QPushButton::clicked, this, &DashboardStatsWidget::onCheckFirmware);
 
     m_firmwareStatusLabel = new QLabel;
-    m_firmwareStatusLabel->setStyleSheet("font-size: 10px;");
+    m_firmwareStatusLabel->setStyleSheet(captionStyle());
     m_firmwareStatusLabel->setAlignment(Qt::AlignRight);
     m_firmwareStatusLabel->hide();
 
@@ -73,41 +115,33 @@ void DashboardStatsWidget::setupUI()
     // Separator
     auto *sep1 = new QFrame;
     sep1->setFrameShape(QFrame::HLine);
-    sep1->setFrameShadow(QFrame::Sunken);
+    sep1->setFrameShadow(QFrame::Plain);
+    sep1->setFixedHeight(1);
+    sep1->setStyleSheet(QString("background-color: %1; border: none;")
+                            .arg(Theme::palette().border.name()));
     mainLayout->addWidget(sep1);
 
     // --- Section 2: Telemetry ---
     auto *telemetryLayout = new QGridLayout;
-    telemetryLayout->setContentsMargins(4, 4, 4, 4);
-    telemetryLayout->setSpacing(2);
-
-    // Progress bar stylesheet (palette-aware base colors)
-    QString barStyle =
-        "QProgressBar {"
-        "  border: 1px solid palette(mid);"
-        "  border-radius: 3px;"
-        "  text-align: center;"
-        "  height: 14px;"
-        "  background: palette(base);"
-        "}"
-        "QProgressBar::chunk {"
-        "  border-radius: 2px;"
-        "}";
+    telemetryLayout->setContentsMargins(0, 0, 0, 0);
+    telemetryLayout->setVerticalSpacing(Theme::Space::sm);
+    telemetryLayout->setHorizontalSpacing(Theme::Space::md);
 
     // Battery row
     auto *battLabel = new QLabel("Battery");
-    battLabel->setStyleSheet("font-size: 11px;");
+    battLabel->setStyleSheet(captionStyle());
     m_batteryBar = new QProgressBar;
     m_batteryBar->setRange(0, 100);
     m_batteryBar->setValue(0);
     m_batteryBar->setTextVisible(false);
-    m_batteryBar->setFixedHeight(14);
-    m_batteryBar->setStyleSheet(barStyle + "QProgressBar::chunk { background: #4caf50; }");
+    m_batteryBar->setFixedHeight(7);
+    m_batteryBar->setStyleSheet(meterStyle(Theme::palette().success));
     m_batteryPctLabel = new QLabel("--%");
     m_batteryPctLabel->setAlignment(Qt::AlignRight);
-    m_batteryPctLabel->setFixedWidth(40);
+    m_batteryPctLabel->setFixedWidth(42);
+    m_batteryPctLabel->setStyleSheet(valueStyle());
     m_voltageLabel = new QLabel;
-    m_voltageLabel->setStyleSheet("color: gray; font-size: 11px;");
+    m_voltageLabel->setStyleSheet(captionStyle());
 
     telemetryLayout->addWidget(battLabel, 0, 0);
     telemetryLayout->addWidget(m_batteryBar, 0, 1);
@@ -116,16 +150,17 @@ void DashboardStatsWidget::setupUI()
 
     // Channel utilization row
     auto *chLabel = new QLabel("Ch Util");
-    chLabel->setStyleSheet("font-size: 11px;");
+    chLabel->setStyleSheet(captionStyle());
     m_chUtilBar = new QProgressBar;
     m_chUtilBar->setRange(0, 1000);
     m_chUtilBar->setValue(0);
     m_chUtilBar->setTextVisible(false);
-    m_chUtilBar->setFixedHeight(14);
-    m_chUtilBar->setStyleSheet(barStyle + "QProgressBar::chunk { background: #2196f3; }");
+    m_chUtilBar->setFixedHeight(7);
+    m_chUtilBar->setStyleSheet(meterStyle(Theme::palette().info));
     m_chUtilLabel = new QLabel("--%");
     m_chUtilLabel->setAlignment(Qt::AlignRight);
-    m_chUtilLabel->setFixedWidth(40);
+    m_chUtilLabel->setFixedWidth(42);
+    m_chUtilLabel->setStyleSheet(valueStyle());
 
     telemetryLayout->addWidget(chLabel, 2, 0);
     telemetryLayout->addWidget(m_chUtilBar, 2, 1);
@@ -133,16 +168,17 @@ void DashboardStatsWidget::setupUI()
 
     // Air TX utilization row
     auto *airLabel = new QLabel("Air TX");
-    airLabel->setStyleSheet("font-size: 11px;");
+    airLabel->setStyleSheet(captionStyle());
     m_airTxBar = new QProgressBar;
     m_airTxBar->setRange(0, 1000);
     m_airTxBar->setValue(0);
     m_airTxBar->setTextVisible(false);
-    m_airTxBar->setFixedHeight(14);
-    m_airTxBar->setStyleSheet(barStyle + "QProgressBar::chunk { background: #ff9800; }");
+    m_airTxBar->setFixedHeight(7);
+    m_airTxBar->setStyleSheet(meterStyle(Theme::palette().warning));
     m_airTxLabel = new QLabel("--%");
     m_airTxLabel->setAlignment(Qt::AlignRight);
-    m_airTxLabel->setFixedWidth(40);
+    m_airTxLabel->setFixedWidth(42);
+    m_airTxLabel->setStyleSheet(valueStyle());
 
     telemetryLayout->addWidget(airLabel, 3, 0);
     telemetryLayout->addWidget(m_airTxBar, 3, 1);
@@ -150,9 +186,9 @@ void DashboardStatsWidget::setupUI()
 
     // Environment row
     m_envTitleLabel = new QLabel("Environ");
-    m_envTitleLabel->setStyleSheet("font-size: 11px;");
+    m_envTitleLabel->setStyleSheet(captionStyle());
     m_envLabel = new QLabel;
-    m_envLabel->setStyleSheet("font-size: 11px;");
+    m_envLabel->setStyleSheet(valueStyle());
     m_envLabel->setAlignment(Qt::AlignRight);
     telemetryLayout->addWidget(m_envTitleLabel, 4, 0);
     telemetryLayout->addWidget(m_envLabel, 4, 1, 1, 2);
@@ -161,9 +197,9 @@ void DashboardStatsWidget::setupUI()
 
     // Uptime row
     m_uptimeTitleLabel = new QLabel("Uptime");
-    m_uptimeTitleLabel->setStyleSheet("font-size: 11px;");
+    m_uptimeTitleLabel->setStyleSheet(captionStyle());
     m_uptimeLabel = new QLabel;
-    m_uptimeLabel->setStyleSheet("font-size: 11px;");
+    m_uptimeLabel->setStyleSheet(valueStyle());
     m_uptimeLabel->setAlignment(Qt::AlignRight);
     telemetryLayout->addWidget(m_uptimeTitleLabel, 5, 0);
     telemetryLayout->addWidget(m_uptimeLabel, 5, 1, 1, 2);
@@ -172,9 +208,9 @@ void DashboardStatsWidget::setupUI()
 
     // Signal row
     m_signalTitleLabel = new QLabel("Signal");
-    m_signalTitleLabel->setStyleSheet("font-size: 11px;");
+    m_signalTitleLabel->setStyleSheet(captionStyle());
     m_signalLabel = new QLabel;
-    m_signalLabel->setStyleSheet("font-size: 11px;");
+    m_signalLabel->setStyleSheet(valueStyle());
     m_signalLabel->setAlignment(Qt::AlignRight);
     telemetryLayout->addWidget(m_signalTitleLabel, 6, 0);
     telemetryLayout->addWidget(m_signalLabel, 6, 1, 1, 2);
@@ -186,19 +222,23 @@ void DashboardStatsWidget::setupUI()
     // Separator
     auto *sep2 = new QFrame;
     sep2->setFrameShape(QFrame::HLine);
-    sep2->setFrameShadow(QFrame::Sunken);
+    sep2->setFrameShadow(QFrame::Plain);
+    sep2->setFixedHeight(1);
+    sep2->setStyleSheet(QString("background-color: %1; border: none;")
+                            .arg(Theme::palette().border.name()));
     mainLayout->addWidget(sep2);
 
     // --- Section 3: Config ---
     auto *configLayout = new QGridLayout;
-    configLayout->setContentsMargins(4, 4, 4, 4);
-    configLayout->setSpacing(2);
+    configLayout->setContentsMargins(0, 0, 0, 0);
+    configLayout->setVerticalSpacing(Theme::Space::xs);
+    configLayout->setHorizontalSpacing(Theme::Space::md);
 
     auto makeLabelPair = [&](int row, const QString &title) -> QLabel * {
         auto *titleLbl = new QLabel(title);
-        titleLbl->setStyleSheet("font-size: 11px; color: gray;");
+        titleLbl->setStyleSheet(captionStyle());
         auto *valueLbl = new QLabel("--");
-        valueLbl->setStyleSheet("font-size: 11px;");
+        valueLbl->setStyleSheet(valueStyle());
         valueLbl->setAlignment(Qt::AlignRight);
         configLayout->addWidget(titleLbl, row, 0);
         configLayout->addWidget(valueLbl, row, 1);
@@ -277,28 +317,7 @@ void DashboardStatsWidget::updateTelemetry()
         m_batteryBar->setValue(batt);
         m_batteryPctLabel->setText(QString("%1%").arg(batt));
 
-        // Color-code battery bar
-        QString color;
-        if (batt < 20)
-            color = "#f44336"; // red
-        else if (batt < 50)
-            color = "#ff9800"; // orange
-        else
-            color = "#4caf50"; // green
-
-        QString barStyle =
-            "QProgressBar {"
-            "  border: 1px solid palette(mid);"
-            "  border-radius: 3px;"
-            "  text-align: center;"
-            "  height: 14px;"
-            "  background: palette(base);"
-            "}"
-            "QProgressBar::chunk {"
-            "  border-radius: 2px;"
-            "  background: " + color + ";"
-            "}";
-        m_batteryBar->setStyleSheet(barStyle);
+        m_batteryBar->setStyleSheet(meterStyle(Theme::batteryColor(batt, node.isExternalPower)));
     } else {
         m_batteryBar->setValue(0);
         m_batteryPctLabel->setText("--%");
@@ -401,7 +420,7 @@ void DashboardStatsWidget::onCheckFirmware()
 {
     m_checkFirmwareButton->setEnabled(false);
     m_firmwareStatusLabel->setText("Checking...");
-    m_firmwareStatusLabel->setStyleSheet("font-size: 10px; color: gray;");
+    m_firmwareStatusLabel->setStyleSheet(captionStyle());
     m_firmwareStatusLabel->show();
 
     QNetworkRequest request(QUrl("https://api.github.com/repos/meshtastic/firmware/releases/latest"));
@@ -415,7 +434,7 @@ void DashboardStatsWidget::onCheckFirmware()
 
         if (reply->error() != QNetworkReply::NoError) {
             m_firmwareStatusLabel->setText("Check failed");
-            m_firmwareStatusLabel->setStyleSheet("font-size: 10px; color: red;");
+            m_firmwareStatusLabel->setStyleSheet(QString("font-size: 11px; color: %1;").arg(Theme::palette().danger.name()));
             return;
         }
 
@@ -425,7 +444,7 @@ void DashboardStatsWidget::onCheckFirmware()
 
         if (latestVersion.isEmpty()) {
             m_firmwareStatusLabel->setText("Could not parse version");
-            m_firmwareStatusLabel->setStyleSheet("font-size: 10px; color: red;");
+            m_firmwareStatusLabel->setStyleSheet(QString("font-size: 11px; color: %1;").arg(Theme::palette().danger.name()));
             return;
         }
 
@@ -437,15 +456,15 @@ void DashboardStatsWidget::onCheckFirmware()
 
         if (currentNorm.isEmpty()) {
             m_firmwareStatusLabel->setText(QString("Latest: %1").arg(latestVersion));
-            m_firmwareStatusLabel->setStyleSheet("font-size: 10px; color: gray;");
+            m_firmwareStatusLabel->setStyleSheet(captionStyle());
         } else if (currentNorm == latestNorm) {
             m_firmwareStatusLabel->setText("Up to date");
-            m_firmwareStatusLabel->setStyleSheet("font-size: 10px; color: #4caf50;");
+            m_firmwareStatusLabel->setStyleSheet(QString("font-size: 11px; color: %1;").arg(Theme::palette().success.name()));
         } else {
             m_firmwareStatusLabel->setText(QString("<a href=\"%1\">Update: %2</a>").arg(downloadUrl, latestVersion));
             m_firmwareStatusLabel->setTextFormat(Qt::RichText);
             m_firmwareStatusLabel->setOpenExternalLinks(true);
-            m_firmwareStatusLabel->setStyleSheet("font-size: 10px; color: #ff9800;");
+            m_firmwareStatusLabel->setStyleSheet(QString("font-size: 11px; color: %1;").arg(Theme::palette().warning.name()));
         }
         m_firmwareStatusLabel->show();
     });

@@ -1,4 +1,5 @@
 #include "DeviceConfigTab.h"
+#include "Theme.h"
 #include "DeviceConfig.h"
 
 #include <QTimer>
@@ -114,7 +115,7 @@ void DeviceConfigTab::setupUI()
 
     m_factoryResetButton = new QPushButton("Factory Reset");
     m_factoryResetButton->setToolTip("Reset device to factory defaults (WARNING: erases all settings!)");
-    m_factoryResetButton->setStyleSheet("background-color: #ffcccc;");
+    m_factoryResetButton->setProperty("danger", true);  // styled by Theme
     connect(m_factoryResetButton, &QPushButton::clicked, this, &DeviceConfigTab::onFactoryResetClicked);
     actionsLayout->addWidget(m_factoryResetButton);
 
@@ -125,7 +126,7 @@ void DeviceConfigTab::setupUI()
     QHBoxLayout *bottomLayout = new QHBoxLayout;
 
     m_statusLabel = new QLabel("Waiting for device config...");
-    m_statusLabel->setStyleSheet("color: gray;");
+    m_statusLabel->setStyleSheet(Theme::statusLabelStyle());
     bottomLayout->addWidget(m_statusLabel);
 
     bottomLayout->addStretch();

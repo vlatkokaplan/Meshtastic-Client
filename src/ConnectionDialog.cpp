@@ -1,4 +1,5 @@
 #include "ConnectionDialog.h"
+#include "Theme.h"
 #include "BluetoothConnection.h"
 #include "SerialConnection.h"
 #include "AppSettings.h"
@@ -85,7 +86,7 @@ void ConnectionDialog::setupTcpTab()
         m_tcpHostEdit->setText(lastHost);
 
     QLabel *hint = new QLabel("Default port is 4403 if not specified.");
-    hint->setStyleSheet("color: gray; font-size: 11px;");
+    hint->setStyleSheet(Theme::mutedLabelStyle());
     layout->addWidget(hint);
 
     layout->addStretch();

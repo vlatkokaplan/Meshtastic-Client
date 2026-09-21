@@ -1,4 +1,5 @@
 #include "SignalScannerWidget.h"
+#include "Theme.h"
 #include "NodeManager.h"
 #include "MeshtasticProtocol.h"
 #include <QVBoxLayout>
@@ -300,7 +301,8 @@ void SignalScannerWidget::setupUI()
 
     // Last hop warning label (shown when node is >0 hops away)
     m_lastHopWarningLabel = new QLabel("Note: Signal shows last hop only, not the distant node's actual signal.");
-    m_lastHopWarningLabel->setStyleSheet("QLabel { color: #ff9800; font-style: italic; padding: 4px; }");
+    m_lastHopWarningLabel->setStyleSheet(QString("QLabel { color: %1; font-style: italic; padding: 4px; }")
+                                             .arg(Theme::palette().warning.name()));
     m_lastHopWarningLabel->setVisible(false);
     mainLayout->addWidget(m_lastHopWarningLabel);
 

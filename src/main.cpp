@@ -3,6 +3,8 @@
 #include <QIcon>
 #include <QLoggingCategory>
 #include "MainWindow.h"
+#include "Theme.h"
+#include "AppSettings.h"
 
 // Custom message handler for debug logging
 static bool debugEnabled = false;
@@ -30,6 +32,9 @@ int main(int argc, char *argv[])
     app.setApplicationName("Meshtastic Client");
     app.setApplicationVersion("1.0.0");
     app.setOrganizationName("Meshtastic");
+
+    // Theme before any widget is constructed, so nothing flashes unstyled
+    Theme::apply(AppSettings::instance()->darkTheme());
 
     // Parse command line arguments
     QCommandLineParser parser;

@@ -1,4 +1,5 @@
 #include "TelemetryGraphWidget.h"
+#include "Theme.h"
 #include "NodeManager.h"
 #include "MeshtasticProtocol.h"
 #include <QVBoxLayout>
@@ -302,7 +303,7 @@ void TelemetryGraphWidget::setupUI()
 
     // Stats label
     m_statsLabel = new QLabel;
-    m_statsLabel->setStyleSheet("color: gray;");
+    m_statsLabel->setStyleSheet(Theme::statusLabelStyle());
     chartLayout->addWidget(m_statsLabel);
 
     mainLayout->addWidget(chartGroup, 1);

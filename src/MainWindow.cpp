@@ -14,6 +14,7 @@
 #include "DeviceConfig.h"
 #include "AppSettings.h"
 #include "AppSettingsTab.h"
+#include "Theme.h"
 #include "TopologyWidget.h"
 #include "ConnectionDialog.h"
 #include "SimulationConnection.h"
@@ -288,7 +289,8 @@ void MainWindow::setupUI()
 
     // Traceroute cooldown text label (hidden by default)
     m_tracerouteCooldownLabel = new QLabel;
-    m_tracerouteCooldownLabel->setStyleSheet("QLabel { color: #ff6f00; font-weight: bold; padding-right: 10px; }");
+    m_tracerouteCooldownLabel->setStyleSheet(QString("QLabel { color: %1; font-weight: bold; padding-right: 10px; }")
+                                                 .arg(Theme::palette().warning.name()));
     m_tracerouteCooldownLabel->setMaximumWidth(180);
     m_tracerouteCooldownLabel->setVisible(false);
     statusBar()->addPermanentWidget(m_tracerouteCooldownLabel);
@@ -304,8 +306,9 @@ void MainWindow::setupToolbar()
     QToolBar *toolbar = addToolBar("Main");
     toolbar->setMovable(false);
 
-    m_connectButton = new QPushButton("Connect...");
+    m_connectButton = new QPushButton("Connect");
     m_connectButton->setToolTip("Open connection dialog (Serial, TCP, or Bluetooth)");
+    m_connectButton->setProperty("accent", true);  // primary action
     connect(m_connectButton, &QPushButton::clicked, this, &MainWindow::showConnectionDialog);
     toolbar->addWidget(m_connectButton);
 
@@ -316,15 +319,61 @@ void MainWindow::setupToolbar()
 
     toolbar->addSeparator();
 
-    m_rebootButton = new QPushButton("Reboot Device");
-    m_rebootButton->setEnabled(false);
-    m_rebootButton->setToolTip("Reboot the connected Meshtastic device");
-    connect(m_rebootButton, &QPushButton::clicked, this, &MainWindow::rebootDevice);
-    toolbar->addWidget(m_rebootButton);
-
     QPushButton *configButton = new QPushButton("Request Config");
     connect(configButton, &QPushButton::clicked, this, &MainWindow::requestConfig);
     toolbar->addWidget(configButton);
+
+    m_rebootButton = new QPushButton("Reboot Device");
+    m_rebootButton->setEnabled(false);
+    m_rebootButton->setToolTip("Reboot the connected Meshtastic device");
+    m_rebootButton->setProperty("danger", true);  // destructive action
+    connect(m_rebootButton, &QPushButton::clicked, this, &MainWindow::rebootDevice);
+    toolbar->addWidget(m_rebootButton);
+
+    // Push the connection indicator to the right-hand end of the toolbar
+    QWidget *spacer = new QWidget;
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    toolbar->addWidget(spacer);
+
+    m_connectionPill = new QLabel;
+    m_connectionPill->setTextFormat(Qt::RichText);
+    m_connectionPill->setContentsMargins(0, 0, Theme::Space::md, 0);
+    toolbar->addWidget(m_connectionPill);
+
+    updateConnectionPill();
+}
+
+// A coloured dot plus a short label: connection state readable at a glance,
+// without parsing the status bar text.
+void MainWindow::updateConnectionPill()
+{
+    if (!m_connectionPill)
+        return;
+
+    const auto &p = Theme::palette();
+    QColor dot;
+    QString text;
+
+    if (m_tcp->isReconnecting())
+    {
+        dot = p.warning;
+        text = "Reconnecting";
+    }
+    else if (isDeviceConnected())
+    {
+        dot = p.success;
+        text = connectedDeviceName();
+    }
+    else
+    {
+        dot = p.textDisabled;
+        text = "Disconnected";
+    }
+
+    m_connectionPill->setText(
+        QString("<span style='color:%1; font-size:15px;'>&#9679;</span>"
+                "<span style='color:%2; font-size:12px;'> %3</span>")
+            .arg(dot.name(), p.textMuted.name(), text.toHtmlEscaped()));
 }
 
 void MainWindow::setupMapTab()
@@ -343,13 +392,18 @@ void MainWindow::setupMapTab()
     QWidget *sidebar = new QWidget;
     QVBoxLayout *sidebarLayout = new QVBoxLayout(sidebar);
     sidebarLayout->setContentsMargins(0, 0, 0, 0);
+    sidebarLayout->setSpacing(Theme::Space::sm);
 
     // Dashboard stats panel
     m_dashboardStats = new DashboardStatsWidget(m_nodeManager, m_configWidget->deviceConfig());
     sidebarLayout->addWidget(m_dashboardStats);
 
-    QLabel *nodesLabel = new QLabel("Nodes");
-    nodesLabel->setStyleSheet("font-weight: bold; padding: 5px;");
+    QLabel *nodesLabel = new QLabel("NODES");
+    nodesLabel->setStyleSheet(QString("font-weight: 700; font-size: 11px; letter-spacing: 1px;"
+                                      "color: %1; padding: %2px %3px 0 %3px;")
+                                  .arg(Theme::palette().textMuted.name())
+                                  .arg(Theme::Space::sm)
+                                  .arg(Theme::Space::md));
     sidebarLayout->addWidget(nodesLabel);
 
     // Node search filter
@@ -364,17 +418,29 @@ void MainWindow::setupMapTab()
     connect(m_nodeSearchEdit, &QLineEdit::textChanged, this, [](const QString &text) {
         AppSettings::instance()->setValue("nodeSearchText", text);
     });
+    m_nodeSearchEdit->setContentsMargins(Theme::Space::md, 0, Theme::Space::md, 0);
     sidebarLayout->addWidget(m_nodeSearchEdit);
 
     // Node table setup
     m_nodeTable = new QTableWidget;
     m_nodeTable->setColumnCount(6);
     m_nodeTable->setHorizontalHeaderLabels({"Name", "Short", "Role", "Last Heard", "Battery", "Signal"});
-    m_nodeTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    QHeaderView *nodeHeader = m_nodeTable->horizontalHeader();
+    nodeHeader->setSectionResizeMode(QHeaderView::ResizeToContents);
+    nodeHeader->setSectionResizeMode(0, QHeaderView::Stretch);  // Name takes the slack
+    nodeHeader->setMinimumSectionSize(52);
     m_nodeTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_nodeTable->setSelectionMode(QAbstractItemView::SingleSelection);
     m_nodeTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_nodeTable->setSortingEnabled(true);
     m_nodeTable->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_nodeTable->setShowGrid(false);
+    m_nodeTable->setAlternatingRowColors(true);
+    m_nodeTable->setFrameShape(QFrame::NoFrame);
+    m_nodeTable->verticalHeader()->setVisible(false);       // row numbers add nothing here
+    m_nodeTable->verticalHeader()->setDefaultSectionSize(28);
+    m_nodeTable->horizontalHeader()->setHighlightSections(false);
+    m_nodeTable->horizontalHeader()->setFixedHeight(28);
     // Restore saved sort column/order
     {
         int col   = AppSettings::instance()->value("nodeSortColumn", -1).toInt();
@@ -1391,6 +1457,26 @@ void MainWindow::onClearNodeDatabase()
     }
 }
 
+
+// "3m ago" instead of a full timestamp: shorter, and the age is what you
+// actually want to know at a glance. Full timestamp moves to the tooltip.
+static QString relativeTimeText(const QDateTime &when)
+{
+    if (!when.isValid())
+        return QStringLiteral("never");
+
+    qint64 secs = when.secsTo(QDateTime::currentDateTime());
+    if (secs < 0)
+        secs = 0;
+    if (secs < 60)
+        return QStringLiteral("just now");
+    if (secs < 3600)
+        return QStringLiteral("%1m ago").arg(secs / 60);
+    if (secs < 86400)
+        return QStringLiteral("%1h ago").arg(secs / 3600);
+    return QStringLiteral("%1d ago").arg(secs / 86400);
+}
+
 void MainWindow::updateNodeList()
 {
     // The table is rebuilt from scratch below, which drops the selection and
@@ -1465,7 +1551,7 @@ void MainWindow::updateNodeList()
         nameItem->setData(Qt::UserRole, node.nodeNum);
         if (!node.hasPosition)
         {
-            nameItem->setForeground(QBrush(Qt::gray));
+            nameItem->setForeground(QBrush(Theme::palette().textMuted));
         }
         if (isMyNode)
         {
@@ -1481,7 +1567,7 @@ void MainWindow::updateNodeList()
         shortItem->setTextAlignment(Qt::AlignCenter);
         if (!node.hasPosition)
         {
-            shortItem->setForeground(QBrush(Qt::gray));
+            shortItem->setForeground(QBrush(Theme::palette().textMuted));
         }
         if (isMyNode)
         {
@@ -1496,15 +1582,20 @@ void MainWindow::updateNodeList()
         roleItem->setData(Qt::UserRole, node.nodeNum);
         if (!node.hasPosition)
         {
-            roleItem->setForeground(QBrush(Qt::gray));
+            roleItem->setForeground(QBrush(Theme::palette().textMuted));
         }
         m_nodeTable->setItem(row, 2, roleItem);
 
         // Col 3: Last Heard
-        QTableWidgetItem *heardItem = new QTableWidgetItem(node.lastHeard.toString("yyyy-MM-dd HH:mm:ss"));
+        QTableWidgetItem *heardItem = new QTableWidgetItem(relativeTimeText(node.lastHeard));
+        heardItem->setToolTip(node.lastHeard.isValid()
+                                  ? node.lastHeard.toString("yyyy-MM-dd HH:mm:ss")
+                                  : QStringLiteral("Never heard from this node"));
+        // Sort on the real timestamp, not the "3m ago" text
+        heardItem->setData(Qt::UserRole + 1, node.lastHeard);
         if (!node.hasPosition)
         {
-            heardItem->setForeground(QBrush(Qt::gray));
+            heardItem->setForeground(QBrush(Theme::palette().textMuted));
         }
         m_nodeTable->setItem(row, 3, heardItem);
 
@@ -1512,7 +1603,7 @@ void MainWindow::updateNodeList()
         QTableWidgetItem *batteryItem = new QTableWidgetItem;
         if (!node.hasPosition)
         {
-            batteryItem->setForeground(QBrush(Qt::gray));
+            batteryItem->setForeground(QBrush(Theme::palette().textMuted));
         }
         if (node.isExternalPower)
         {
@@ -1574,7 +1665,7 @@ void MainWindow::updateNodeList()
         {
             signalItem->setText("-");
             if (!node.hasPosition)
-                signalItem->setForeground(QBrush(Qt::gray));
+                signalItem->setForeground(QBrush(Theme::palette().textMuted));
         }
         m_nodeTable->setItem(row, 5, signalItem);
         row++;
@@ -1633,6 +1724,7 @@ void MainWindow::updateStatusLabel()
         status = "Disconnected";
     }
     m_statusLabel->setText(status);
+    updateConnectionPill();
 }
 
 void MainWindow::requestConfig()
@@ -1914,16 +2006,22 @@ void MainWindow::showTracerouteResult(const MeshtasticProtocol::DecodedPacket &p
     resultText->setReadOnly(true);
     resultText->setFont(QFont("monospace", 10));
 
+    // This is rendered HTML, so it needs the palette injected - a hardcoded
+    // light table is unreadable once the dark theme is on.
+    const auto &pal = Theme::palette();
     QString html;
-    html += "<style>"
-            "table { border-collapse: collapse; width: 100%; margin: 10px 0; }"
-            "th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }"
-            "th { background-color: #f0f0f0; }"
-            ".snr-good { color: #2e7d32; font-weight: bold; }"
-            ".snr-ok { color: #f57c00; font-weight: bold; }"
-            ".snr-bad { color: #c62828; font-weight: bold; }"
-            ".arrow { font-size: 16px; color: #666; text-align: center; }"
-            "</style>";
+    html += QString("<style>"
+                    "table { border-collapse: collapse; width: 100%; margin: 10px 0; }"
+                    "th, td { border: 1px solid %1; padding: 8px; text-align: left; }"
+                    "th { background-color: %2; color: %3; }"
+                    "td { color: %4; }"
+                    ".snr-good { color: %5; font-weight: bold; }"
+                    ".snr-ok { color: %6; font-weight: bold; }"
+                    ".snr-bad { color: %7; font-weight: bold; }"
+                    ".arrow { font-size: 16px; color: %3; text-align: center; }"
+                    "</style>")
+                .arg(pal.border.name(), pal.surfaceAlt.name(), pal.textMuted.name(),
+                     pal.text.name(), pal.success.name(), pal.warning.name(), pal.danger.name());
 
     // Outgoing route (towards destination)
     QVariantList route = packet.fields.value("route").toList();

@@ -1,4 +1,5 @@
 #include "MessagesWidget.h"
+#include "Theme.h"
 #include "NodeManager.h"
 #include "Database.h"
 
@@ -365,7 +366,7 @@ void MessagesWidget::setupUI()
 
     // Status
     m_statusLabel = new QLabel;
-    m_statusLabel->setStyleSheet("color: #65676b; font-size: 11px;");
+    m_statusLabel->setStyleSheet(Theme::mutedLabelStyle());
     rightLayout->addWidget(m_statusLabel);
 
     m_splitter->addWidget(rightPanel);

@@ -1458,6 +1458,30 @@ void MainWindow::onClearNodeDatabase()
 }
 
 
+// QTableWidgetItem sorts on its display text, which is wrong for any column
+// whose text is not lexically ordered - "1h ago" sorts before "20m ago", and
+// "Plugged" sorts against battery percentages. Columns that need a real
+// ordering stash the underlying value in SortRole and this compares that.
+class SortableTableItem : public QTableWidgetItem
+{
+public:
+    static constexpr int SortRole = Qt::UserRole + 1;
+    using QTableWidgetItem::QTableWidgetItem;
+
+    bool operator<(const QTableWidgetItem &other) const override
+    {
+        const QVariant mine = data(SortRole);
+        const QVariant theirs = other.data(SortRole);
+        if (mine.isValid() && theirs.isValid())
+        {
+            if (mine.typeId() == QMetaType::QDateTime || theirs.typeId() == QMetaType::QDateTime)
+                return mine.toDateTime() < theirs.toDateTime();
+            return mine.toDouble() < theirs.toDouble();
+        }
+        return QTableWidgetItem::operator<(other);
+    }
+};
+
 // "3m ago" instead of a full timestamp: shorter, and the age is what you
 // actually want to know at a glance. Full timestamp moves to the tooltip.
 static QString relativeTimeText(const QDateTime &when)
@@ -1492,6 +1516,8 @@ void MainWindow::updateNodeList()
     int scrollPos = m_nodeTable->verticalScrollBar()->value();
 
     m_nodeTable->setUpdatesEnabled(false);
+    const bool sortingWasEnabled = m_nodeTable->isSortingEnabled();
+    m_nodeTable->setSortingEnabled(false);
     m_nodeTable->setRowCount(0);
 
     // Only re-sort when node data has changed, not just filter changes
@@ -1602,12 +1628,12 @@ void MainWindow::updateNodeList()
         m_nodeTable->setItem(row, 2, roleItem);
 
         // Col 3: Last Heard
-        QTableWidgetItem *heardItem = new QTableWidgetItem(relativeTimeText(node.lastHeard));
+        SortableTableItem *heardItem = new SortableTableItem(relativeTimeText(node.lastHeard));
         heardItem->setToolTip(node.lastHeard.isValid()
                                   ? node.lastHeard.toString("yyyy-MM-dd HH:mm:ss")
                                   : QStringLiteral("Never heard from this node"));
         // Sort on the real timestamp, not the "3m ago" text
-        heardItem->setData(Qt::UserRole + 1, node.lastHeard);
+        heardItem->setData(SortableTableItem::SortRole, node.lastHeard);
         if (!node.hasPosition)
         {
             heardItem->setForeground(QBrush(Theme::palette().textMuted));
@@ -1615,7 +1641,9 @@ void MainWindow::updateNodeList()
         m_nodeTable->setItem(row, 3, heardItem);
 
         // Col 4: Battery
-        QTableWidgetItem *batteryItem = new QTableWidgetItem;
+        SortableTableItem *batteryItem = new SortableTableItem;
+        batteryItem->setData(SortableTableItem::SortRole,
+                             node.isExternalPower ? 1000 : node.batteryLevel);
         if (!node.hasPosition)
         {
             batteryItem->setForeground(QBrush(Theme::palette().textMuted));
@@ -1643,7 +1671,13 @@ void MainWindow::updateNodeList()
         m_nodeTable->setItem(row, 4, batteryItem);
 
         // Col 5: Signal (bars for 0-hop, hop count for multi-hop)
-        QTableWidgetItem *signalItem = new QTableWidgetItem;
+        SortableTableItem *signalItem = new SortableTableItem;
+        double signalRank = -1000.0;
+        if (node.snr != 0.0f)
+            signalRank = node.snr;
+        else if (node.hopsAway > 0)
+            signalRank = -100.0 - node.hopsAway;  // fewer hops ranks higher
+        signalItem->setData(SortableTableItem::SortRole, signalRank);
         signalItem->setTextAlignment(Qt::AlignCenter);
         if (node.hopsAway == 0 && (node.snr != 0.0f || node.rssi != 0))
         {
@@ -1685,6 +1719,8 @@ void MainWindow::updateNodeList()
         m_nodeTable->setItem(row, 5, signalItem);
         row++;
     }
+
+    m_nodeTable->setSortingEnabled(sortingWasEnabled);
 
     if (m_nodesLabel)
     {

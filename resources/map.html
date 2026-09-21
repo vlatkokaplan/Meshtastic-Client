@@ -7,6 +7,9 @@
     <title>Meshtastic Map</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <style>
         * {
             margin: 0;
@@ -232,7 +235,29 @@
         // Initialize map
         var map = L.map('map', {
             zoomControl: true
-        }).setView([37.7749, -122.4194], 10);
+        });
+
+        // Restore the last view rather than hardcoding a location - the map used
+        // to open on San Francisco for a beat before fitToNodes moved it.
+        var restoredView = false;
+        try {
+            var saved = JSON.parse(localStorage.getItem('mapView') || 'null');
+            if (saved && isFinite(saved.lat) && isFinite(saved.lng) && isFinite(saved.zoom)) {
+                map.setView([saved.lat, saved.lng], saved.zoom);
+                restoredView = true;
+            }
+        } catch (e) { /* private mode or blocked storage */ }
+        if (!restoredView) {
+            map.setView([20, 0], 2);  // neutral world view until nodes arrive
+        }
+
+        map.on('moveend zoomend', function () {
+            try {
+                var c = map.getCenter();
+                localStorage.setItem('mapView', JSON.stringify(
+                    { lat: c.lat, lng: c.lng, zoom: map.getZoom() }));
+            } catch (e) { /* ignore */ }
+        });
 
         // Add scale control
         L.control.scale({ imperial: true, metric: true }).addTo(map);
@@ -253,6 +278,20 @@
         // Store traceroute line
         var tracerouteLine = null;
         var tracerouteMarkers = [];
+
+        // Nodes bunch up tightly in a town, which turned a dozen pins into an
+        // unreadable pile. Cluster them, but fall back to plain markers if the
+        // plugin did not load (the CDN is unreachable offline).
+        var clusterSupported = (typeof L.markerClusterGroup === 'function');
+        var markerLayer = clusterSupported
+            ? L.markerClusterGroup({
+                  maxClusterRadius: 45,
+                  spiderfyOnMaxZoom: true,      // fan out co-located nodes on click
+                  showCoverageOnHover: false,
+                  disableClusteringAtZoom: 16
+              })
+            : L.layerGroup();
+        markerLayer.addTo(map);
 
         // Distinct palette — enough contrast between adjacent entries
         var NODE_COLORS = [
@@ -414,9 +453,7 @@
 
             updateNodes: function (nodes) {
                 // Remove old markers
-                for (var id in markers) {
-                    map.removeLayer(markers[id]);
-                }
+                markerLayer.clearLayers();
                 markers = {};
 
                 // Collect bounds for auto-fit
@@ -445,7 +482,7 @@
                         }
                     });
 
-                    marker.addTo(map);
+                    markerLayer.addLayer(marker);
                     markers[node.nodeNum] = marker;
                     bounds.push([node.latitude, node.longitude]);
                 }
@@ -475,6 +512,7 @@
                 var marker = markers[nodeNum];
                 if (!marker) return;
 
+                // No element while the marker sits inside a collapsed cluster
                 var el = marker.getElement();
                 if (!el) return;
 
@@ -497,11 +535,20 @@
                 // Close any open popups
                 map.closePopup();
 
-                // Open this marker's popup
-                marker.openPopup();
+                var self = this;
+                var reveal = function () {
+                    marker.openPopup();
+                    self.blinkNode(nodeNum, 2000);
+                };
 
-                // Brief highlight effect
-                this.blinkNode(nodeNum, 2000);
+                // A clustered marker has no element on the map until its cluster
+                // is opened, so zoom to it first and only then show the popup.
+                if (clusterSupported && typeof markerLayer.zoomToShowLayer === 'function'
+                    && !map.hasLayer(marker)) {
+                    markerLayer.zoomToShowLayer(marker, reveal);
+                } else {
+                    reveal();
+                }
             },
 
             setTileServer: function (url) {

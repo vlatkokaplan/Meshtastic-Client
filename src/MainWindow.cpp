@@ -1430,8 +1430,16 @@ void MainWindow::onClearNodeDatabase()
     if (reply != QMessageBox::Yes)
         return;
 
-    if (m_database)
-        m_database->deleteAllNodes();
+    // A failed delete used to pass silently, leaving every node in place while
+    // the UI reported success.
+    if (m_database && !m_database->deleteAllNodes())
+    {
+        QMessageBox::warning(this, "Clear Nodes",
+                             "The saved nodes could not be deleted from the local database.\n\n"
+                             "Nothing was changed. See the log for details.");
+        statusBar()->showMessage("Failed to clear nodes", 5000);
+        return;
+    }
 
     // Drops the in-memory nodes and repaints the node list and map
     m_nodeManager->clear();

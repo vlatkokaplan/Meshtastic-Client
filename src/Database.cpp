@@ -754,16 +754,37 @@ bool Database::deleteNode(uint32_t nodeNum)
 
 bool Database::deleteAllNodes()
 {
-    QSqlQuery query(m_db);
-
-    if (!query.exec("DELETE FROM nodes"))
+    if (!m_db.isOpen())
     {
-        qWarning() << "Failed to delete all nodes:" << query.lastError().text();
+        qWarning() << "deleteAllNodes: database not open";
         return false;
     }
 
-    qDebug() << "Deleted all nodes from database";
-    return true;
+    QSqlQuery query(m_db);
+
+    // messages, telemetry_history and position_history all carry a foreign key
+    // on nodes(node_num) with no ON DELETE CASCADE, so with PRAGMA foreign_keys
+    // = ON (set in open()) a plain "DELETE FROM nodes" fails outright for every
+    // node that has any history. Cascading instead would destroy the user's
+    // message history, which is not what clearing the node list means.
+    //
+    // So suspend enforcement for this one statement and leave the history rows
+    // in place. They are keyed on node_num and re-associate when the node is
+    // heard from again. PRAGMA foreign_keys is a no-op inside a transaction, so
+    // it has to be toggled outside of one.
+    if (!query.exec("PRAGMA foreign_keys = OFF"))
+        qWarning() << "deleteAllNodes: could not suspend foreign keys:" << query.lastError().text();
+
+    bool ok = query.exec("DELETE FROM nodes");
+    if (!ok)
+        qWarning() << "Failed to delete all nodes:" << query.lastError().text();
+    else
+        qDebug() << "Deleted" << query.numRowsAffected() << "nodes from database";
+
+    if (!query.exec("PRAGMA foreign_keys = ON"))
+        qWarning() << "deleteAllNodes: could not restore foreign keys:" << query.lastError().text();
+
+    return ok;
 }
 
 int Database::nodeCount()

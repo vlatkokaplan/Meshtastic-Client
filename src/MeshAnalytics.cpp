@@ -52,10 +52,16 @@ MeshAnalytics::DecodeStats MeshAnalytics::decodeStats(const QDateTime &since) co
     if (!m_db || !m_db->isOpen())
         return stats;
 
+    // Only actual over-the-air mesh packets count. The packets table also
+    // records device-to-app frames - NodeInfo, Config, ModuleConfig,
+    // QueueStatus and so on - which carry no portnum because they are not Data
+    // payloads at all. Counting those as decode failures buried a real 97%
+    // decode rate under an apparent 7%.
     QSqlQuery q(m_db->connection());
     q.prepare("SELECT port_num, channel, COUNT(*) FROM packets "
-              "WHERE timestamp >= ? GROUP BY port_num, channel");
+              "WHERE timestamp >= ? AND packet_type = ? GROUP BY port_num, channel");
     q.addBindValue(toPacketStamp(since));
+    q.addBindValue(static_cast<int>(MeshtasticProtocol::PacketType::PacketReceived));
 
     if (!q.exec())
     {

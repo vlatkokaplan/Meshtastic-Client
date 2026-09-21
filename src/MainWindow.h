@@ -23,6 +23,7 @@ class SerialConnection;
 class TcpConnection;
 class BluetoothConnection;
 class NodeManager;
+class AnalyticsWidget;
 class PacketListWidget;
 class Database;
 class MessagesWidget;
@@ -101,10 +102,12 @@ private:
     QLabel *m_tracerouteCooldownLabel = nullptr;
     QTimer *m_positionRefreshTimer = nullptr;
     QLabel *m_connectionPill = nullptr;
+    AnalyticsWidget *m_analyticsWidget = nullptr;
     QLabel *m_nodesLabel = nullptr;
     int m_dbNodeCount = 0;  // cached: SELECT COUNT(*) is too slow for per-packet status updates
 
     void refreshDbNodeCount();
+    void setupAnalyticsTab();
     void updateConnectionPill();
     int m_tracerouteCooldownRemaining = 0;
     static const int TRACEROUTE_COOLDOWN_MS = 30000; // 30 seconds

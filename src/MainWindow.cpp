@@ -15,6 +15,7 @@
 #include "AppSettings.h"
 #include "AppSettingsTab.h"
 #include "Theme.h"
+#include "AnalyticsWidget.h"
 #include "TopologyWidget.h"
 #include "ConnectionDialog.h"
 #include "SimulationConnection.h"
@@ -264,6 +265,7 @@ void MainWindow::setupUI()
     m_topologyWidget = new TopologyWidget(m_nodeManager);
     m_tabWidget->addTab(m_topologyWidget, "Topology");
 
+    setupAnalyticsTab();
     setupConfigTab();
 
     // Connect traceroute selection to map + topology visualization
@@ -493,6 +495,12 @@ void MainWindow::setupPacketTab()
 {
     m_packetList = new PacketListWidget(m_nodeManager);
     m_tabWidget->addTab(m_packetList, "Packets");
+}
+
+void MainWindow::setupAnalyticsTab()
+{
+    m_analyticsWidget = new AnalyticsWidget(m_nodeManager, m_configWidget->deviceConfig());
+    m_tabWidget->addTab(m_analyticsWidget, "Analytics");
 }
 
 void MainWindow::setupConfigTab()
@@ -1902,6 +1910,11 @@ void MainWindow::openDatabaseForNode(uint32_t nodeNum)
             m_topologyWidget->loadFromDatabase();
         }
 
+        if (m_analyticsWidget)
+        {
+            m_analyticsWidget->setDatabase(m_database);
+        }
+
         refreshDbNodeCount();
         statusBar()->showMessage(QString("Database loaded: %1 nodes").arg(m_dbNodeCount), 3000);
     }
@@ -1943,6 +1956,10 @@ void MainWindow::closeDatabase()
     if (m_topologyWidget)
     {
         m_topologyWidget->setDatabase(nullptr);
+    }
+    if (m_analyticsWidget)
+    {
+        m_analyticsWidget->setDatabase(nullptr);
     }
 
     // 2. Clear local node state

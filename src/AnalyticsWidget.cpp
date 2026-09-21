@@ -313,17 +313,19 @@ void AnalyticsWidget::refresh()
     }
 
     const QDateTime since = windowStart();
-    updateDecode(since);
-    updateAirtime(since);
-    updateReachability(since);
-    updateChurn(since);
+    // One instance for the whole refresh; it only holds pointers, but four
+    // separate ones also meant reading the traceroute table twice.
+    MeshAnalytics analytics(m_db, m_nodes);
+    updateDecode(since, analytics);
+    updateAirtime(since, analytics);
+    updateReachability(since, analytics);
+    updateChurn(since, analytics);
 
     m_updatedLabel->setText("Updated " + QDateTime::currentDateTime().toString("HH:mm:ss"));
 }
 
-void AnalyticsWidget::updateDecode(const QDateTime &since)
+void AnalyticsWidget::updateDecode(const QDateTime &since, MeshAnalytics &analytics)
 {
-    MeshAnalytics analytics(m_db, m_nodes);
     const auto stats = analytics.decodeStats(since);
 
     if (!stats.hasData())
@@ -364,9 +366,8 @@ void AnalyticsWidget::updateDecode(const QDateTime &since)
                                          .arg(channels.join("  ·  ")));
 }
 
-void AnalyticsWidget::updateAirtime(const QDateTime &since)
+void AnalyticsWidget::updateAirtime(const QDateTime &since, MeshAnalytics &analytics)
 {
-    MeshAnalytics analytics(m_db, m_nodes);
     const double limit = dutyCycleLimitPercent();
     const uint32_t myNode = m_nodes ? m_nodes->myNodeNum() : 0;
 
@@ -419,9 +420,8 @@ void AnalyticsWidget::updateAirtime(const QDateTime &since)
     }
 }
 
-void AnalyticsWidget::updateReachability(const QDateTime &since)
+void AnalyticsWidget::updateReachability(const QDateTime &since, MeshAnalytics &analytics)
 {
-    MeshAnalytics analytics(m_db, m_nodes);
     const auto topo = analytics.topology(since);
 
     m_articulationTable->setRowCount(0);
@@ -487,9 +487,8 @@ void AnalyticsWidget::updateReachability(const QDateTime &since)
     }
 }
 
-void AnalyticsWidget::updateChurn(const QDateTime &since)
+void AnalyticsWidget::updateChurn(const QDateTime &since, MeshAnalytics &analytics)
 {
-    MeshAnalytics analytics(m_db, m_nodes);
     const auto churn = analytics.routeChurn(since);
 
     m_churnTable->setRowCount(0);

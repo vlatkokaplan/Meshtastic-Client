@@ -52,6 +52,8 @@ private:
     qint64 m_virtualMs = 0;
     int m_cursor = 0;          // index of the next packet to emit
     bool m_playing = false;
+    static constexpr int kPacketLimit = 20000;
+    bool m_truncated = false;
 
     QComboBox *m_windowCombo = nullptr;
     QComboBox *m_speedCombo = nullptr;

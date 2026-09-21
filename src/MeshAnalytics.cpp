@@ -21,6 +21,13 @@ namespace
 qint64 toPacketStamp(const QDateTime &t) { return t.toMSecsSinceEpoch(); }
 qint64 toRowStamp(const QDateTime &t) { return t.toSecsSinceEpoch(); }
 
+// Database::saveTraceroute() joins the hop and SNR lists with ';', and each hop
+// is a hex node id, optionally '!'-prefixed - the same form
+// MeshtasticProtocol::nodeIdFromString() parses. Splitting on ',' or reading
+// the hops as decimal both fail silently, yielding a plausible-looking but
+// wrong graph, so both are pinned here rather than written out at each use.
+const QChar kRouteSeparator = QLatin1Char(';');
+
 } // namespace
 
 MeshAnalytics::MeshAnalytics(Database *db, NodeManager *nodes)
@@ -42,6 +49,18 @@ QString MeshAnalytics::nodeLabel(uint32_t nodeNum) const
             return n.shortName;
     }
     return MeshtasticProtocol::nodeIdToString(nodeNum);
+}
+
+QList<uint32_t> MeshAnalytics::parseStoredRoute(const QString &stored)
+{
+    QList<uint32_t> hops;
+    for (const QString &hop : stored.split(kRouteSeparator, Qt::SkipEmptyParts))
+    {
+        uint32_t n = MeshtasticProtocol::nodeIdFromString(hop.trimmed());
+        if (n != 0)
+            hops.append(n);
+    }
+    return hops;
 }
 
 // ---------------------------------------------------------------- 16 --------
@@ -292,18 +311,12 @@ MeshAnalytics::Topology MeshAnalytics::topology(const QDateTime &since) const
         {
             const uint32_t from = tr.value(0).toUInt();
             const uint32_t to = tr.value(1).toUInt();
-            const QStringList hops = tr.value(2).toString().split(',', Qt::SkipEmptyParts);
-            const QStringList snrs = tr.value(3).toString().split(',', Qt::SkipEmptyParts);
+            const QStringList snrs =
+                tr.value(3).toString().split(kRouteSeparator, Qt::SkipEmptyParts);
 
             QList<uint32_t> path;
             path.append(from);
-            for (const QString &h : hops)
-            {
-                bool ok = false;
-                uint32_t n = h.trimmed().toUInt(&ok);
-                if (ok && n != 0)
-                    path.append(n);
-            }
+            path.append(parseStoredRoute(tr.value(2).toString()));
             path.append(to);
 
             for (int i = 0; i + 1 < path.size(); ++i)
@@ -397,12 +410,8 @@ QList<MeshAnalytics::RouteChurn> MeshAnalytics::routeChurn(const QDateTime &sinc
         rc.churnPercent = rc.observations ? 100.0 * rc.distinctRoutes / rc.observations : 0.0;
 
         QStringList pretty;
-        for (const QString &hop : it.value().last.split(',', Qt::SkipEmptyParts))
-        {
-            bool ok = false;
-            uint32_t n = hop.trimmed().toUInt(&ok);
-            pretty << (ok ? nodeLabel(n) : hop.trimmed());
-        }
+        for (uint32_t hop : parseStoredRoute(it.value().last))
+            pretty << nodeLabel(hop);
         rc.lastRoute = pretty.isEmpty() ? QStringLiteral("direct") : pretty.join(" > ");
         out.append(rc);
     }

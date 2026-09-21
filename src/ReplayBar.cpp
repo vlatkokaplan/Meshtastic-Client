@@ -100,7 +100,11 @@ void ReplayBar::onLoad()
 
     m_startMs = from.toMSecsSinceEpoch();
     m_endMs = now.toMSecsSinceEpoch();
-    m_packets = m_db->loadPacketsInRange(m_startMs, m_endMs);
+    m_packets = m_db->loadPacketsInRange(m_startMs, m_endMs, kPacketLimit);
+    // Hitting the cap means we hold the most recent kPacketLimit packets, not
+    // the whole window. Say so rather than replaying a shorter span than the
+    // one the user asked for and letting them think it was all of it.
+    m_truncated = (m_packets.size() >= kPacketLimit);
     m_cursor = 0;
     m_virtualMs = m_startMs;
 
@@ -124,9 +128,21 @@ void ReplayBar::onLoad()
     }
     m_scrub->setEnabled(true);
     m_playButton->setEnabled(true);
-    m_status->setText(QString("%1 packets loaded  ·  %2")
+    m_status->setText(QString("%1 packets loaded%2  ·  %3")
                           .arg(m_packets.size())
+                          .arg(m_truncated ? " (most recent only)" : "")
                           .arg(describePosition()));
+    if (m_truncated)
+    {
+        m_status->setToolTip(
+            QString("The window holds more than %1 packets. Showing the most "
+                    "recent %1; choose a shorter window to cover it all.")
+                .arg(kPacketLimit));
+    }
+    else
+    {
+        m_status->setToolTip(QString());
+    }
 }
 
 void ReplayBar::onPlayPause()

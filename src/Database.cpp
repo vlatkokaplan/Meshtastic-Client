@@ -1,4 +1,5 @@
 #include "Database.h"
+#include <algorithm>
 #include "MessagesWidget.h" // For ChatMessage struct
 #include <QSqlQuery>
 #include <QSqlError>
@@ -291,6 +292,7 @@ bool Database::createTables()
 
     // Indexes
     query.exec("CREATE INDEX IF NOT EXISTS idx_neighbor_node ON neighbor_info(node_num)");
+    query.exec("CREATE INDEX IF NOT EXISTS idx_neighbor_timestamp ON neighbor_info(timestamp DESC)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_node)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_node)");
     query.exec("CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp DESC)");
@@ -1503,9 +1505,13 @@ QList<Database::PacketRecord> Database::loadPacketsInRange(qint64 fromMs, qint64
     QSqlQuery query(m_db);
     // packet_type 1 is PacketReceived: real over-the-air traffic, as opposed to
     // the device-to-app frames this table also holds.
+    //
+    // Selected newest-first then reversed, so that hitting the limit keeps the
+    // most recent packets rather than the oldest. Truncating from the wrong end
+    // would silently replay only the start of the requested window.
     query.prepare("SELECT timestamp, from_node, to_node, port_num, channel, type_name "
                   "FROM packets WHERE timestamp >= ? AND timestamp <= ? AND packet_type = 1 "
-                  "ORDER BY timestamp ASC LIMIT ?");
+                  "ORDER BY timestamp DESC LIMIT ?");
     query.addBindValue(fromMs);
     query.addBindValue(toMs);
     query.addBindValue(limit);
@@ -1527,6 +1533,8 @@ QList<Database::PacketRecord> Database::loadPacketsInRange(qint64 fromMs, qint64
         rec.typeName = query.value(5).toString();
         out.append(rec);
     }
+
+    std::reverse(out.begin(), out.end());  // back to oldest-first for replay
     return out;
 }
 

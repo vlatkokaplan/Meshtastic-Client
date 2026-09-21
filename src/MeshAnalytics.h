@@ -112,6 +112,12 @@ public:
     // Connected components, largest first. Exposed for testing.
     static QList<QSet<uint32_t>> findComponents(const QMap<uint32_t, QSet<uint32_t>> &adjacency);
 
+    // Parses a route as Database::saveTraceroute() stores it: hex node ids,
+    // optionally '!'-prefixed, joined with ';'. Exposed so the storage format
+    // is pinned by a test - reading it with the wrong separator or radix
+    // produces a wrong graph silently rather than failing.
+    static QList<uint32_t> parseStoredRoute(const QString &stored);
+
 private:
     Database *m_db = nullptr;
     NodeManager *m_nodes = nullptr;

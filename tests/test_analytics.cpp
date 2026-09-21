@@ -84,6 +84,57 @@ private slots:
         QCOMPARE(ap.size(), 2);
     }
 
+    // ---- stored route format ---------------------------------------------
+    // Database::saveTraceroute() joins hops with ';' and each hop is a hex node
+    // id. Reading them with ',' or as decimal fails silently and yields a wrong
+    // graph rather than an error, so the format is pinned here.
+
+    void route_hops_are_hex_separated_by_semicolons()
+    {
+        auto hops = MeshAnalytics::parseStoredRoute("b29c7344;f8bc4672");
+        QCOMPARE(hops.size(), 2);
+        QCOMPARE(hops[0], 0xb29c7344u);
+        QCOMPARE(hops[1], 0xf8bc4672u);
+    }
+
+    void route_hops_accept_bang_prefix()
+    {
+        auto hops = MeshAnalytics::parseStoredRoute("!b29c7344;!f8bc4672");
+        QCOMPARE(hops.size(), 2);
+        QCOMPARE(hops[0], 0xb29c7344u);
+        QCOMPARE(hops[1], 0xf8bc4672u);
+    }
+
+    void digits_only_hop_is_read_as_hex_not_decimal()
+    {
+        // The case that fails quietly: "12345678" is valid decimal AND valid
+        // hex, so a decimal reading yields a real but entirely wrong node.
+        auto hops = MeshAnalytics::parseStoredRoute("12345678");
+        QCOMPARE(hops.size(), 1);
+        QCOMPARE(hops[0], 0x12345678u);
+        QVERIFY(hops[0] != 12345678u);
+    }
+
+    void comma_separated_route_is_not_silently_accepted()
+    {
+        // Guards against the separator drifting back to ','
+        auto hops = MeshAnalytics::parseStoredRoute("b29c7344,f8bc4672");
+        QVERIFY(hops.size() != 2);
+    }
+
+    void empty_route_yields_no_hops()
+    {
+        QVERIFY(MeshAnalytics::parseStoredRoute(QString()).isEmpty());
+        QVERIFY(MeshAnalytics::parseStoredRoute(";;").isEmpty());
+    }
+
+    void unparseable_hop_is_dropped_not_zero()
+    {
+        auto hops = MeshAnalytics::parseStoredRoute("b29c7344;zzzz;f8bc4672");
+        QCOMPARE(hops.size(), 2);
+        QVERIFY(!hops.contains(0u));
+    }
+
     // ---- components ------------------------------------------------------
 
     void components_split_a_partitioned_graph()

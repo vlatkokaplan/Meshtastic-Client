@@ -55,10 +55,10 @@ private slots:
 
 private:
     void setupUI();
-    void updateDecode(const QDateTime &since);
-    void updateAirtime(const QDateTime &since);
-    void updateReachability(const QDateTime &since);
-    void updateChurn(const QDateTime &since);
+    void updateDecode(const QDateTime &since, MeshAnalytics &analytics);
+    void updateAirtime(const QDateTime &since, MeshAnalytics &analytics);
+    void updateReachability(const QDateTime &since, MeshAnalytics &analytics);
+    void updateChurn(const QDateTime &since, MeshAnalytics &analytics);
 
     QDateTime windowStart() const;
     double dutyCycleLimitPercent() const;

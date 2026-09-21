@@ -282,6 +282,18 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
             result.fields["uplinkEnabled"] = settings.uplink_enabled();
             result.fields["downlinkEnabled"] = settings.downlink_enabled();
         }
+        else
+        {
+            // A channel with no settings carries no name or key. Report them as
+            // empty rather than omitting them, otherwise DeviceConfig keeps
+            // whatever was there before and a channel disabled on the device
+            // still shows its old name and PSK.
+            result.fields["channelName"] = QString();
+            result.fields["name"] = QString();
+            result.fields["psk"] = QByteArray();
+            result.fields["uplinkEnabled"] = false;
+            result.fields["downlinkEnabled"] = false;
+        }
         break;
     }
 

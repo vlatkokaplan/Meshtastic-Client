@@ -58,6 +58,11 @@ private:
     QWidget *m_placeholderWidget;
 
     int m_currentChannel = -1;
+    // Set once the user touches a field, cleared on select/save. Stops an
+    // incoming channel packet from overwriting edits in progress.
+    bool m_editorDirty = false;
+
+    void markEditorDirty();
 
     void setupUI();
     void updateChannelList();

@@ -3,6 +3,10 @@
 #include "DeviceConfig.h"
 
 #include <QDebug>
+#include <QSignalBlocker>
+#include <QListWidgetItem>
+#include <QBrush>
+#include <QMessageBox>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -150,6 +154,15 @@ void ChannelsConfigTab::setupUI()
 
     m_saveButton = new QPushButton("Save Channel");
     connect(m_saveButton, &QPushButton::clicked, this, &ChannelsConfigTab::onSaveClicked);
+
+    // Any edit marks the editor dirty so an incoming channel packet won't
+    // overwrite it (see onChannelConfigChanged)
+    connect(m_roleCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) { markEditorDirty(); });
+    connect(m_nameEdit, &QLineEdit::textEdited, this, [this](const QString &) { markEditorDirty(); });
+    connect(m_pskEdit, &QLineEdit::textEdited, this, [this](const QString &) { markEditorDirty(); });
+    connect(m_uplinkCheck, &QCheckBox::toggled, this, [this](bool) { markEditorDirty(); });
+    connect(m_downlinkCheck, &QCheckBox::toggled, this, [this](bool) { markEditorDirty(); });
     bottomLayout->addWidget(m_saveButton);
 
     editorLayout->addLayout(bottomLayout);
@@ -162,7 +175,17 @@ void ChannelsConfigTab::setupUI()
 
 void ChannelsConfigTab::updateChannelList()
 {
-    m_channelList->clear();
+    // Rebuilding this list used to call clear(), which emits
+    // currentRowChanged(-1) and so tore down the selection and the editor every
+    // time a channel arrived from the device - eight times during a config
+    // dump, and again after every save. Update the labels in place instead, and
+    // keep signals blocked so nothing observes a half-built list.
+    const QSignalBlocker blocker(m_channelList);
+
+    while (m_channelList->count() < 8)
+        m_channelList->addItem(QString());
+    while (m_channelList->count() > 8)
+        delete m_channelList->takeItem(m_channelList->count() - 1);
 
     for (int i = 0; i < 8; i++) {
         auto ch = m_config->channel(i);
@@ -174,7 +197,21 @@ void ChannelsConfigTab::updateChannelList()
             QString roleStr = (ch.role == 1) ? "Primary" : "Secondary";
             label = QString("%1 (%2)").arg(name, roleStr);
         }
-        m_channelList->addItem(label);
+
+        QListWidgetItem *item = m_channelList->item(i);
+        if (item->text() != label)
+            item->setText(label);
+
+        // Disabled channels are dimmed so the configured ones stand out
+        item->setForeground(QBrush(ch.role == 0 ? Theme::palette().textMuted
+                                                : Theme::palette().text));
+    }
+
+    // Keep the row the user is on selected across rebuilds
+    if (m_currentChannel >= 0 && m_currentChannel < 8
+        && m_channelList->currentRow() != m_currentChannel)
+    {
+        m_channelList->setCurrentRow(m_currentChannel);
     }
 }
 
@@ -187,21 +224,46 @@ void ChannelsConfigTab::onChannelSelected(int row)
     }
 
     m_currentChannel = row;
+    m_editorDirty = false;
     m_stackedWidget->setCurrentWidget(m_editorWidget);
     updateEditorFromConfig(row);
+}
+
+void ChannelsConfigTab::markEditorDirty()
+{
+    if (m_currentChannel < 0 || m_editorDirty)
+        return;
+    m_editorDirty = true;
+    m_statusLabel->setText(QString("Channel %1 - unsaved changes").arg(m_currentChannel));
+    m_statusLabel->setStyleSheet(QString("color: %1;").arg(Theme::palette().warning.name()));
 }
 
 void ChannelsConfigTab::onChannelConfigChanged(int index)
 {
     updateChannelList();
-    if (index == m_currentChannel) {
-        updateEditorFromConfig(index);
+
+    if (index != m_currentChannel)
+        return;
+
+    // The device can send a channel while the user is editing it. Refreshing
+    // the editor then would silently discard what they typed.
+    if (m_editorDirty) {
+        m_statusLabel->setText(
+            QString("Channel %1 changed on the device - your unsaved edits are kept").arg(index));
+        m_statusLabel->setStyleSheet(QString("color: %1;").arg(Theme::palette().warning.name()));
+        return;
     }
+
+    updateEditorFromConfig(index);
 }
 
 void ChannelsConfigTab::updateEditorFromConfig(int index)
 {
     auto ch = m_config->channel(index);
+
+    // Writing the fields below would otherwise look like user edits
+    const QSignalBlocker b1(m_roleCombo), b2(m_nameEdit), b3(m_pskEdit),
+                         b4(m_uplinkCheck), b5(m_downlinkCheck);
 
     m_channelIndexLabel->setText(QString("Channel %1").arg(index));
     m_roleCombo->setCurrentIndex(ch.role);
@@ -217,14 +279,16 @@ void ChannelsConfigTab::updateEditorFromConfig(int index)
     m_uplinkCheck->setChecked(ch.uplinkEnabled);
     m_downlinkCheck->setChecked(ch.downlinkEnabled);
 
+    m_editorDirty = false;
     m_statusLabel->setText(QString("Editing channel %1").arg(index));
     m_statusLabel->setStyleSheet(Theme::statusLabelStyle());
 }
 
 void ChannelsConfigTab::notifySaved()
 {
+    m_editorDirty = false;
     m_statusLabel->setText("Saved \u2713");
-    m_statusLabel->setStyleSheet("color: green;");
+    m_statusLabel->setStyleSheet(QString("color: %1;").arg(Theme::palette().success.name()));
 }
 
 void ChannelsConfigTab::onSaveClicked()
@@ -247,10 +311,35 @@ void ChannelsConfigTab::onSaveClicked()
 
     qDebug() << "Saving - role:" << ch.role << "name:" << ch.name;
 
-    // Convert base64 PSK back to bytes
+    // Convert base64 PSK back to bytes. fromBase64() silently returns junk for
+    // malformed input, and the radio only accepts 0, 1, 16 or 32 byte keys, so
+    // refuse anything else rather than writing a broken channel to the device.
     QString pskBase64 = m_pskEdit->text().trimmed();
     if (!pskBase64.isEmpty()) {
-        ch.psk = QByteArray::fromBase64(pskBase64.toLatin1());
+        auto decoded = QByteArray::fromBase64Encoding(pskBase64.toLatin1(),
+                                                      QByteArray::AbortOnBase64DecodingErrors);
+        if (!decoded) {
+            QMessageBox::warning(this, "Invalid PSK",
+                                 "The pre-shared key is not valid base64.\n\n"
+                                 "Use \"Generate\" for a new random key, or paste the "
+                                 "base64 key from another device.");
+            m_statusLabel->setText("Invalid PSK - not saved");
+            m_statusLabel->setStyleSheet(QString("color: %1;").arg(Theme::palette().danger.name()));
+            return;
+        }
+        ch.psk = *decoded;
+
+        const int n = ch.psk.size();
+        if (n != 1 && n != 16 && n != 32) {
+            QMessageBox::warning(this, "Invalid PSK",
+                                 QString("A pre-shared key must be 1, 16 or 32 bytes; "
+                                         "this one decodes to %1.\n\n"
+                                         "1 byte selects a default key, 16 bytes is AES-128 "
+                                         "and 32 bytes is AES-256.").arg(n));
+            m_statusLabel->setText(QString("PSK is %1 bytes - not saved").arg(n));
+            m_statusLabel->setStyleSheet(QString("color: %1;").arg(Theme::palette().danger.name()));
+            return;
+        }
     }
     qDebug() << "PSK size:" << ch.psk.size();
 

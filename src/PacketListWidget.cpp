@@ -1,4 +1,6 @@
 #include "PacketListWidget.h"
+#include <algorithm>
+#include <QSignalBlocker>
 #include <QJsonObject>
 #include <QJsonDocument>
 #include "Database.h"
@@ -379,6 +381,12 @@ PacketFilterModel::PacketFilterModel(NodeManager *nodeManager, QObject *parent)
 {
 }
 
+void PacketFilterModel::setChannelFilter(int channel)
+{
+    m_channelFilter = channel;
+    invalidateFilter();
+}
+
 void PacketFilterModel::setTypeFilter(const QString &type)
 {
     m_typeFilter = type;
@@ -438,6 +446,11 @@ bool PacketFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &sourc
         }
     }
 
+    if (m_channelFilter >= 0 && packet.channelIndex != m_channelFilter)
+    {
+        return false;
+    }
+
     return true;
 }
 
@@ -466,6 +479,16 @@ void PacketListWidget::setupUI()
     m_portNumFilter->addItems({"All", "TEXT_MESSAGE", "POSITION", "NODEINFO", "TELEMETRY",
                                "ROUTING", "TRACEROUTE", "ADMIN"});
     filterLayout->addWidget(m_portNumFilter);
+
+    filterLayout->addWidget(new QLabel("Ch:"));
+    m_channelFilter = new QComboBox;
+    m_channelFilter->setToolTip(
+        "Filter by the channel a packet arrived on. Packets we could decode carry "
+        "a channel index; ones we hold no key for carry only the channel hash, "
+        "which is shown as such.");
+    m_channelFilter->addItem("All", -1);
+    m_channelFilter->setMinimumWidth(130);
+    filterLayout->addWidget(m_channelFilter);
 
     filterLayout->addStretch();
 
@@ -515,6 +538,10 @@ void PacketListWidget::setupUI()
     // Connect filters
     connect(m_typeFilter, &QComboBox::currentTextChanged,
             m_filterModel, &PacketFilterModel::setTypeFilter);
+    connect(m_channelFilter, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int i) {
+                m_filterModel->setChannelFilter(m_channelFilter->itemData(i).toInt());
+            });
     connect(m_portNumFilter, &QComboBox::currentTextChanged,
             m_filterModel, &PacketFilterModel::setPortNumFilter);
 
@@ -526,6 +553,8 @@ void PacketListWidget::setupUI()
 void PacketListWidget::addPacket(const MeshtasticProtocol::DecodedPacket &packet)
 {
     m_model->addPacket(packet);
+    if (!m_knownChannels.contains(packet.channelIndex))
+        rebuildChannelFilter();
 }
 
 void PacketTableModel::setPackets(const QList<MeshtasticProtocol::DecodedPacket> &packets)
@@ -540,6 +569,62 @@ void PacketTableModel::setPackets(const QList<MeshtasticProtocol::DecodedPacket>
 void PacketListWidget::clear()
 {
     m_model->clear();
+}
+
+void PacketListWidget::setChannelNames(const QMap<int, QString> &names)
+{
+    if (m_channelNames == names)
+        return;
+    m_channelNames = names;
+    rebuildChannelFilter();
+}
+
+// The combo offers only the channels actually present, so it never lists
+// options that would match nothing. Rebuilt on change rather than on every
+// packet, and the current selection is kept across rebuilds.
+void PacketListWidget::rebuildChannelFilter()
+{
+    if (!m_channelFilter)
+        return;
+
+    QList<int> present;
+    for (int row = 0; row < m_model->rowCount(); ++row)
+    {
+        const int ch = m_model->packetAt(row).channelIndex;
+        if (!present.contains(ch))
+            present.append(ch);
+    }
+    std::sort(present.begin(), present.end());
+
+    if (present == m_knownChannels)
+        return;
+    m_knownChannels = present;
+
+    const int previous = m_channelFilter->currentData().toInt();
+
+    QSignalBlocker block(m_channelFilter);
+    m_channelFilter->clear();
+    m_channelFilter->addItem("All", -1);
+
+    for (int ch : present)
+    {
+        QString label;
+        if (m_channelNames.contains(ch))
+            label = QString("%1 - %2").arg(ch).arg(m_channelNames.value(ch));
+        else if (ch < 8)
+            label = QString("Channel %1").arg(ch);
+        else
+            // Not an index: a channel we hold no key for, identified only by
+            // the hash it arrived under.
+            label = QString("hash %1 - not ours").arg(ch);
+
+        m_channelFilter->addItem(label, ch);
+    }
+
+    const int restore = m_channelFilter->findData(previous);
+    m_channelFilter->setCurrentIndex(restore >= 0 ? restore : 0);
+    if (restore < 0)
+        m_filterModel->setChannelFilter(-1);   // the old choice is gone
 }
 
 void PacketListWidget::setDatabase(Database *db)
@@ -586,6 +671,7 @@ void PacketListWidget::loadFromDatabase()
     // loadRecentPackets() returns newest first, which is the order the list
     // displays, so no reordering is needed.
     m_model->setPackets(packets);
+    rebuildChannelFilter();
     qDebug() << "[PacketList] Loaded" << packets.size() << "packets from database";
 }
 

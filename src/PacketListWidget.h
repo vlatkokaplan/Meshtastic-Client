@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <QTableView>
 #include <QAbstractTableModel>
+#include <QMap>
 #include <QSortFilterProxyModel>
 #include <QComboBox>
 #include <QList>
@@ -67,11 +68,14 @@ public:
     void setTypeFilter(const QString &type);
     void setPortNumFilter(const QString &portNum);
     void setHideLocalDevicePackets(bool hide);
+    // -1 shows every channel
+    void setChannelFilter(int channel);
 
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override;
 
 private:
+    int m_channelFilter = -1;
     NodeManager *m_nodeManager;
     QString m_typeFilter;
     QString m_portNumFilter;
@@ -94,6 +98,10 @@ public:
     void setDatabase(Database *db);
     void loadFromDatabase();
 
+    // Names for configured channels, so the filter can distinguish one of ours
+    // from a bare hash that only means "a channel we have no key for".
+    void setChannelNames(const QMap<int, QString> &names);
+
 signals:
     void packetSelected(const MeshtasticProtocol::DecodedPacket &packet);
 
@@ -106,6 +114,11 @@ private:
     PacketTableModel *m_model;
     PacketFilterModel *m_filterModel;
     Database *m_database = nullptr;
+    QComboBox *m_channelFilter = nullptr;
+    QMap<int, QString> m_channelNames;
+    QList<int> m_knownChannels;      // what the combo currently offers
+
+    void rebuildChannelFilter();
     QComboBox *m_typeFilter;
     QComboBox *m_portNumFilter;
     NodeManager *m_nodeManager;

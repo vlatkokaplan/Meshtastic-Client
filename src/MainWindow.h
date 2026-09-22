@@ -106,6 +106,7 @@ private:
     QLabel *m_connectionPill = nullptr;
     AnalyticsWidget *m_analyticsWidget = nullptr;
     ReplayBar *m_replayBar = nullptr;
+    QMap<int, QString> m_channelNames;   // index -> name, for the packet filter
     int m_dbNodeCount = 0;  // cached: SELECT COUNT(*) is too slow for per-packet status updates
 
     void refreshDbNodeCount();

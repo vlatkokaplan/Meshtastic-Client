@@ -770,6 +770,17 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
                 m_messagesWidget->setChannel(index, name, enabled);
             }
 
+            // Let the packet filter name our channels, so its entries read as
+            // channels rather than bare numbers that could equally be hashes
+            if (m_packetList)
+            {
+                if (enabled && !name.isEmpty())
+                    m_channelNames[index] = name;
+                else
+                    m_channelNames.remove(index);
+                m_packetList->setChannelNames(m_channelNames);
+            }
+
             // Update DeviceConfig for config tab
             if (m_configWidget && m_configWidget->deviceConfig())
             {

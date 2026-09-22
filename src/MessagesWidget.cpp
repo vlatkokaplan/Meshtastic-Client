@@ -15,6 +15,7 @@
 #include <QClipboard>
 #include <QBrush>
 #include <QStyledItemDelegate>
+#include <QAbstractItemView>
 #include <QPainter>
 #include <QToolTip>
 #include <QHelpEvent>
@@ -39,7 +40,8 @@ enum MessageRoles {
     ReactionsRole,     // aggregated tapbacks, e.g. "\U0001F44D 2  \u2764\uFE0F"
     IsEmojiOnlyRole,   // message is nothing but emoji: draw it large
     ReplyToSenderRole, // who wrote the message this one answers
-    ReplyToTextRole    // a short excerpt of it, quoted above the body
+    ReplyToTextRole,   // a short excerpt of it, quoted above the body
+    ReactionDetailRole // who sent each reaction, shown on hovering the chip
 };
 
 namespace {
@@ -113,6 +115,7 @@ public:
 
     // Store sender rect for click detection
     mutable QHash<int, QRect> m_senderRects;
+    mutable QHash<int, QRect> m_reactionRects;
 
     bool editorEvent(QEvent *event, QAbstractItemModel *model, const QStyleOptionViewItem &option, const QModelIndex &index) override
     {
@@ -154,6 +157,16 @@ public:
     {
         if (event && event->type() == QEvent::ToolTip)
         {
+            // Over the reaction chip, name who sent each one; anywhere else in
+            // the bubble keeps the message's own tooltip.
+            const QString detail = index.data(ReactionDetailRole).toString();
+            if (!detail.isEmpty() && m_reactionRects.contains(index.row())
+                && m_reactionRects.value(index.row()).contains(event->pos()))
+            {
+                QToolTip::showText(event->globalPos(), detail, view);
+                return true;
+            }
+
             QString tooltip = index.data(Qt::ToolTipRole).toString();
             if (!tooltip.isEmpty())
             {
@@ -328,6 +341,7 @@ public:
             const int chipX = isOutgoing ? bubbleRect.right() - chipW
                                          : bubbleRect.left();
             const QRect chip(chipX, bubbleRect.bottom() - 2, chipW, chipH);
+            m_reactionRects[index.row()] = chip;
 
             painter->setPen(Qt::NoPen);
             painter->setBrush(QColor("#ffffff"));
@@ -1040,12 +1054,22 @@ void MessagesWidget::updateMessageDisplay()
     // be drawn attached to it rather than as messages in their own right.
     // Identical emoji are counted rather than repeated.
     QMap<uint32_t, QMap<QString, int>> reactionsFor;
+    // Who sent each one, in arrival order, for the hover tooltip
+    QMap<uint32_t, QMap<QString, QStringList>> reactorsFor;
     QSet<uint32_t> reactionIds;
     for (const ChatMessage &msg : m_messages)
     {
         if (!msg.isReaction || msg.replyId == 0)
             continue;
-        reactionsFor[msg.replyId][msg.text.trimmed()]++;
+        const QString emoji = msg.text.trimmed();
+        reactionsFor[msg.replyId][emoji]++;
+
+        const QString who = (msg.fromNode == myNode) ? QStringLiteral("You")
+                                                     : getNodeName(msg.fromNode);
+        QStringList &names = reactorsFor[msg.replyId][emoji];
+        if (!names.contains(who))
+            names << who;
+
         if (msg.packetId != 0)
             reactionIds.insert(msg.packetId);
     }
@@ -1133,16 +1157,29 @@ void MessagesWidget::updateMessageDisplay()
         item->setData(IsEmojiOnlyRole, isEmojiOnly(msg.text));
 
         QString reactionText;
+        QString reactionDetail;
         if (msg.packetId != 0 && reactionsFor.contains(msg.packetId))
         {
             const auto &counts = reactionsFor[msg.packetId];
+            const auto &who = reactorsFor.value(msg.packetId);
             QStringList parts;
+            QStringList detailLines;
             for (auto it = counts.constBegin(); it != counts.constEnd(); ++it)
+            {
                 parts << (it.value() > 1 ? QString("%1 %2").arg(it.key()).arg(it.value())
                                          : it.key());
+                // Rich text so the emoji can name its own font: QToolTip uses
+                // the plain application font and would otherwise draw a box.
+                detailLines << QString("<span style=\"font-family:'Noto Color Emoji',"
+                                       "'Apple Color Emoji','Segoe UI Emoji';\">%1</span> %2")
+                                   .arg(it.key().toHtmlEscaped(),
+                                        who.value(it.key()).join(", ").toHtmlEscaped());
+            }
             reactionText = parts.join("  ");
+            reactionDetail = detailLines.join("<br>");
         }
         item->setData(ReactionsRole, reactionText);
+        item->setData(ReactionDetailRole, reactionDetail);
 
         // A reply quotes what it answers, so the thread is readable without
         // scrolling back to find the message it refers to.

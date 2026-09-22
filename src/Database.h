@@ -125,6 +125,8 @@ public:
     bool deleteOldPackets(int daysOld = 7);
     // Mesh packets only, oldest first, for replaying recorded activity
     QList<PacketRecord> loadPacketsInRange(qint64 fromMs, qint64 toMs, int limit = 20000);
+    // Newest first, for repopulating the packet list on startup
+    QList<PacketRecord> loadRecentPackets(int limit = 2000);
 
     // Neighbor info operations (for topology)
     struct NeighborRecord

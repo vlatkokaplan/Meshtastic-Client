@@ -1560,6 +1560,39 @@ QList<Database::PacketRecord> Database::loadPacketsInRange(qint64 fromMs, qint64
     return out;
 }
 
+QList<Database::PacketRecord> Database::loadRecentPackets(int limit)
+{
+    QList<PacketRecord> out;
+    if (!m_db.isOpen())
+        return out;
+
+    QSqlQuery query(m_db);
+    query.prepare("SELECT timestamp, packet_type, from_node, to_node, port_num, channel, "
+                  "type_name, fields_json FROM packets ORDER BY timestamp DESC LIMIT ?");
+    query.addBindValue(limit);
+
+    if (!query.exec())
+    {
+        qWarning() << "Failed to load recent packets:" << query.lastError().text();
+        return out;
+    }
+
+    while (query.next())
+    {
+        PacketRecord rec;
+        rec.timestamp = query.value(0).toLongLong();
+        rec.packetType = query.value(1).toInt();
+        rec.fromNode = query.value(2).toUInt();
+        rec.toNode = query.value(3).toUInt();
+        rec.portNum = query.value(4).toInt();
+        rec.channel = query.value(5).toInt();
+        rec.typeName = query.value(6).toString();
+        rec.fieldsJson = query.value(7).toString();
+        out.append(rec);
+    }
+    return out;
+}
+
 bool Database::deleteOldPackets(int daysOld)
 {
     if (!m_db.isOpen())

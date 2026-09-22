@@ -1717,6 +1717,11 @@ void MainWindow::openDatabaseForNode(uint32_t nodeNum)
             m_replayBar->setDatabase(m_database);
         }
 
+        if (m_packetList)
+        {
+            m_packetList->setDatabase(m_database);
+        }
+
         refreshDbNodeCount();
         if (!m_simulateMode)
             AppSettings::instance()->setLastDatabaseNode(nodeNum);
@@ -1768,6 +1773,10 @@ void MainWindow::closeDatabase()
     if (m_replayBar)
     {
         m_replayBar->setDatabase(nullptr);
+    }
+    if (m_packetList)
+    {
+        m_packetList->setDatabase(nullptr);
     }
 
     // 2. Clear local node state

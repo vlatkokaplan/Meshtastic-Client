@@ -11,6 +11,8 @@
 
 class NodeManager;
 
+class Database;
+
 class PacketTableModel : public QAbstractTableModel
 {
     Q_OBJECT
@@ -40,6 +42,8 @@ public:
 
     void addPacket(const MeshtasticProtocol::DecodedPacket &packet);
     void clear();
+    // Replaces the contents in one reset; expects newest first
+    void setPackets(const QList<MeshtasticProtocol::DecodedPacket> &packets);
 
     const MeshtasticProtocol::DecodedPacket &packetAt(int row) const;
 
@@ -85,6 +89,11 @@ public:
     void clear();
     void dumpPacketsToFile(const QString &filePath, int count);
 
+    // Packets are written to the database as they arrive but were never read
+    // back, so the list started empty on every launch even with capture on.
+    void setDatabase(Database *db);
+    void loadFromDatabase();
+
 signals:
     void packetSelected(const MeshtasticProtocol::DecodedPacket &packet);
 
@@ -96,6 +105,7 @@ private:
     QTableView *m_tableView;
     PacketTableModel *m_model;
     PacketFilterModel *m_filterModel;
+    Database *m_database = nullptr;
     QComboBox *m_typeFilter;
     QComboBox *m_portNumFilter;
     NodeManager *m_nodeManager;

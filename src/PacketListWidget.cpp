@@ -1,4 +1,7 @@
 #include "PacketListWidget.h"
+#include <QJsonObject>
+#include <QJsonDocument>
+#include "Database.h"
 #include "NodeManager.h"
 #include "AppSettings.h"
 #include <QVBoxLayout>
@@ -525,9 +528,65 @@ void PacketListWidget::addPacket(const MeshtasticProtocol::DecodedPacket &packet
     m_model->addPacket(packet);
 }
 
+void PacketTableModel::setPackets(const QList<MeshtasticProtocol::DecodedPacket> &packets)
+{
+    beginResetModel();
+    m_packets = packets;
+    if (m_packets.size() > MAX_PACKETS)
+        m_packets = m_packets.mid(0, MAX_PACKETS);
+    endResetModel();
+}
+
 void PacketListWidget::clear()
 {
     m_model->clear();
+}
+
+void PacketListWidget::setDatabase(Database *db)
+{
+    m_database = db;
+    if (m_database)
+        loadFromDatabase();
+    else
+        m_model->clear();
+}
+
+// Rebuilds a DecodedPacket from a stored row. Everything the list shows is
+// recoverable: the fields map was serialised to JSON when the packet arrived.
+void PacketListWidget::loadFromDatabase()
+{
+    if (!m_database || !m_database->isOpen())
+        return;
+
+    const auto rows = m_database->loadRecentPackets();
+    QList<MeshtasticProtocol::DecodedPacket> packets;
+    packets.reserve(rows.size());
+
+    for (const auto &rec : rows)
+    {
+        MeshtasticProtocol::DecodedPacket p;
+        p.type = static_cast<MeshtasticProtocol::PacketType>(rec.packetType);
+        p.from = rec.fromNode;
+        p.to = rec.toNode;
+        p.portNum = static_cast<MeshtasticProtocol::PortNum>(rec.portNum);
+        p.channelIndex = rec.channel;
+        p.timestamp = rec.timestamp;
+        p.typeName = rec.typeName;
+
+        if (!rec.fieldsJson.isEmpty())
+        {
+            QJsonParseError err;
+            const auto doc = QJsonDocument::fromJson(rec.fieldsJson.toUtf8(), &err);
+            if (err.error == QJsonParseError::NoError && doc.isObject())
+                p.fields = doc.object().toVariantMap();
+        }
+        packets.append(p);
+    }
+
+    // loadRecentPackets() returns newest first, which is the order the list
+    // displays, so no reordering is needed.
+    m_model->setPackets(packets);
+    qDebug() << "[PacketList] Loaded" << packets.size() << "packets from database";
 }
 
 void PacketListWidget::onRowSelected(const QModelIndex &current, const QModelIndex &previous)

@@ -85,6 +85,11 @@ public:
     // Registers a channel we are not configured for, so its traffic has
     // somewhere to appear instead of being dropped.
     void addForeignChannel(int hash);
+
+    // Opens the reaction picker for a message, anchored at a screen point.
+    // Public because the item delegate calls it when the reaction strip
+    // is clicked.
+    void showEmojiPicker(uint32_t packetId, const QPoint &globalPos);
     void clearChannels();
 
     int totalUnreadCount() const;

@@ -107,6 +107,7 @@ set(SOURCES
     src/AnalyticsWidget.cpp
     src/ReplayBar.cpp
     src/NodeTableWidget.cpp
+    src/EmojiPicker.cpp
     src/MainWindow.cpp
     src/PacketListWidget.cpp
     src/TracerouteWidget.cpp

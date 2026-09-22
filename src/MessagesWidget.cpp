@@ -24,6 +24,8 @@
 #include <QMouseEvent>
 #include <algorithm>
 #include "AppSettings.h"
+#include "EmojiPicker.h"
+#include <QCursor>
 #include <QEvent>
 #include <QKeyEvent>
 #include <QMap>
@@ -124,6 +126,24 @@ public:
             QMouseEvent *mouseEvent = static_cast<QMouseEvent *>(event);
             if (mouseEvent->button() == Qt::LeftButton)
             {
+                // Clicking the reaction strip offers the picker right there,
+                // so joining a reaction costs one click rather than three.
+                if (m_reactionRects.contains(index.row())
+                    && m_reactionRects.value(index.row()).contains(mouseEvent->pos()))
+                {
+                    const uint32_t packetId = index.data(Qt::UserRole).toUInt();
+                    QObject *p = parent();
+                    while (p)
+                    {
+                        if (auto *mw = qobject_cast<MessagesWidget *>(p))
+                        {
+                            mw->showEmojiPicker(packetId, QCursor::pos());
+                            return true;
+                        }
+                        p = p->parent();
+                    }
+                }
+
                 bool isOutgoing = index.data(IsOutgoingRole).toBool();
                 if (!isOutgoing && m_senderRects.contains(index.row()))
                 {
@@ -513,6 +533,16 @@ void MessagesWidget::setupUI()
     m_messageList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);  // Smoother scrolling
     m_messageList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_messageList->setContextMenuPolicy(Qt::CustomContextMenu);
+    // Double-click reacts: the fastest path, and what people try first
+    connect(m_messageList, &QListWidget::itemDoubleClicked, this,
+            [this](QListWidgetItem *item) {
+                if (!item)
+                    return;
+                const uint32_t packetId = item->data(Qt::UserRole).toUInt();
+                if (packetId != 0)
+                    showEmojiPicker(packetId, QCursor::pos());
+            });
+
     connect(m_messageList, &QListWidget::customContextMenuRequested,
             this, &MessagesWidget::onMessageContextMenu);
     rightLayout->addWidget(m_messageList, 1);
@@ -1433,14 +1463,32 @@ void MessagesWidget::onMessageContextMenu(const QPoint &pos)
 
     QMenu menu(this);
 
-    // Quick reactions
-    QMenu *reactMenu = menu.addMenu("React");
-    QStringList reactions = {"👍", "❤️", "😂", "😮", "😢", "🎉"};
-    for (const QString &emoji : reactions)
+    // What this user actually reacts with, one click away, with the full
+    // picker behind it rather than a fixed list of six.
+    const QStringList recent = EmojiPicker::recentlyUsed();
+    if (!recent.isEmpty())
     {
-        QAction *action = reactMenu->addAction(emoji);
-        connect(action, &QAction::triggered, this, [this, emoji, packetId]()
-                { sendReactionToMessage(emoji, packetId); });
+        QMenu *quick = menu.addMenu("React");
+        for (const QString &emoji : recent)
+        {
+            QAction *action = quick->addAction(emoji);
+            connect(action, &QAction::triggered, this, [this, emoji, packetId]() {
+                EmojiPicker::noteUsed(emoji);
+                sendReactionToMessage(emoji, packetId);
+            });
+        }
+        quick->addSeparator();
+        QAction *more = quick->addAction("More\u2026");
+        connect(more, &QAction::triggered, this, [this, packetId]() {
+            showEmojiPicker(packetId, QCursor::pos());
+        });
+    }
+    else
+    {
+        QAction *react = menu.addAction("React\u2026");
+        connect(react, &QAction::triggered, this, [this, packetId]() {
+            showEmojiPicker(packetId, QCursor::pos());
+        });
     }
 
     QAction *replyAction = menu.addAction("Reply");
@@ -1499,6 +1547,18 @@ void MessagesWidget::onConversationContextMenu(const QPoint &pos)
             deleteConversation(nodeNum);
         }
     }
+}
+
+void MessagesWidget::showEmojiPicker(uint32_t packetId, const QPoint &globalPos)
+{
+    if (packetId == 0)
+        return;
+
+    auto *picker = new EmojiPicker(this);
+    connect(picker, &EmojiPicker::picked, this, [this, packetId](const QString &emoji) {
+        sendReactionToMessage(emoji, packetId);
+    });
+    picker->popupAt(globalPos);
 }
 
 void MessagesWidget::sendReactionToMessage(const QString &emoji, uint32_t replyToId)

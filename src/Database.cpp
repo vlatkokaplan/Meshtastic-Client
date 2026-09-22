@@ -8,7 +8,7 @@
 #include <QDebug>
 #include <QUuid>
 
-static const int SCHEMA_VERSION = 8;
+static const int SCHEMA_VERSION = 9;
 
 Database::Database(QObject *parent)
     : QObject(parent)
@@ -191,6 +191,8 @@ bool Database::createTables()
             created_at INTEGER,
             status INTEGER DEFAULT 0,
             packet_id INTEGER DEFAULT 0,
+            reply_id INTEGER DEFAULT 0,
+            is_reaction INTEGER DEFAULT 0,
             FOREIGN KEY (from_node) REFERENCES nodes(node_num)
         )
     )"))
@@ -480,6 +482,27 @@ bool Database::migrateSchema(int fromVersion, int toVersion)
             query.exec("CREATE INDEX IF NOT EXISTS idx_neighbor_node ON neighbor_info(node_num)");
             qDebug() << "Database migrated to schema version 8";
             break;
+
+        case 9:
+        {
+            // Tapbacks: which message a reaction responds to, and whether it is
+            // a reaction at all. Without these, reactions reload as ordinary
+            // messages after a restart.
+            qDebug() << "Migrating to schema version 9 - adding reaction columns";
+            auto addColumn = [&](const QString &sql) {
+                if (!query.exec(sql))
+                {
+                    // "duplicate column" is fine: the table may already be current
+                    const QString err = query.lastError().text();
+                    if (!err.contains("duplicate column", Qt::CaseInsensitive))
+                        qWarning() << "Migration to v9:" << err;
+                }
+            };
+            addColumn("ALTER TABLE messages ADD COLUMN reply_id INTEGER DEFAULT 0");
+            addColumn("ALTER TABLE messages ADD COLUMN is_reaction INTEGER DEFAULT 0");
+            qDebug() << "Database migrated to schema version 9";
+            break;
+        }
         }
     }
     return true;
@@ -540,8 +563,8 @@ bool Database::prepareStatements()
 
     m_saveMessageStmt = new QSqlQuery(m_db);
     if (!m_saveMessageStmt->prepare(R"(
-        INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at, status, packet_id)
-        VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at, :status, :packet_id)
+        INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at, status, packet_id, reply_id, is_reaction)
+        VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at, :status, :packet_id, :reply_id, :is_reaction)
     )"))
     {
         qWarning() << "Failed to prepare saveMessage statement:" << m_saveMessageStmt->lastError().text();
@@ -830,8 +853,8 @@ bool Database::saveMessage(const Message &msg)
     QSqlQuery query(m_db);
 
     if (!query.prepare(R"(
-        INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at, status, packet_id)
-        VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at, :status, :packet_id)
+        INSERT INTO messages (from_node, to_node, channel, port_num, text, payload, timestamp, read, created_at, status, packet_id, reply_id, is_reaction)
+        VALUES (:from, :to, :channel, :port_num, :text, :payload, :timestamp, :read, :created_at, :status, :packet_id, :reply_id, :is_reaction)
     )"))
     {
         qWarning() << "Failed to prepare message insert:" << query.lastError().text();
@@ -852,6 +875,8 @@ bool Database::saveMessage(const Message &msg)
     query.bindValue(":created_at", now);
     query.bindValue(":status", msg.status);
     query.bindValue(":packet_id", msg.packetId);
+    query.bindValue(":reply_id", msg.replyId);
+    query.bindValue(":is_reaction", msg.isReaction ? 1 : 0);
 
     if (!query.exec())
     {
@@ -895,6 +920,8 @@ QList<Database::Message> Database::loadMessages(int limit, int offset)
         msg.read = query.value("read").toBool();
         msg.status = query.value("status").toInt();
         msg.packetId = query.value("packet_id").toUInt();
+        msg.replyId = query.value("reply_id").toUInt();
+        msg.isReaction = query.value("is_reaction").toBool();
         qint64 ts = query.value("timestamp").toLongLong();
         if (ts > 0)
         {
@@ -1120,6 +1147,8 @@ QList<ChatMessage> Database::getAllMessages()
         msg.text = query.value("text").toString();
         msg.read = query.value("read").toBool();
         msg.packetId = query.value("packet_id").toUInt();
+        msg.replyId = query.value("reply_id").toUInt();
+        msg.isReaction = query.value("is_reaction").toBool();
         qint64 ts = query.value("timestamp").toLongLong();
         if (ts > 0)
         {

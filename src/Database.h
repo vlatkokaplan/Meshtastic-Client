@@ -45,6 +45,8 @@ public:
         QByteArray payload;
         int status = 0; // MessageStatus enum value
         uint32_t packetId = 0;
+        uint32_t replyId = 0;     // tapback target
+        bool isReaction = false;
     };
 
     bool saveMessage(const Message &msg);

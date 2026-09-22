@@ -23,6 +23,8 @@
 #include <QMouseEvent>
 #include <algorithm>
 #include "AppSettings.h"
+#include <QMap>
+#include <QSet>
 
 // Custom roles for message data
 enum MessageRoles {
@@ -31,8 +33,73 @@ enum MessageRoles {
     TimeRole,
     StatusRole,
     IsOutgoingRole,
-    FromNodeRole
+    FromNodeRole,
+    ReactionsRole,     // aggregated tapbacks, e.g. "\U0001F44D 2  \u2764\uFE0F"
+    IsEmojiOnlyRole    // message is nothing but emoji: draw it large
 };
+
+namespace {
+
+// True when every visible codepoint is emoji. Such a message is drawn at
+// several times the normal size, the way every other chat client does - at body
+// text size an emoji is an illegible smudge.
+// Qt's painter does not reliably fall back to a colour emoji font, so an emoji
+// draws as a replacement box even when one is installed. Naming the emoji
+// families explicitly as fallbacks fixes it; unavailable ones are ignored.
+QFont withEmojiFallback(const QFont &base)
+{
+    QFont f = base;
+    QStringList families = f.families();
+    if (families.isEmpty())
+        families << f.family();
+    families << "Noto Color Emoji" << "Apple Color Emoji" << "Segoe UI Emoji" << "Symbola";
+    f.setFamilies(families);
+    return f;
+}
+
+bool isEmojiOnly(const QString &text)
+{
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty())
+        return false;
+
+    bool sawEmoji = false;
+    int emojiCount = 0;
+
+    for (const uint cp : trimmed.toUcs4())
+    {
+        if (QChar::isSpace(cp))
+            continue;
+
+        const bool isEmoji =
+            (cp >= 0x1F300 && cp <= 0x1FAFF) ||   // pictographs, faces, symbols
+            (cp >= 0x2600  && cp <= 0x27BF)  ||   // misc symbols and dingbats
+            (cp >= 0x1F000 && cp <= 0x1F0FF) ||   // mahjong, cards
+            (cp >= 0x2B00  && cp <= 0x2BFF)  ||   // arrows and shapes
+            (cp >= 0x1F1E6 && cp <= 0x1F1FF);     // regional indicators (flags)
+
+        // Joiners, variation selectors and skin tones are part of a sequence
+        const bool isModifier =
+            cp == 0x200D || cp == 0xFE0F || cp == 0xFE0E ||
+            (cp >= 0x1F3FB && cp <= 0x1F3FF) ||
+            (cp >= 0x20E0 && cp <= 0x20FF);
+
+        if (isEmoji)
+        {
+            sawEmoji = true;
+            emojiCount++;
+        }
+        else if (!isModifier)
+        {
+            return false;    // ordinary text
+        }
+    }
+
+    // A wall of emoji is a message, not a reaction - keep those at normal size
+    return sawEmoji && emojiCount <= 8;
+}
+
+} // namespace
 
 // Modern chat bubble delegate with click detection
 class MessageItemDelegate : public QStyledItemDelegate
@@ -116,11 +183,24 @@ public:
         senderFont.setBold(true);
         QFontMetrics senderFm(senderFont);
 
-        QFontMetrics messageFm(option.font);
+        // An emoji-only message is drawn several times larger; at body size it
+        // is an illegible smudge.
+        const bool emojiOnly = index.data(IsEmojiOnlyRole).toBool();
+        QFont messageFont = withEmojiFallback(option.font);
+        if (emojiOnly)
+            messageFont.setPointSizeF(option.font.pointSizeF() * 2.8);
+        QFontMetrics messageFm(messageFont);
 
         QFont metaFont = option.font;
         metaFont.setPointSizeF(option.font.pointSizeF() * 0.85);
         QFontMetrics metaFm(metaFont);
+
+        // Tapbacks on this message, shown on a strip beneath the bubble
+        const QString reactions = index.data(ReactionsRole).toString();
+        QFont reactionFont = withEmojiFallback(option.font);
+        reactionFont.setPointSizeF(option.font.pointSizeF() * 1.15);
+        QFontMetrics reactionFm(reactionFont);
+        const int reactionHeight = reactions.isEmpty() ? 0 : reactionFm.height() + 6;
 
         // Calculate content widths
         int senderWidth = isOutgoing ? 0 : senderFm.horizontalAdvance(sender);
@@ -193,6 +273,7 @@ public:
         // Draw message text
         painter->setFont(option.font);
         painter->setPen(textColor);
+        painter->setFont(messageFont);
         QRect msgRect(textX, textY, textWidth, msgBound.height());
         painter->drawText(msgRect, Qt::TextWordWrap, messageText);
         textY += msgBound.height() + 2;
@@ -201,6 +282,28 @@ public:
         painter->setFont(metaFont);
         painter->setPen(metaColor);
         painter->drawText(bubbleRect.right() - hPadding - metaWidth, textY + metaFm.ascent(), meta);
+
+        // Tapbacks sit just below the bubble on a rounded chip, so a reaction
+        // reads as attached to its message rather than as a message of its own.
+        if (!reactions.isEmpty())
+        {
+            painter->setFont(reactionFont);
+            const int chipW = reactionFm.horizontalAdvance(reactions) + 14;
+            const int chipH = reactionFm.height() + 2;
+            const int chipX = isOutgoing ? bubbleRect.right() - chipW
+                                         : bubbleRect.left();
+            const QRect chip(chipX, bubbleRect.bottom() - 2, chipW, chipH);
+
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(QColor("#ffffff"));
+            painter->drawRoundedRect(chip, chipH / 2, chipH / 2);
+            painter->setPen(QPen(QColor("#ced4da"), 1));
+            painter->setBrush(Qt::NoBrush);
+            painter->drawRoundedRect(chip, chipH / 2, chipH / 2);
+
+            painter->setPen(QColor("#212529"));
+            painter->drawText(chip, Qt::AlignCenter, reactions);
+        }
 
         painter->restore();
     }
@@ -212,6 +315,8 @@ public:
         QString messageText = index.data(MessageTextRole).toString();
         QString timeStr = index.data(TimeRole).toString();
         QString statusStr = index.data(StatusRole).toString();
+        const bool emojiOnly = index.data(IsEmojiOnlyRole).toBool();
+        const QString reactions = index.data(ReactionsRole).toString();
 
         int bubbleMaxWidth = 350;
         int hPadding = 10;
@@ -221,11 +326,20 @@ public:
         QFont senderFont = option.font;
         senderFont.setBold(true);
         QFontMetrics senderFm(senderFont);
-        QFontMetrics messageFm(option.font);
+
+        QFont messageFont = withEmojiFallback(option.font);
+        if (emojiOnly)
+            messageFont.setPointSizeF(option.font.pointSizeF() * 2.8);
+        QFontMetrics messageFm(messageFont);
 
         QFont metaFont = option.font;
         metaFont.setPointSizeF(option.font.pointSizeF() * 0.85);
         QFontMetrics metaFm(metaFont);
+
+        QFont reactionFont = withEmojiFallback(option.font);
+        reactionFont.setPointSizeF(option.font.pointSizeF() * 1.15);
+        const int reactionHeight = reactions.isEmpty()
+                                       ? 0 : QFontMetrics(reactionFont).height() + 6;
 
         // Calculate widths needed
         int senderWidth = isOutgoing ? 0 : senderFm.horizontalAdvance(sender);
@@ -242,7 +356,8 @@ public:
 
         int senderHeight = isOutgoing ? 0 : senderFm.height() + 2;
         int metaHeight = metaFm.height();
-        int totalHeight = senderHeight + msgBound.height() + metaHeight + 2 * vPadding + margin + 2;
+        int totalHeight = senderHeight + msgBound.height() + metaHeight
+                          + 2 * vPadding + margin + 2 + reactionHeight;
 
         return QSize(option.rect.width(), totalHeight);
     }
@@ -832,8 +947,32 @@ void MessagesWidget::updateMessageDisplay()
 
     uint32_t myNode = m_nodeManager->myNodeNum();
 
+    // Gather tapbacks first, keyed by the message they respond to, so they can
+    // be drawn attached to it rather than as messages in their own right.
+    // Identical emoji are counted rather than repeated.
+    QMap<uint32_t, QMap<QString, int>> reactionsFor;
+    QSet<uint32_t> reactionIds;
     for (const ChatMessage &msg : m_messages)
     {
+        if (!msg.isReaction || msg.replyId == 0)
+            continue;
+        reactionsFor[msg.replyId][msg.text.trimmed()]++;
+        if (msg.packetId != 0)
+            reactionIds.insert(msg.packetId);
+    }
+
+    // A reaction whose target we do not have would vanish entirely, so those
+    // are still shown as ordinary messages.
+    QSet<uint32_t> presentIds;
+    for (const ChatMessage &msg : m_messages)
+        if (msg.packetId != 0)
+            presentIds.insert(msg.packetId);
+
+    for (const ChatMessage &msg : m_messages)
+    {
+        if (msg.isReaction && msg.replyId != 0 && presentIds.contains(msg.replyId))
+            continue;   // drawn on its target instead
+
         bool show = false;
 
         if (m_currentType == ConversationType::Channel)
@@ -902,6 +1041,19 @@ void MessagesWidget::updateMessageDisplay()
         item->setData(StatusRole, statusStr);
         item->setData(IsOutgoingRole, isOutgoing);
         item->setData(FromNodeRole, msg.fromNode);
+        item->setData(IsEmojiOnlyRole, isEmojiOnly(msg.text));
+
+        QString reactionText;
+        if (msg.packetId != 0 && reactionsFor.contains(msg.packetId))
+        {
+            const auto &counts = reactionsFor[msg.packetId];
+            QStringList parts;
+            for (auto it = counts.constBegin(); it != counts.constEnd(); ++it)
+                parts << (it.value() > 1 ? QString("%1 %2").arg(it.key()).arg(it.value())
+                                         : it.key());
+            reactionText = parts.join("  ");
+        }
+        item->setData(ReactionsRole, reactionText);
 
         // Tooltip with full status info
         QString tooltip;

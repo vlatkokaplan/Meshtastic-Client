@@ -58,6 +58,11 @@ struct ChatMessage
     bool read = false;
     uint32_t packetId = 0;
     MessageStatus status = MessageStatus::Sending;
+
+    // Tapbacks: the id of the message being responded to, and whether this is
+    // a reaction rather than a reply carrying its own text.
+    uint32_t replyId = 0;
+    bool isReaction = false;
 };
 
 class MessagesWidget : public QWidget

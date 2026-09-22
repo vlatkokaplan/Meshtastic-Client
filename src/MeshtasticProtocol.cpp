@@ -444,6 +444,13 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
         {
         case PortNum::TextMessage:
             fields["text"] = QString::fromUtf8(payloadData);
+            // A tapback is a text message carrying the id of what it responds
+            // to, with emoji set. Without these it arrives as an ordinary
+            // message and the thread loses the link.
+            if (decoded.reply_id() != 0)
+                fields["replyId"] = static_cast<uint32_t>(decoded.reply_id());
+            if (decoded.emoji() != 0)
+                fields["isReaction"] = true;
             break;
 
         case PortNum::Position:
@@ -667,6 +674,10 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
                 {
                 case PortNum::TextMessage:
                     fields["text"] = QString::fromUtf8(payloadData);
+                    if (data.reply_id() != 0)
+                        fields["replyId"] = static_cast<uint32_t>(data.reply_id());
+                    if (data.emoji() != 0)
+                        fields["isReaction"] = true;
                     break;
                 case PortNum::Position:
                     fields.insert(decodePosition(payloadData));

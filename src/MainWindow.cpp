@@ -977,6 +977,8 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
                                            : packet.channelIndex;
                 msg.timestamp = QDateTime::currentDateTime();
                 msg.packetId = packet.fields.value("packetId", 0).toUInt();
+                msg.replyId = packet.fields.value("replyId", 0).toUInt();
+                msg.isReaction = packet.fields.value("isReaction", false).toBool();
                 m_messagesWidget->addMessage(msg);
 
                 // Autoresponder: handle !commands in DMs
@@ -1866,6 +1868,8 @@ void MainWindow::onSendReaction(const QString &emoji, uint32_t toNode, int chann
     msg.timestamp = QDateTime::currentDateTime();
     msg.isOutgoing = true;
     msg.packetId = packetId;
+    msg.replyId = replyId;
+    msg.isReaction = true;
     m_messagesWidget->addMessage(msg);
 
     statusBar()->showMessage(QString("Reaction %1 sent").arg(emoji), 3000);

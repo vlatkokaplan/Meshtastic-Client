@@ -69,7 +69,7 @@ private slots:
     void onPositionRefreshTick();
     void onClearNodeDatabase();
     void onForgetRadio();
-    void onSendMessage(const QString &text, uint32_t toNode, int channel);
+    void onSendMessage(const QString &text, uint32_t toNode, int channel, uint32_t replyId);
     void onSendReaction(const QString &emoji, uint32_t toNode, int channel, uint32_t replyId);
     void onSettingChanged(const QString &key, const QVariant &value);
 

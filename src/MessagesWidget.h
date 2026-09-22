@@ -90,7 +90,8 @@ public:
     int totalUnreadCount() const;
 
 signals:
-    void sendMessage(const QString &text, uint32_t toNode, int channel);
+    // replyId is the packet being replied to, or 0 for a new message
+    void sendMessage(const QString &text, uint32_t toNode, int channel, uint32_t replyId);
     void sendReaction(const QString &emoji, uint32_t toNode, int channel, uint32_t replyId);
     void nodeClicked(uint32_t nodeNum);  // Emitted when user clicks a node name in messages
     void unreadCountChanged(int count);
@@ -143,6 +144,17 @@ private:
     // Reply mode
     uint32_t m_replyToPacketId = 0;
     uint32_t m_replyToNode = 0;
+    QString m_replyToText;          // shown while composing a reply
+
+    void enterReplyMode(uint32_t packetId, uint32_t fromNode, const QString &text);
+    void cancelReplyMode();
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
+private:
+    // Finds a message by packet id, for quoting what a reply answers
+    const ChatMessage *messageByPacketId(uint32_t packetId) const;
 
     void setupUI();
     void updateConversationList();

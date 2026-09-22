@@ -23,6 +23,8 @@
 #include <QMouseEvent>
 #include <algorithm>
 #include "AppSettings.h"
+#include <QEvent>
+#include <QKeyEvent>
 #include <QMap>
 #include <QSet>
 
@@ -35,7 +37,9 @@ enum MessageRoles {
     IsOutgoingRole,
     FromNodeRole,
     ReactionsRole,     // aggregated tapbacks, e.g. "\U0001F44D 2  \u2764\uFE0F"
-    IsEmojiOnlyRole    // message is nothing but emoji: draw it large
+    IsEmojiOnlyRole,   // message is nothing but emoji: draw it large
+    ReplyToSenderRole, // who wrote the message this one answers
+    ReplyToTextRole    // a short excerpt of it, quoted above the body
 };
 
 namespace {
@@ -195,6 +199,15 @@ public:
         metaFont.setPointSizeF(option.font.pointSizeF() * 0.85);
         QFontMetrics metaFm(metaFont);
 
+        // What this message replies to, quoted above the body
+        const QString replySender = index.data(ReplyToSenderRole).toString();
+        const QString replyText = index.data(ReplyToTextRole).toString();
+        const bool hasQuote = !replyText.isEmpty();
+        QFont quoteFont = option.font;
+        quoteFont.setPointSizeF(option.font.pointSizeF() * 0.85);
+        QFontMetrics quoteFm(quoteFont);
+        const int quoteHeight = hasQuote ? quoteFm.height() * 2 + 6 : 0;
+
         // Tapbacks on this message, shown on a strip beneath the bubble
         const QString reactions = index.data(ReactionsRole).toString();
         QFont reactionFont = withEmojiFallback(option.font);
@@ -221,7 +234,8 @@ public:
         // Calculate heights
         int senderHeight = isOutgoing ? 0 : senderFm.height() + 2;
         int metaHeight = metaFm.height();
-        int bubbleHeight = senderHeight + msgBound.height() + metaHeight + 2 * vPadding + 2;
+        int bubbleHeight = senderHeight + quoteHeight + msgBound.height()
+                           + metaHeight + 2 * vPadding + 2;
 
         // Position bubble
         int bubbleX = isOutgoing ? fullRect.right() - bubbleWidth - margin : fullRect.left() + margin;
@@ -273,6 +287,27 @@ public:
         // Draw message text
         painter->setFont(option.font);
         painter->setPen(textColor);
+        if (hasQuote)
+        {
+            // A tinted bar and a dimmed excerpt, the usual shorthand for "this
+            // answers that"
+            const QRect quoteRect(textX, textY, textWidth, quoteHeight - 4);
+            QColor barColor = isOutgoing ? QColor(255, 255, 255, 160) : QColor("#0084ff");
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(barColor);
+            painter->drawRoundedRect(QRect(quoteRect.left(), quoteRect.top(), 3,
+                                           quoteRect.height()), 1.5, 1.5);
+
+            painter->setFont(quoteFont);
+            painter->setPen(isOutgoing ? QColor(255, 255, 255, 200) : QColor("#495057"));
+            const int qx = quoteRect.left() + 8;
+            if (!replySender.isEmpty())
+                painter->drawText(qx, quoteRect.top() + quoteFm.ascent(), replySender);
+            painter->drawText(qx, quoteRect.top() + quoteFm.height() + quoteFm.ascent(),
+                              quoteFm.elidedText(replyText, Qt::ElideRight, textWidth - 12));
+            textY += quoteHeight;
+        }
+
         painter->setFont(messageFont);
         QRect msgRect(textX, textY, textWidth, msgBound.height());
         painter->drawText(msgRect, Qt::TextWordWrap, messageText);
@@ -317,6 +352,7 @@ public:
         QString statusStr = index.data(StatusRole).toString();
         const bool emojiOnly = index.data(IsEmojiOnlyRole).toBool();
         const QString reactions = index.data(ReactionsRole).toString();
+        const bool hasQuote = !index.data(ReplyToTextRole).toString().isEmpty();
 
         int bubbleMaxWidth = 350;
         int hPadding = 10;
@@ -341,6 +377,10 @@ public:
         const int reactionHeight = reactions.isEmpty()
                                        ? 0 : QFontMetrics(reactionFont).height() + 6;
 
+        QFont quoteFont = option.font;
+        quoteFont.setPointSizeF(option.font.pointSizeF() * 0.85);
+        const int quoteHeight = hasQuote ? QFontMetrics(quoteFont).height() * 2 + 6 : 0;
+
         // Calculate widths needed
         int senderWidth = isOutgoing ? 0 : senderFm.horizontalAdvance(sender);
         QString meta = statusStr.isEmpty() ? timeStr : timeStr + "  " + statusStr;
@@ -356,7 +396,7 @@ public:
 
         int senderHeight = isOutgoing ? 0 : senderFm.height() + 2;
         int metaHeight = metaFm.height();
-        int totalHeight = senderHeight + msgBound.height() + metaHeight
+        int totalHeight = senderHeight + quoteHeight + msgBound.height() + metaHeight
                           + 2 * vPadding + margin + 2 + reactionHeight;
 
         return QSize(option.rect.width(), totalHeight);
@@ -754,6 +794,8 @@ void MessagesWidget::loadFromDatabase()
         msg.isOutgoing = (dbMsg.fromNode == m_nodeManager->myNodeNum());
         msg.status = static_cast<MessageStatus>(dbMsg.status);
         msg.packetId = dbMsg.packetId;
+        msg.replyId = dbMsg.replyId;
+        msg.isReaction = dbMsg.isReaction;
 
         m_messages.append(msg);
     }
@@ -789,6 +831,7 @@ void MessagesWidget::clear()
     m_currentDmNode = 0;
     m_manualDmPartners.clear();
     m_inputEdit->setEnabled(false);
+    m_inputEdit->installEventFilter(this);
     m_sendButton->setEnabled(false);
     m_headerLabel->setText("Select a channel or conversation");
     clearChannels();
@@ -912,28 +955,74 @@ void MessagesWidget::onConversationSelected(QTreeWidgetItem *item, int column)
         m_inputEdit->setFocus();
 }
 
+bool MessagesWidget::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_inputEdit && event->type() == QEvent::KeyPress)
+    {
+        auto *key = static_cast<QKeyEvent *>(event);
+        if (key->key() == Qt::Key_Escape && m_replyToPacketId != 0)
+        {
+            cancelReplyMode();
+            return true;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
 void MessagesWidget::onSendClicked()
 {
     QString text = m_inputEdit->text().trimmed();
     if (text.isEmpty())
         return;
 
+    const uint32_t replyId = m_replyToPacketId;
+
     if (m_currentType == ConversationType::Channel)
     {
         // Send to channel (broadcast)
-        emit sendMessage(text, 0xFFFFFFFF, m_currentChannel);
+        emit sendMessage(text, 0xFFFFFFFF, m_currentChannel, replyId);
     }
     else if (m_currentType == ConversationType::DirectMessage)
     {
         // Send direct message to specific node
-        emit sendMessage(text, m_currentDmNode, 0);
+        emit sendMessage(text, m_currentDmNode, 0, replyId);
     }
 
-    // Clear reply mode
+    cancelReplyMode();
+    m_inputEdit->clear();
+}
+
+const ChatMessage *MessagesWidget::messageByPacketId(uint32_t packetId) const
+{
+    if (packetId == 0)
+        return nullptr;
+    for (const ChatMessage &m : m_messages)
+        if (m.packetId == packetId)
+            return &m;
+    return nullptr;
+}
+
+void MessagesWidget::enterReplyMode(uint32_t packetId, uint32_t fromNode, const QString &text)
+{
+    m_replyToPacketId = packetId;
+    m_replyToNode = fromNode;
+    m_replyToText = text;
+
+    // Show what is being answered, not just that a reply is in progress
+    QString preview = text.simplified();
+    if (preview.length() > 40)
+        preview = preview.left(40) + QStringLiteral("\u2026");
+    m_inputEdit->setPlaceholderText(
+        QString("Replying to %1: \"%2\"   (Esc to cancel)").arg(getNodeName(fromNode), preview));
+    m_inputEdit->setFocus();
+}
+
+void MessagesWidget::cancelReplyMode()
+{
     m_replyToPacketId = 0;
     m_replyToNode = 0;
+    m_replyToText.clear();
     m_inputEdit->setPlaceholderText("Type a message...");
-    m_inputEdit->clear();
 }
 
 void MessagesWidget::updateMessageDisplay()
@@ -1054,6 +1143,27 @@ void MessagesWidget::updateMessageDisplay()
             reactionText = parts.join("  ");
         }
         item->setData(ReactionsRole, reactionText);
+
+        // A reply quotes what it answers, so the thread is readable without
+        // scrolling back to find the message it refers to.
+        if (msg.replyId != 0 && !msg.isReaction)
+        {
+            if (const ChatMessage *target = messageByPacketId(msg.replyId))
+            {
+                QString excerpt = target->text.simplified();
+                if (excerpt.length() > 60)
+                    excerpt = excerpt.left(60) + QStringLiteral("\u2026");
+                item->setData(ReplyToSenderRole, getNodeName(target->fromNode));
+                item->setData(ReplyToTextRole, excerpt);
+            }
+            else
+            {
+                // The original is not in our history - say so rather than
+                // silently dropping the fact that this is a reply.
+                item->setData(ReplyToSenderRole, QString());
+                item->setData(ReplyToTextRole, QStringLiteral("original message not stored"));
+            }
+        }
 
         // Tooltip with full status info
         QString tooltip;
@@ -1309,10 +1419,7 @@ void MessagesWidget::onMessageContextMenu(const QPoint &pos)
     if (selected == replyAction)
     {
         // Set up reply mode - prefix input with reply indicator
-        m_replyToPacketId = packetId;
-        m_replyToNode = fromNode;
-        m_inputEdit->setPlaceholderText(QString("Replying to message..."));
-        m_inputEdit->setFocus();
+        enterReplyMode(packetId, fromNode, item->data(MessageTextRole).toString());
     }
     else if (selected == copyAction)
     {

@@ -1021,8 +1021,13 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
                             {
                                 qDebug() << "[Autoresponder]" << cmd << "from"
                                          << QString::number(packet.from, 16) << "->" << response;
-                                QTimer::singleShot(500, this, [this, response, fromNode = packet.from]() {
-                                    onSendMessage(response, fromNode, 0);
+                                // Answer as a reply to the command, so the
+                                // exchange reads as a pair rather than two
+                                // unrelated messages.
+                                const uint32_t replyTo = msg.packetId;
+                                QTimer::singleShot(500, this, [this, response, replyTo,
+                                                               fromNode = packet.from]() {
+                                    onSendMessage(response, fromNode, 0, replyTo);
                                 });
                             }
                         }
@@ -1802,7 +1807,7 @@ void MainWindow::closeDatabase()
     m_dbNodeCount = 0;
 }
 
-void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel)
+void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel, uint32_t replyId)
 {
     if (!isDeviceConnected())
     {
@@ -1812,7 +1817,7 @@ void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     uint32_t packetId = 0;
-    QByteArray packet = m_protocol->createTextMessagePacket(text, toNode, myNode, channel, 0, &packetId);
+    QByteArray packet = m_protocol->createTextMessagePacket(text, toNode, myNode, channel, replyId, &packetId);
     bool sent = sendToDevice(packet);
 
     qDebug() << "[MainWindow] Sent message with packetId:" << packetId << "ok:" << sent;
@@ -1829,6 +1834,7 @@ void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel
     // A write that never reached the device will never be ACKed, so don't leave
     // it spinning on "Sending..."
     msg.status = sent ? MessageStatus::Sending : MessageStatus::Failed;
+    msg.replyId = replyId;
     m_messagesWidget->addMessage(msg);
 
     QString destName;

@@ -341,6 +341,33 @@ private slots:
         QCOMPARE(decoded.channelIndex, foreignHash);
     }
 
+    void real_captured_tapback_is_recognised()
+    {
+        // A genuine reaction captured off the air: "\u2615" sent as a tapback to
+        // an earlier message. Kept verbatim because the wire encoding of the
+        // emoji field is what decides whether a reaction is recognised at all,
+        // and a hand-built packet would only prove our own encoder agrees with
+        // our own decoder.
+        const QByteArray frame = QByteArray::fromHex(
+            "12440DBC8A60AE15FFFFFFFF221308011203E298953DA8A402724501000000"
+            "480035C0F919C03D5915B26A4500002C41480160C8FFFFFFFFFFFFFFFF0178"
+            "039801EE01A80101");
+
+        meshtastic::FromRadio fr;
+        QVERIFY(fr.ParseFromArray(frame.constData(), frame.size()));
+        QVERIFY(fr.has_packet());
+
+        const auto &data = fr.packet().decoded();
+        QCOMPARE(static_cast<int>(data.portnum()), 1);          // TEXT_MESSAGE_APP
+        QCOMPARE(QString::fromStdString(data.payload()), QString("\u2615"));
+
+        // The two fields that make this a tapback rather than a message
+        QCOMPARE(static_cast<uint32_t>(data.reply_id()), 1912775848u);
+        QVERIFY2(data.emoji() != 0,
+                 "emoji must decode non-zero, or a reaction is indistinguishable "
+                 "from a message that happens to contain one");
+    }
+
     void ignores_garbage_bytes_before_sync()
     {
         MeshtasticProtocol proto;

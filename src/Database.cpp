@@ -8,7 +8,9 @@
 #include <QDebug>
 #include <QUuid>
 
-static const int SCHEMA_VERSION = 9;
+#include "meshtastic/mesh.pb.h"
+
+static const int SCHEMA_VERSION = 10;
 
 Database::Database(QObject *parent)
     : QObject(parent)
@@ -503,9 +505,86 @@ bool Database::migrateSchema(int fromVersion, int toVersion)
             qDebug() << "Database migrated to schema version 9";
             break;
         }
+
+        case 10:
+            // Reactions received before the columns existed are still
+            // recoverable: the raw frame was kept alongside every packet, and
+            // it carries reply_id and emoji even though neither was parsed at
+            // the time. Re-read them rather than leaving months of tapbacks
+            // showing as ordinary messages.
+            qDebug() << "Migrating to schema version 10 - recovering reactions from stored packets";
+            backfillReactionsFromPackets();
+            qDebug() << "Database migrated to schema version 10";
+            break;
         }
     }
     return true;
+}
+
+// Re-reads reply_id and emoji out of the raw frames kept in the packets table
+// and applies them to the matching messages. Only fills rows that have neither
+// set, so it never overwrites anything parsed live.
+void Database::backfillReactionsFromPackets()
+{
+    QSqlQuery read(m_db);
+    if (!read.exec("SELECT raw_data FROM packets WHERE port_num = 1 AND raw_data IS NOT NULL"))
+    {
+        qWarning() << "Reaction backfill: could not read packets:" << read.lastError().text();
+        return;
+    }
+
+    struct Tapback { uint32_t replyId; bool isReaction; };
+    QMap<uint32_t, Tapback> found;
+
+    while (read.next())
+    {
+        const QByteArray raw = read.value(0).toByteArray();
+        if (raw.isEmpty())
+            continue;
+
+        meshtastic::FromRadio fr;
+        if (!fr.ParseFromArray(raw.constData(), raw.size()) || !fr.has_packet())
+            continue;
+
+        const auto &pkt = fr.packet();
+        if (!pkt.has_decoded())
+            continue;      // encrypted frames were stored as they arrived
+
+        const auto &data = pkt.decoded();
+        if (data.reply_id() == 0)
+            continue;
+
+        found.insert(pkt.id(), {static_cast<uint32_t>(data.reply_id()), data.emoji() != 0});
+    }
+
+    if (found.isEmpty())
+        return;
+
+    if (!m_db.transaction())
+    {
+        qWarning() << "Reaction backfill: could not begin transaction";
+        return;
+    }
+
+    QSqlQuery update(m_db);
+    update.prepare("UPDATE messages SET reply_id = ?, is_reaction = ? "
+                   "WHERE packet_id = ? AND reply_id = 0 AND is_reaction = 0");
+
+    int applied = 0;
+    for (auto it = found.constBegin(); it != found.constEnd(); ++it)
+    {
+        update.addBindValue(it.value().replyId);
+        update.addBindValue(it.value().isReaction ? 1 : 0);
+        update.addBindValue(it.key());
+        if (update.exec())
+            applied += update.numRowsAffected();
+        else
+            qWarning() << "Reaction backfill:" << update.lastError().text();
+    }
+
+    m_db.commit();
+    qDebug() << "Reaction backfill: recovered" << applied << "of" << found.size()
+             << "replies/reactions from stored packets";
 }
 
 int Database::getSchemaVersion()

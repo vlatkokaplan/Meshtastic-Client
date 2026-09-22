@@ -165,6 +165,8 @@ private:
 
     bool createTables();
     bool migrateSchema(int fromVersion, int toVersion);
+    // One-off recovery of tapbacks stored before the columns existed
+    void backfillReactionsFromPackets();
     int getSchemaVersion();
     void setSchemaVersion(int version);
     bool prepareStatements();

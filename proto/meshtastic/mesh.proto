@@ -161,7 +161,12 @@ message Data {
     fixed32 source = 5;
     fixed32 request_id = 6;
     fixed32 reply_id = 7;
-    uint32 emoji = 8;
+    // fixed32, not uint32: the firmware encodes this as a 32-bit fixed value,
+    // and declaring it as a varint made protobuf treat every real tapback's
+    // emoji field as unknown and return 0 - so reactions never decoded as
+    // reactions. Matches upstream meshtastic/protobufs.
+    fixed32 emoji = 8;
+    optional uint32 bitfield = 9;
 }
 
 message MeshPacket {

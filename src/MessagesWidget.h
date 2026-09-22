@@ -22,7 +22,16 @@ struct ChannelInfo
     QString name;
     QString psk; // Not displayed, just stored
     bool enabled = false;
+    // A channel we are not configured for, recovered by decrypting with a
+    // well-known key. Readable, but there is no key to reply with.
+    bool foreign = false;
 };
+
+// Foreign channels are keyed by their wire hash offset past any real channel
+// index, since a hash of 0-7 would otherwise land on one of our own channels.
+constexpr int kForeignChannelBase = 1000;
+inline int foreignChannelKey(int hash) { return kForeignChannelBase + hash; }
+inline bool isForeignChannel(int key) { return key >= kForeignChannelBase; }
 
 enum class MessageStatus
 {
@@ -68,6 +77,9 @@ public:
 
     // Channel management
     void setChannel(int index, const QString &name, bool enabled);
+    // Registers a channel we are not configured for, so its traffic has
+    // somewhere to appear instead of being dropped.
+    void addForeignChannel(int hash);
     void clearChannels();
 
     int totalUnreadCount() const;

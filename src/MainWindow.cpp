@@ -935,30 +935,45 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             // decrypted it with the key of a configured channel, which sets
             // resolvedChannel.
             //
-            // This used to exclude everything the app decrypted, because the
-            // only app-side path was a brute-force sweep of the default keys,
-            // whose results come from channels we are not configured for and
-            // belong in the Packet List alone. Matching the channel hash added a
-            // second, trustworthy path - and messages arriving on our own
-            // channels were being dropped with the brute-forced ones.
+            // Three cases, and each belongs somewhere different:
+            //   the device decoded it            -> one of our channels
+            //   we decrypted it via a channel key -> one of our channels
+            //   we recovered it by key sweep      -> someone else's channel
+            // Everything the app decrypted used to be dropped, which lost the
+            // middle case entirely and left the last one invisible.
             const bool deviceDecoded = !packet.fields.contains("decrypted");
             const bool onKnownChannel = packet.fields.contains("resolvedChannel");
 
+            // Traffic recovered by sweeping the well-known keys belongs to a
+            // channel we are not configured for. It is readable, so dropping it
+            // silently is wrong, but it must not be mixed in with our own
+            // channels either - it gets a read-only conversation of its own,
+            // named by the channel hash it arrived under.
             if (m_messagesWidget && packet.fields.contains("text")
-                && (deviceDecoded || onKnownChannel))
+                && !deviceDecoded && !onKnownChannel)
             {
+                m_messagesWidget->addForeignChannel(packet.channelIndex);
+            }
+
+            if (m_messagesWidget && packet.fields.contains("text"))
+            {
+                const bool foreign = !deviceDecoded && !onKnownChannel;
                 ChatMessage msg;
                 msg.fromNode = packet.from;
                 msg.toNode = packet.to;
                 msg.text = packet.fields["text"].toString();
-                msg.channelIndex = packet.channelIndex;
+                msg.channelIndex = foreign ? foreignChannelKey(packet.channelIndex)
+                                           : packet.channelIndex;
                 msg.timestamp = QDateTime::currentDateTime();
                 msg.packetId = packet.fields.value("packetId", 0).toUInt();
                 m_messagesWidget->addMessage(msg);
 
                 // Autoresponder: handle !commands in DMs
                 uint32_t myNode = m_nodeManager->myNodeNum();
-                bool isDM = (packet.to == myNode && packet.to != 0xFFFFFFFF);
+                // Never autorespond on a channel we hold no key for: the reply
+                // could not be encrypted for it, and answering traffic we only
+                // happened to overhear is not ours to do.
+                bool isDM = !foreign && (packet.to == myNode && packet.to != 0xFFFFFFFF);
                 bool isFromOther = (packet.from != myNode);
                 QString trimmed = msg.text.trimmed();
 

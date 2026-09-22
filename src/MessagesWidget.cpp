@@ -392,6 +392,22 @@ void MessagesWidget::setDatabase(Database *db)
     m_database = db;
 }
 
+void MessagesWidget::addForeignChannel(int hash)
+{
+    const int key = foreignChannelKey(hash);
+    if (m_channels.contains(key))
+        return;
+
+    ChannelInfo ch;
+    ch.index = key;
+    ch.name = QString("Other \u00b7 hash %1").arg(hash);
+    ch.enabled = true;
+    ch.foreign = true;
+    m_channels[key] = ch;
+
+    updateConversationList();
+}
+
 void MessagesWidget::setChannel(int index, const QString &name, bool enabled)
 {
     if (index < 0 || index > 7)
@@ -753,7 +769,9 @@ void MessagesWidget::onConversationSelected(QTreeWidgetItem *item, int column)
         QString channelName = m_channels.contains(m_currentChannel)
                                   ? m_channels[m_currentChannel].name
                                   : QString("Channel %1").arg(m_currentChannel);
-        m_headerLabel->setText(QString("# %1").arg(channelName));
+        m_headerLabel->setText(isForeignChannel(m_currentChannel)
+                                   ? QString("%1  (not one of your channels)").arg(channelName)
+                                   : QString("# %1").arg(channelName));
     }
     else if (type == ConversationType::DirectMessage)
     {
@@ -766,10 +784,17 @@ void MessagesWidget::onConversationSelected(QTreeWidgetItem *item, int column)
 
     updateMessageDisplay();
 
-    // Enable input for sending
-    m_inputEdit->setEnabled(true);
-    m_sendButton->setEnabled(true);
-    m_inputEdit->setFocus();
+    // A foreign channel is one we have no key for; its traffic is readable
+    // because it used a well-known key, but there is nothing to reply with.
+    const bool canSend = !(m_currentType == ConversationType::Channel
+                           && isForeignChannel(m_currentChannel));
+    m_inputEdit->setEnabled(canSend);
+    m_sendButton->setEnabled(canSend);
+    m_inputEdit->setPlaceholderText(
+        canSend ? QStringLiteral("Type a message...")
+                : QStringLiteral("Read-only - this channel is not configured on your device"));
+    if (canSend)
+        m_inputEdit->setFocus();
 }
 
 void MessagesWidget::onSendClicked()

@@ -264,6 +264,83 @@ private slots:
         QVERIFY(decoded.channelIndex != hash);
     }
 
+    void encrypted_text_on_an_unknown_channel_is_not_resolved()
+    {
+        // Same well-known key, but arriving under a channel hash none of our
+        // channels produce. It still decrypts - the key is public - but it is
+        // someone else's channel, and the UI has to be able to tell, because
+        // that is what decides whether it can be replied to.
+        DeviceConfig cfg;
+        DeviceConfig::LoRaConfig lora;
+        lora.modemPreset = 0;
+        cfg.setLoRaConfig(lora);
+
+        DeviceConfig::ChannelConfig ch;
+        ch.index = 0;
+        ch.role = 1;
+        ch.name = "Srbija";              // hashes to something other than 16
+        ch.psk = QByteArray(1, 0x01);
+        cfg.setChannel(0, ch);
+
+        MeshtasticProtocol proto;
+        proto.setDeviceConfig(&cfg);
+
+        const int foreignHash = 16;
+        QVERIFY(proto.channelHashFor(0) != foreignHash);
+
+        meshtastic::Data data;
+        data.set_portnum(meshtastic::PortNum::TEXT_MESSAGE_APP);
+        data.set_payload("not my channel");
+        std::string plain;
+        QVERIFY(data.SerializeToString(&plain));
+
+        const uint32_t packetId = 0x55667788;
+        const uint32_t fromNode = 0x0a0b0c0d;
+
+        unsigned char nonce[16] = {0};
+        for (int i = 0; i < 4; ++i) nonce[i] = (packetId >> (8 * i)) & 0xFF;
+        for (int i = 0; i < 4; ++i) nonce[8 + i] = (fromNode >> (8 * i)) & 0xFF;
+
+        const QByteArray key = QByteArray::fromHex("d4f1bb3a20290759f0bcffabcf4e6901");
+        QByteArray cipher(static_cast<int>(plain.size()), 0);
+        int outLen = 0;
+        EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+        QVERIFY(ctx);
+        QVERIFY(EVP_EncryptInit_ex(ctx, EVP_aes_128_ctr(), nullptr,
+                                   reinterpret_cast<const unsigned char *>(key.constData()),
+                                   nonce) == 1);
+        QVERIFY(EVP_EncryptUpdate(ctx, reinterpret_cast<unsigned char *>(cipher.data()), &outLen,
+                                  reinterpret_cast<const unsigned char *>(plain.data()),
+                                  static_cast<int>(plain.size())) == 1);
+        EVP_CIPHER_CTX_free(ctx);
+        cipher.resize(outLen);
+
+        meshtastic::FromRadio fr;
+        auto *pkt = fr.mutable_packet();
+        pkt->set_id(packetId);
+        pkt->set_from(fromNode);
+        pkt->set_to(0xFFFFFFFF);
+        pkt->set_channel(foreignHash);
+        pkt->set_encrypted(cipher.constData(), cipher.size());
+
+        std::string wire;
+        QVERIFY(fr.SerializeToString(&wire));
+
+        QSignalSpy spy(&proto, &MeshtasticProtocol::packetReceived);
+        proto.processIncomingData(makeFrame(wire));
+
+        QCOMPARE(spy.count(), 1);
+        auto decoded = spy[0][0].value<MeshtasticProtocol::DecodedPacket>();
+
+        // Readable...
+        QCOMPARE(decoded.fields["text"].toString(), QString("not my channel"));
+        QVERIFY(decoded.fields.contains("decrypted"));
+        // ...but not ours: no channel resolved, and the hash passes through
+        QVERIFY2(!decoded.fields.contains("resolvedChannel"),
+                 "a channel we hold no key for must not be reported as one of ours");
+        QCOMPARE(decoded.channelIndex, foreignHash);
+    }
+
     void ignores_garbage_bytes_before_sync()
     {
         MeshtasticProtocol proto;

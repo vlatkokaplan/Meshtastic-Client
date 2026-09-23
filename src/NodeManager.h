@@ -33,6 +33,7 @@ struct NodeInfo
     int rssi = 0;
     QDateTime lastHeard;
     int hopsAway = -1;
+    bool viaMqtt = false;  // last heard through an MQTT gateway, not over the air
 
     bool isExternalPower = false; // True if node is externally powered
     bool isFavorite = false;      // True if node is marked as favorite
@@ -96,6 +97,8 @@ public:
                         const QString &userId, const QString &hwModel);
     void updateNodeTelemetry(uint32_t nodeNum, const QVariantMap &telemetry);
     void updateNodeSignal(uint32_t nodeNum, float snr, int rssi, int hopsAway);
+    // A packet arrived through MQTT: heard, but no RF signal or hop count
+    void markHeardViaMqtt(uint32_t nodeNum);
     void setNodeFavorite(uint32_t nodeNum, bool favorite);
 
     NodeInfo getNode(uint32_t nodeNum) const;
@@ -124,6 +127,8 @@ signals:
     void nodesChanged();
 
 private:
+    static void applyDeviceMetrics(NodeInfo &node, const QVariantMap &metrics);
+
     mutable QRecursiveMutex m_mutex;  // Protects m_nodes access (recursive for signal/slot reentrancy)
     QMap<uint32_t, NodeInfo> m_nodes;
     uint32_t m_myNodeNum = 0;

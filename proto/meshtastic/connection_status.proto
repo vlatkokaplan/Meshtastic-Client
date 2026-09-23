@@ -2,42 +2,119 @@ syntax = "proto3";
 
 package meshtastic;
 
-option java_package = "com.geeksville.mesh";
-option java_outer_classname = "ConnectionStatusProtos";
+option csharp_namespace = "Meshtastic.Protobufs";
+option go_package = "github.com/meshtastic/go/generated";
+option java_outer_classname = "ConnStatusProtos";
+option java_package = "org.meshtastic.proto";
+option swift_prefix = "";
 
 message DeviceConnectionStatus {
-    WiFiConnectionStatus wifi = 1;
-    EthConnectionStatus ethernet = 2;
-    BluetoothConnectionStatus bluetooth = 3;
-    SerialConnectionStatus serial = 4;
+  /*
+   * WiFi Status
+   */
+  optional WifiConnectionStatus wifi = 1;
+  /*
+   * WiFi Status
+   */
+  optional EthernetConnectionStatus ethernet = 2;
+
+  /*
+   * Bluetooth Status
+   */
+  optional BluetoothConnectionStatus bluetooth = 3;
+
+  /*
+   * Serial Status
+   */
+  optional SerialConnectionStatus serial = 4;
 }
 
-message WiFiConnectionStatus {
-    ConnectionStatus status = 1;
-    string ssid = 2;
-    int32 rssi = 3;
-    fixed32 ip = 4;
+/*
+ * WiFi connection status
+ */
+message WifiConnectionStatus {
+  /*
+   * Connection status
+   */
+  NetworkConnectionStatus status = 1;
+
+  /*
+   * WiFi access point SSID
+   */
+  string ssid = 2;
+
+  /*
+   * RSSI of wireless connection
+   */
+  int32 rssi = 3;
 }
 
-message EthConnectionStatus {
-    ConnectionStatus status = 1;
-    fixed32 ip = 2;
+/*
+ * Ethernet connection status
+ */
+message EthernetConnectionStatus {
+  /*
+   * Connection status
+   */
+  NetworkConnectionStatus status = 1;
 }
 
+/*
+ * Ethernet or WiFi connection status
+ */
+message NetworkConnectionStatus {
+  /*
+   * IP address of device
+   */
+  fixed32 ip_address = 1;
+
+  /*
+   * Whether the device has an active connection or not
+   */
+  bool is_connected = 2;
+
+  /*
+   * Whether the device has an active connection to an MQTT broker or not
+   */
+  bool is_mqtt_connected = 3;
+
+  /*
+   * Whether the device is actively remote syslogging or not
+   */
+  bool is_syslog_connected = 4;
+}
+
+/*
+ * Bluetooth connection status
+ */
 message BluetoothConnectionStatus {
-    uint32 pin = 1;
-    int32 rssi = 2;
-    bool is_connected = 3;
+  /*
+   * The pairing PIN for bluetooth
+   */
+  uint32 pin = 1;
+
+  /*
+   * RSSI of bluetooth connection
+   */
+  int32 rssi = 2;
+
+  /*
+   * Whether the device has an active connection or not
+   */
+  bool is_connected = 3;
 }
 
+/*
+ * Serial connection status
+ */
 message SerialConnectionStatus {
-    uint32 baud = 1;
-    bool is_connected = 2;
-}
+  /*
+   * Serial baud rate
+   */
+  uint32 baud = 1;
 
-message ConnectionStatus {
-    bool is_connected = 1;
-    int32 ip_address = 2;
-    bool is_mqtt_connected = 3;
-    bool is_syslog_connected = 4;
+  /*
+   * Whether the device has an active connection or not
+   */
+  bool is_connected = 2;
 }

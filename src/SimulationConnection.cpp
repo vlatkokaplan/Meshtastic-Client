@@ -1,4 +1,6 @@
 #include "SimulationConnection.h"
+#include <QRandomGenerator>
+#include <cmath>
 #include "MeshtasticProtocol.h"
 
 #include <QDebug>
@@ -157,6 +159,7 @@ void SimulationConnection::scheduleConfigDump()
         { t += 80, &SimulationConnection::buildLoRaConfig,     "LoRa config"     },
         { t += 80, &SimulationConnection::buildDeviceConfig,   "Device config"   },
         { t += 80, &SimulationConnection::buildPositionConfig, "Position config" },
+        { t += 80, &SimulationConnection::buildSecurityConfig, "Security config" },
         { t += 80, &SimulationConnection::buildPrimaryChannel, "Primary channel" },
     };
     for (auto &c : configs) {
@@ -297,8 +300,8 @@ QByteArray SimulationConnection::buildLoRaConfig()
     meshtastic::FromRadio fr;
     auto *cfg = fr.mutable_config()->mutable_lora();
     cfg->set_use_preset(true);
-    cfg->set_modem_preset(1);  // LONG_FAST
-    cfg->set_region(5);        // EU_868
+    cfg->set_modem_preset(meshtastic::Config_LoRaConfig::LONG_FAST);
+    cfg->set_region(meshtastic::Config_LoRaConfig::EU_868);
     cfg->set_hop_limit(3);
     cfg->set_tx_enabled(true);
     cfg->set_tx_power(0);
@@ -311,9 +314,21 @@ QByteArray SimulationConnection::buildDeviceConfig()
 {
     meshtastic::FromRadio fr;
     auto *cfg = fr.mutable_config()->mutable_device();
-    cfg->set_role(0);          // CLIENT
-    cfg->set_serial_enabled(true);
+    cfg->set_role(meshtastic::Config_DeviceConfig::CLIENT);
     cfg->set_node_info_broadcast_secs(900);
+    std::string s;
+    fr.SerializeToString(&s);
+    return wrapFrame(s);
+}
+
+QByteArray SimulationConnection::buildSecurityConfig()
+{
+    meshtastic::FromRadio fr;
+    auto *cfg = fr.mutable_config()->mutable_security();
+    // Fixed dummy keypair: the simulator never encrypts anything with it
+    cfg->set_public_key(std::string(32, '\x11'));
+    cfg->set_private_key(std::string(32, '\x22'));
+    cfg->set_serial_enabled(true);
     std::string s;
     fr.SerializeToString(&s);
     return wrapFrame(s);
@@ -325,7 +340,7 @@ QByteArray SimulationConnection::buildPositionConfig()
     auto *cfg = fr.mutable_config()->mutable_position();
     cfg->set_position_broadcast_secs(900);
     cfg->set_position_broadcast_smart_enabled(true);
-    cfg->set_gps_mode(1);      // ENABLED
+    cfg->set_gps_mode(meshtastic::Config_PositionConfig::ENABLED);
     std::string s;
     fr.SerializeToString(&s);
     return wrapFrame(s);
@@ -404,7 +419,7 @@ QByteArray SimulationConnection::buildNeighborInfo(
     auto *packet = fr.mutable_packet();
     packet->set_from(fromNode);
     packet->set_to(0xFFFFFFFFu);  // broadcast
-    packet->set_id(static_cast<uint32_t>(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF));
+    packet->set_id(QRandomGenerator::global()->generate() | 1u);
     auto *decoded = packet->mutable_decoded();
     decoded->set_portnum(static_cast<meshtastic::PortNum>(67));  // NEIGHBORINFO_APP
     decoded->set_payload(niBytes);
@@ -428,8 +443,8 @@ void SimulationConnection::scheduleTracerouteDump()
     // Simulated traceroute responses — one per reachable destination.
     // SNR values are stored as int32 = actual_snr * 4 (Meshtastic wire format).
     // snrTowards[i] = SNR for hop i of the forward path.
-    // snrBack contains all hops of the return path EXCEPT the last one
-    // (MY_NODE's rx_snr covers that final hop).
+    // snrBack lists the return path's hops except the last; buildTraceroute
+    // appends that one from rxSnr, as the requester's firmware does.
     struct SimTraceroute {
         uint32_t        responder;    // packet.from  (destination, responding node)
         QList<uint32_t> route;        // intermediate nodes, forward path
@@ -486,6 +501,9 @@ QByteArray SimulationConnection::buildTraceroute(
     for (int32_t  s : snrTowards)  rd.add_snr_towards(s);
     for (uint32_t n : routeBack)   rd.add_route_back(n);
     for (int32_t  s : snrBack)     rd.add_snr_back(s);
+    // The requester's firmware appends the SNR it received the response on
+    // (TraceRouteModule::appendMyIDandSNR, SNRonly) before the app sees it
+    rd.add_snr_back(static_cast<int32_t>(std::lround(rxSnr * 4.0f)));
 
     std::string rdBytes;
     rd.SerializeToString(&rdBytes);
@@ -494,11 +512,12 @@ QByteArray SimulationConnection::buildTraceroute(
     auto *packet = fr.mutable_packet();
     packet->set_from(responder);
     packet->set_to(requester);
-    packet->set_id(static_cast<uint32_t>(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF));
+    packet->set_id(QRandomGenerator::global()->generate() | 1u);
     packet->set_rx_snr(rxSnr);
     auto *decoded = packet->mutable_decoded();
     decoded->set_portnum(static_cast<meshtastic::PortNum>(meshtastic::PortNum::TRACEROUTE_APP));
     decoded->set_payload(rdBytes);
+    decoded->set_request_id(QRandomGenerator::global()->generate() | 1u);  // a response, like the real thing
 
     std::string s;
     fr.SerializeToString(&s);
@@ -518,7 +537,7 @@ QByteArray SimulationConnection::buildRoutingAck(
     auto *packet = fr.mutable_packet();
     packet->set_from(fromNode);
     packet->set_to(toNode);
-    packet->set_id(static_cast<uint32_t>(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF));
+    packet->set_id(QRandomGenerator::global()->generate() | 1u);
     auto *decoded = packet->mutable_decoded();
     decoded->set_portnum(static_cast<meshtastic::PortNum>(meshtastic::PortNum::ROUTING_APP));
     decoded->set_payload(routingBytes);

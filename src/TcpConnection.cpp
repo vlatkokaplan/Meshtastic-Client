@@ -4,6 +4,11 @@
 TcpConnection::TcpConnection(QObject *parent)
     : QObject(parent), m_socket(new QTcpSocket(this)), m_reconnectTimer(new QTimer(this))
 {
+    // Let the OS probe an idle connection too; the app-level watchdog in
+    // MainWindow catches a dead link sooner than default keepalive timers.
+    connect(m_socket, &QTcpSocket::connected, this, [this]() {
+        m_socket->setSocketOption(QAbstractSocket::KeepAliveOption, 1);
+    });
     connect(m_socket, &QTcpSocket::connected, this, &TcpConnection::onSocketConnected);
     connect(m_socket, &QTcpSocket::disconnected, this, &TcpConnection::onSocketDisconnected);
     connect(m_socket, &QTcpSocket::readyRead, this, &TcpConnection::onReadyRead);
@@ -29,6 +34,7 @@ bool TcpConnection::connectToHost(const QString &host, quint16 port)
     m_lastPort = port;
     m_intentionalDisconnect = false;
     m_reconnectTimer->stop();
+    m_reconnectAttempts = 0;
 
     qDebug() << "[TCP] Connecting to" << host << ":" << port;
     m_socket->connectToHost(host, port);
@@ -96,19 +102,21 @@ void TcpConnection::onSocketConnected()
 {
     qDebug() << "[TCP] Connected to" << m_lastHost << ":" << m_lastPort;
     m_reconnectTimer->stop();
+    m_reconnectAttempts = 0;
     emit connected();
 }
 
 void TcpConnection::onSocketDisconnected()
 {
     qDebug() << "[TCP] Socket disconnected";
-    emit disconnected();
 
+    // Start reconnecting before announcing the disconnect: MainWindow checks
+    // isReconnecting() to decide between "reconnecting" (keep nodes and DB)
+    // and a real disconnect (clear everything).
     if (!m_intentionalDisconnect && !m_lastHost.isEmpty())
-    {
-        qDebug() << "[TCP] Starting reconnection attempts...";
-        m_reconnectTimer->start();
-    }
+        startReconnecting();
+
+    emit disconnected();
 }
 
 void TcpConnection::onReadyRead()
@@ -129,13 +137,10 @@ void TcpConnection::onSocketError(QAbstractSocket::SocketError error)
         error == QAbstractSocket::NetworkError ||
         error == QAbstractSocket::ConnectionRefusedError)
     {
-        emit errorOccurred(errorString);
-
         if (!m_intentionalDisconnect && !m_lastHost.isEmpty())
-        {
-            qDebug() << "[TCP] Starting reconnection attempts...";
-            m_reconnectTimer->start();
-        }
+            startReconnecting();
+
+        emit errorOccurred(errorString);
     }
     else
     {
@@ -143,9 +148,40 @@ void TcpConnection::onSocketError(QAbstractSocket::SocketError error)
     }
 }
 
+int TcpConnection::reconnectDelayMs(int attempt)
+{
+    const int shift = qBound(0, attempt, 4);
+    return qMin(RECONNECT_INTERVAL_MS << shift, MAX_RECONNECT_INTERVAL_MS);
+}
+
+void TcpConnection::startReconnecting()
+{
+    if (m_reconnectTimer->isActive())
+        return;
+    qDebug() << "[TCP] Starting reconnection attempts...";
+    m_reconnectTimer->start(reconnectDelayMs(m_reconnectAttempts));
+}
+
+void TcpConnection::dropAndReconnect()
+{
+    if (m_intentionalDisconnect || m_lastHost.isEmpty())
+        return;
+    qWarning() << "[TCP] No data from" << m_lastHost << "- dropping stale connection";
+    startReconnecting();   // before abort(), for the same reason as above
+    m_socket->abort();     // emits disconnected() if it was connected
+}
+
 void TcpConnection::attemptReconnect()
 {
-    qDebug() << "[TCP] Attempting to reconnect to" << m_lastHost << ":" << m_lastPort;
+    qDebug() << "[TCP] Attempting to reconnect to" << m_lastHost << ":" << m_lastPort
+             << "(attempt" << m_reconnectAttempts + 1 << ")";
     m_intentionalDisconnect = false;
+    // A previous attempt may still be resolving or connecting
+    if (m_socket->state() != QAbstractSocket::UnconnectedState)
+        m_socket->abort();
     m_socket->connectToHost(m_lastHost, m_lastPort);
+
+    // Back off: 3, 6, 12, 24, then every 30 s
+    ++m_reconnectAttempts;
+    m_reconnectTimer->setInterval(reconnectDelayMs(m_reconnectAttempts));
 }

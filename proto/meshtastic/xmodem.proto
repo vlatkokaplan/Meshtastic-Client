@@ -2,10 +2,14 @@ syntax = "proto3";
 
 package meshtastic;
 
-option java_package = "com.geeksville.mesh";
-option java_outer_classname = "XModem";
+option csharp_namespace = "Meshtastic.Protobufs";
+option go_package = "github.com/meshtastic/go/generated";
+option java_outer_classname = "XmodemProtos";
+option java_package = "org.meshtastic.proto";
+option swift_prefix = "";
 
-enum XModem_Control {
+message XModem {
+  enum Control {
     NUL = 0;
     SOH = 1;
     STX = 2;
@@ -14,11 +18,10 @@ enum XModem_Control {
     NAK = 21;
     CAN = 24;
     CTRLZ = 26;
-}
+  }
 
-message XModemPacket {
-    XModem_Control control = 1;
-    uint32 seq = 2;
-    uint32 crc16 = 3;
-    bytes buffer = 4;
+  Control control = 1;
+  uint32 seq = 2;
+  uint32 crc16 = 3;
+  bytes buffer = 4;
 }

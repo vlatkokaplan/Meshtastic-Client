@@ -390,20 +390,16 @@ void DashboardStatsWidget::updateConfig()
 
     // Role
     if (m_deviceConfig->hasDeviceConfig()) {
-        QStringList roles = DeviceConfig::deviceRoleNames();
-        int roleIdx = m_deviceConfig->deviceConfig().role;
-        m_roleLabel->setText(roleIdx < roles.size() ? roles[roleIdx] : "Unknown");
+        m_roleLabel->setText(DeviceConfig::deviceRoleName(m_deviceConfig->deviceConfig().role));
     }
 
     // Region + preset
     if (m_deviceConfig->hasLoRaConfig()) {
         auto lora = m_deviceConfig->loraConfig();
 
-        QStringList regions = DeviceConfig::regionNames();
-        QStringList presets = DeviceConfig::modemPresetNames();
-
-        QString region = lora.region < regions.size() ? regions[lora.region] : "?";
-        QString preset = lora.modemPreset < presets.size() ? presets[lora.modemPreset] : "?";
+        QString region = DeviceConfig::regionName(lora.region);
+        QString preset = lora.usePreset ? DeviceConfig::modemPresetName(lora.modemPreset)
+                                        : QStringLiteral("Custom");
         m_regionPresetLabel->setText(region + "  \u00b7  " + preset);
 
         m_hopsLabel->setText(QString::number(lora.hopLimit));

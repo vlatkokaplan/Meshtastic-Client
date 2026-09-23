@@ -71,6 +71,7 @@ private:
     void ensureDiscoveryAgent();
     void enableNotifications();
     void readFromRadio();
+    static QByteArray frameFromRadio(const QByteArray &value);
 
     static const int RECONNECT_INTERVAL_MS = 3000;
 };

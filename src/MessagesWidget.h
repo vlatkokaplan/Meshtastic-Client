@@ -43,7 +43,14 @@ enum class MessageStatus
     Timeout,       // Message timed out
     MaxRetransmit, // Hit max retransmission attempts
     NoResponse,    // No response from recipient
-    Failed         // Other errors
+    Failed,        // Other errors
+    // Stored in the database as ints: only ever append.
+    DutyCycleLimit,   // Regional duty-cycle budget used up; retry later
+    TooLarge,         // Payload too big for the radio
+    NoChannel,        // Channel not configured on the device
+    PkiNoKey,         // We have no public key for the recipient (PKI_FAILED, PKI_SEND_FAIL_PUBLIC_KEY)
+    PkiUnknownPubkey, // The recipient has no public key for us
+    RateLimited       // Firmware airtime-fairness limit
 };
 
 struct ChatMessage
@@ -117,6 +124,7 @@ private:
     QListWidget *m_messageList;
     QLineEdit *m_inputEdit;
     QPushButton *m_sendButton;
+    QLabel *m_lengthLabel;  // UTF-8 byte count, shown as the limit nears
     QLabel *m_headerLabel;
     QLabel *m_statusLabel;
 

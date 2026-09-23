@@ -120,6 +120,15 @@ void NodeManager::updateNodeFromPacket(const QVariantMap &fields)
         {
             node.isFavorite = fields["isFavorite"].toBool();
         }
+        // From the device's own node database at connect: how far away it
+        // last heard the node, whether that was over MQTT, and its last
+        // DeviceMetrics - so battery and airtime show before any live packet.
+        if (fields.contains("hopsAway"))
+            node.hopsAway = fields["hopsAway"].toInt();
+        if (fields.contains("viaMqtt"))
+            node.viaMqtt = fields["viaMqtt"].toBool();
+        if (fields.contains("deviceMetrics"))
+            applyDeviceMetrics(node, fields["deviceMetrics"].toMap());
 
         persistNode(nodeNum);
         emit nodeUpdated(nodeNum);
@@ -188,40 +197,50 @@ void NodeManager::updateNodeUser(uint32_t nodeNum, const QString &longName,
     scheduleUpdate();
 }
 
+// DeviceMetrics keys, from a telemetry packet or the snapshot inside the
+// device's NodeInfo. Only keys present are applied.
+void NodeManager::applyDeviceMetrics(NodeInfo &node, const QVariantMap &metrics)
+{
+    if (metrics.contains("batteryLevel"))
+    {
+        int level = metrics["batteryLevel"].toInt();
+        // Battery level > 100 means external power (same as web client)
+        node.isExternalPower = level > 100;
+        node.batteryLevel = qMin(level, 100);
+    }
+    if (metrics.contains("voltage"))
+        node.voltage = metrics["voltage"].toFloat();
+    if (metrics.contains("channelUtilization"))
+        node.channelUtilization = metrics["channelUtilization"].toFloat();
+    if (metrics.contains("airUtilTx"))
+        node.airUtilTx = metrics["airUtilTx"].toFloat();
+    if (metrics.contains("uptimeSeconds"))
+        node.uptimeSeconds = metrics["uptimeSeconds"].toUInt();
+}
+
 void NodeManager::updateNodeTelemetry(uint32_t nodeNum, const QVariantMap &telemetry)
 {
     QMutexLocker locker(&m_mutex);
     ensureNode(nodeNum);
     NodeInfo &node = m_nodes[nodeNum];
 
-    if (telemetry.contains("batteryLevel"))
-    {
-        int level = telemetry["batteryLevel"].toInt();
-        // Battery level > 100 means external power (same as web client)
-        if (level > 100)
-        {
-            node.isExternalPower = true;
-            // Display as 100% when on external power
-            level = 100;
-        }
-        else
-        {
-            node.isExternalPower = false;
-        }
-        node.batteryLevel = level;
-    }
-    if (telemetry.contains("voltage"))
-    {
-        node.voltage = telemetry["voltage"].toFloat();
-    }
-    if (telemetry.contains("channelUtilization"))
-    {
+    // Variants reuse key names with different meanings (environment
+    // "voltage" is a sensor reading, health "temperature" is body
+    // temperature), so only take each key from the variant it belongs to.
+    // No telemetryType means an older caller: accept everything as before.
+    const QString type = telemetry.value("telemetryType").toString();
+    const bool anyType = type.isEmpty();
+    const bool device = anyType || type == "device";
+    const bool environment = anyType || type == "environment";
+    // LocalStats is the connected node reporting on itself
+    const bool localStats = type == "localStats";
+
+    if (device)
+        applyDeviceMetrics(node, telemetry);
+    if (localStats && telemetry.contains("channelUtilization"))
         node.channelUtilization = telemetry["channelUtilization"].toFloat();
-    }
-    if (telemetry.contains("airUtilTx"))
-    {
+    if (localStats && telemetry.contains("airUtilTx"))
         node.airUtilTx = telemetry["airUtilTx"].toFloat();
-    }
     // Legacy support: explicit externalPower field (if provided)
     if (telemetry.contains("externalPower"))
     {
@@ -229,22 +248,22 @@ void NodeManager::updateNodeTelemetry(uint32_t nodeNum, const QVariantMap &telem
     }
 
     // Environment telemetry
-    if (telemetry.contains("temperature"))
+    if (environment && telemetry.contains("temperature"))
     {
         node.temperature = telemetry["temperature"].toFloat();
         node.hasEnvironmentTelemetry = true;
     }
-    if (telemetry.contains("relativeHumidity"))
+    if (environment && telemetry.contains("relativeHumidity"))
     {
         node.relativeHumidity = telemetry["relativeHumidity"].toFloat();
         node.hasEnvironmentTelemetry = true;
     }
-    if (telemetry.contains("barometricPressure"))
+    if (environment && telemetry.contains("barometricPressure"))
     {
         node.barometricPressure = telemetry["barometricPressure"].toFloat();
         node.hasEnvironmentTelemetry = true;
     }
-    if (telemetry.contains("uptimeSeconds"))
+    if (localStats && telemetry.contains("uptimeSeconds"))
     {
         node.uptimeSeconds = telemetry["uptimeSeconds"].toUInt();
     }
@@ -268,6 +287,20 @@ void NodeManager::updateNodeSignal(uint32_t nodeNum, float snr, int rssi, int ho
     {
         node.hopsAway = hopsAway;
     }
+    node.viaMqtt = false;  // real SNR/RSSI means it came over the air
+    node.lastHeard = QDateTime::currentDateTime();
+
+    persistNode(nodeNum);
+    emit nodeUpdated(nodeNum);
+    scheduleUpdate();
+}
+
+void NodeManager::markHeardViaMqtt(uint32_t nodeNum)
+{
+    QMutexLocker locker(&m_mutex);
+    ensureNode(nodeNum);
+    NodeInfo &node = m_nodes[nodeNum];
+    node.viaMqtt = true;
     node.lastHeard = QDateTime::currentDateTime();
 
     persistNode(nodeNum);

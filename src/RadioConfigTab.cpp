@@ -1,6 +1,7 @@
 #include "RadioConfigTab.h"
 #include "Theme.h"
 #include "DeviceConfig.h"
+#include "EnumCombo.h"
 
 #include <QTimer>
 #include <QVBoxLayout>
@@ -41,12 +42,12 @@ void RadioConfigTab::setupUI()
 
     // Region
     m_regionCombo = new QComboBox;
-    m_regionCombo->addItems(DeviceConfig::regionNames());
+    populateEnumCombo(m_regionCombo, DeviceConfig::regionOptions(), true);
     radioLayout->addRow("Region:", m_regionCombo);
 
     // Modem Preset
     m_presetCombo = new QComboBox;
-    m_presetCombo->addItems(DeviceConfig::modemPresetNames());
+    populateEnumCombo(m_presetCombo, DeviceConfig::modemPresetOptions());
     radioLayout->addRow("Modem Preset:", m_presetCombo);
 
     // Hop Limit
@@ -137,8 +138,16 @@ void RadioConfigTab::updateUIFromConfig()
 {
     const auto &lora = m_config->loraConfig();
 
-    m_regionCombo->setCurrentIndex(lora.region);
-    m_presetCombo->setCurrentIndex(lora.modemPreset);
+    selectEnumValue(m_regionCombo, DeviceConfig::regionOptions(), lora.region);
+    selectEnumValue(m_presetCombo, DeviceConfig::modemPresetOptions(), lora.modemPreset);
+    // With use_preset off the device runs custom bandwidth / spreading factor /
+    // coding rate, and the preset is ignored. This tab does not edit those, so
+    // leave the device on its custom settings rather than switching to a preset.
+    m_presetCombo->setEnabled(lora.usePreset);
+    m_presetCombo->setToolTip(lora.usePreset
+        ? QString()
+        : QString("The device uses custom modem settings (BW %1 kHz, SF %2, CR 4/%3); "
+                  "the preset is ignored.").arg(lora.bandwidth).arg(lora.spreadFactor).arg(lora.codingRate));
     m_hopLimitSpin->setValue(lora.hopLimit);
     m_txPowerSpin->setValue(lora.txPower);
     m_txEnabledCheck->setChecked(lora.txEnabled);
@@ -149,10 +158,10 @@ void RadioConfigTab::updateUIFromConfig()
 
 void RadioConfigTab::onSaveClicked()
 {
-    DeviceConfig::LoRaConfig lora;
-    lora.usePreset = true;
-    lora.region = m_regionCombo->currentIndex();
-    lora.modemPreset = m_presetCombo->currentIndex();
+    // Start from the device's config so fields this tab doesn't show survive
+    DeviceConfig::LoRaConfig lora = m_config->loraConfig();
+    lora.region = enumComboValue(m_regionCombo);
+    lora.modemPreset = enumComboValue(m_presetCombo);
     lora.hopLimit = m_hopLimitSpin->value();
     lora.txPower = m_txPowerSpin->value();
     lora.txEnabled = m_txEnabledCheck->isChecked();

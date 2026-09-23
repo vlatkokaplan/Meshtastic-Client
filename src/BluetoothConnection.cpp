@@ -141,11 +141,25 @@ bool BluetoothConnection::sendData(const QByteArray &data)
         return false;
     }
 
-    qDebug() << "[BT] Sending" << data.size() << "bytes";
+    // Callers hand every transport the stream framing (0x94 0xC3 + 16-bit
+    // length + protobuf). Over BLE, ToRadio takes the bare ToRadio protobuf -
+    // the firmware rejects a write that still carries the header as malformed.
+    if (data.size() < 4
+        || static_cast<uint8_t>(data[0]) != 0x94
+        || static_cast<uint8_t>(data[1]) != 0xC3) {
+        qWarning() << "[BT] Refusing to send: data is not a framed ToRadio packet";
+        return false;
+    }
+    const int len = (static_cast<uint8_t>(data[2]) << 8) | static_cast<uint8_t>(data[3]);
+    if (len != data.size() - 4) {
+        qWarning() << "[BT] Refusing to send: frame length" << len
+                   << "does not match payload size" << data.size() - 4;
+        return false;
+    }
+    const QByteArray payload = data.mid(4);
 
-    // BLE has an MTU limit; send framed data
-    // Meshtastic BLE protocol: write the framed packet directly to ToRadio
-    m_service->writeCharacteristic(m_toRadioChar, data,
+    qDebug() << "[BT] Sending" << payload.size() << "bytes";
+    m_service->writeCharacteristic(m_toRadioChar, payload,
                                     QLowEnergyService::WriteWithResponse);
     return true;
 }
@@ -325,7 +339,7 @@ void BluetoothConnection::onCharacteristicChanged(const QLowEnergyCharacteristic
     } else if (ch.uuid() == FROMRADIO_UUID) {
         // Direct notification with data
         if (!value.isEmpty()) {
-            emit dataReceived(value);
+            emit dataReceived(frameFromRadio(value));
         }
     }
 }
@@ -334,20 +348,26 @@ void BluetoothConnection::onCharacteristicRead(const QLowEnergyCharacteristic &c
                                                   const QByteArray &value)
 {
     if (ch.uuid() == FROMRADIO_UUID && !value.isEmpty()) {
-        // Frame the data like serial/TCP: 0x94 0xC3 + length(2 bytes MSB) + payload
-        QByteArray framed;
-        framed.append(static_cast<char>(0x94));
-        framed.append(static_cast<char>(0xC3));
-        uint16_t len = static_cast<uint16_t>(value.size());
-        framed.append(static_cast<char>((len >> 8) & 0xFF));
-        framed.append(static_cast<char>(len & 0xFF));
-        framed.append(value);
-
-        emit dataReceived(framed);
+        emit dataReceived(frameFromRadio(value));
 
         // Continue reading until empty (there may be more queued data)
         readFromRadio();
     }
+}
+
+// BLE delivers one bare FromRadio protobuf per read. Frame it like serial/TCP
+// (0x94 0xC3 + 16-bit big-endian length) so the shared stream parser accepts it.
+QByteArray BluetoothConnection::frameFromRadio(const QByteArray &value)
+{
+    QByteArray framed;
+    framed.reserve(value.size() + 4);
+    framed.append(static_cast<char>(0x94));
+    framed.append(static_cast<char>(0xC3));
+    const uint16_t len = static_cast<uint16_t>(value.size());
+    framed.append(static_cast<char>((len >> 8) & 0xFF));
+    framed.append(static_cast<char>(len & 0xFF));
+    framed.append(value);
+    return framed;
 }
 
 void BluetoothConnection::readFromRadio()

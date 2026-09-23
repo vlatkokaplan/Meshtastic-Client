@@ -2,8 +2,13 @@
 #include <QSignalSpy>
 #include "MeshtasticProtocol.h"
 #include "DeviceConfig.h"
+// moc cannot parse the [[deprecated]] enum values in generated protobuf headers
+#ifndef Q_MOC_RUN
 #include "meshtastic/mesh.pb.h"
 #include "meshtastic/portnums.pb.h"
+#include "meshtastic/admin.pb.h"
+#include "meshtastic/telemetry.pb.h"
+#endif
 
 #include <openssl/evp.h>
 
@@ -36,6 +41,15 @@ static QByteArray configCompleteFrame(uint32_t id)
     std::string s;
     fr.SerializeToString(&s);
     return makeFrame(s);
+}
+
+// Pull the Data.payload (the AdminMessage bytes) out of a framed ToRadio
+static QByteArray adminPayloadOf(const QByteArray &frame)
+{
+    meshtastic::ToRadio tr;
+    if (frame.size() < 4 || !tr.ParseFromArray(frame.constData() + 4, frame.size() - 4))
+        return QByteArray();
+    return QByteArray::fromStdString(tr.packet().decoded().payload());
 }
 
 class TestProtocol : public QObject
@@ -366,6 +380,380 @@ private slots:
         QVERIFY2(data.emoji() != 0,
                  "emoji must decode non-zero, or a reaction is indistinguishable "
                  "from a message that happens to contain one");
+    }
+
+    // Hash for an unnamed channel with the default key, given the LoRa
+    // settings. Expected values are xorHash(name) ^ xorHash(defaultpsk),
+    // computed outside this codebase with firmware's preset names.
+    static int unnamedChannelHash(int channelIndex, int modemPreset, bool usePreset)
+    {
+        DeviceConfig cfg;
+        DeviceConfig::LoRaConfig lora;
+        lora.modemPreset = modemPreset;
+        lora.usePreset = usePreset;
+        cfg.setLoRaConfig(lora);
+
+        DeviceConfig::ChannelConfig ch;
+        ch.index = channelIndex;
+        ch.role = channelIndex == 0 ? 1 : 2;
+        ch.psk = QByteArray(1, 0x01);
+        cfg.setChannel(channelIndex, ch);
+
+        MeshtasticProtocol proto;
+        proto.setDeviceConfig(&cfg);
+        return proto.channelHashFor(channelIndex);
+    }
+
+    void newer_presets_hash_with_firmware_names()
+    {
+        QCOMPARE(unnamedChannelHash(0, 9, true), 118);   // LONG_TURBO -> "LongTurbo"
+        QCOMPARE(unnamedChannelHash(0, 16, true), 97);   // MEDIUM_TURBO -> "MediumTurbo"
+    }
+
+    void custom_modem_settings_hash_as_Custom()
+    {
+        // use_preset off: firmware names the channel "Custom" whatever the preset
+        QCOMPARE(unnamedChannelHash(0, 0, false), 49);
+    }
+
+    void unnamed_secondary_channel_takes_the_preset_name()
+    {
+        // Channels::getName applies to every index, not only the primary
+        QCOMPARE(unnamedChannelHash(1, 0, true), 8);
+    }
+
+    void reaction_sets_the_emoji_field()
+    {
+        // Data.emoji = 8, fixed32: tag 0x45 + 01 00 00 00
+        MeshtasticProtocol proto;
+        const QByteArray reaction = proto.createTextMessagePacket(
+            QString::fromUtf8("\xF0\x9F\x91\x8D"), 0xFFFFFFFF, 1, 0, 0x1234, nullptr, true);
+        QVERIFY2(reaction.contains(QByteArray::fromHex("4501000000")), reaction.toHex().constData());
+
+        const QByteArray reply = proto.createTextMessagePacket("ok", 0xFFFFFFFF, 1, 0, 0x1234);
+        QVERIFY(!reply.contains(QByteArray::fromHex("4501000000")));
+    }
+
+    void lora_save_keeps_fields_the_ui_does_not_edit()
+    {
+        // What the device reported, including settings this client has no UI for
+        meshtastic::Config_LoRaConfig device;
+        device.set_use_preset(true);
+        device.set_region(meshtastic::Config_LoRaConfig::EU_868);
+        device.set_hop_limit(3);
+        device.set_ignore_mqtt(true);
+        device.set_config_ok_to_mqtt(true);
+        device.set_override_frequency(869.525f);
+        device.add_ignore_incoming(0xDEADBEEF);
+
+        QVariantMap edited;
+        edited["raw"] = QByteArray::fromStdString(device.SerializeAsString());
+        edited["usePreset"] = true;
+        edited["region"] = 3;
+        edited["hopLimit"] = 5;  // the one change
+
+        MeshtasticProtocol proto;
+        meshtastic::AdminMessage admin;
+        const QByteArray payload = adminPayloadOf(proto.createLoRaConfigPacket(1, 1, edited));
+        QVERIFY(admin.ParseFromArray(payload.constData(), payload.size()));
+        const auto &sent = admin.set_config().lora();
+
+        QCOMPARE(sent.hop_limit(), 5u);
+        QVERIFY(sent.ignore_mqtt());
+        QVERIFY(sent.config_ok_to_mqtt());
+        QCOMPARE(sent.override_frequency(), 869.525f);
+        QCOMPARE(sent.ignore_incoming_size(), 1);
+    }
+
+    void enum_options_come_from_upstream_protos()
+    {
+        // Labels come from (meshtastic.enum_value_metadata); if the extension
+        // were not linked these would fall back to the raw enum names.
+        QCOMPARE(DeviceConfig::modemPresetName(9), QString("Long Range - Turbo"));
+        QCOMPARE(DeviceConfig::deviceRoleName(12), QString("Client Base"));
+        QCOMPARE(DeviceConfig::regionName(3), QString("EU_868"));
+
+        bool routerClientDeprecated = false;
+        for (const auto &o : DeviceConfig::deviceRoleOptions())
+            if (o.value == 3)
+                routerClientDeprecated = o.deprecated;
+        QVERIFY(routerClientDeprecated);
+    }
+
+    void packet_ids_are_unique_and_nonzero()
+    {
+        // Time-based ids collided for packets built in the same millisecond
+        MeshtasticProtocol proto;
+        QSet<uint32_t> seen;
+        for (int i = 0; i < 2000; ++i) {
+            const uint32_t id = proto.nextPacketId();
+            QVERIFY(id != 0);
+            seen.insert(id);
+        }
+        QCOMPARE(seen.size(), 2000);
+    }
+
+    void traceroute_last_hop_snr_is_not_counted_twice()
+    {
+        // Current firmware: snr_back already has route_back + 1 entries
+        meshtastic::RouteDiscovery rd;
+        rd.add_route_back(0xAAAA0001);
+        rd.add_snr_back(12);   // 3.0 dB at the relay
+        rd.add_snr_back(36);   // 9.0 dB at us, appended by our firmware
+
+        meshtastic::FromRadio fr;
+        auto *p = fr.mutable_packet();
+        p->set_from(0xAAAA0003);
+        p->set_to(0x1);
+        p->set_rx_snr(9.0f);
+        p->mutable_decoded()->set_portnum(meshtastic::TRACEROUTE_APP);
+        p->mutable_decoded()->set_request_id(42);
+        p->mutable_decoded()->set_payload(rd.SerializeAsString());
+        std::string s;
+        fr.SerializeToString(&s);
+
+        MeshtasticProtocol proto;
+        QSignalSpy spy(&proto, &MeshtasticProtocol::packetReceived);
+        proto.processIncomingData(makeFrame(s));
+        QCOMPARE(spy.count(), 1);
+        auto pkt = spy[0][0].value<MeshtasticProtocol::DecodedPacket>();
+        const QVariantList snrBack = pkt.fields["snrBack"].toList();
+        QCOMPARE(snrBack.size(), 2);
+        QCOMPARE(snrBack[1].toDouble(), 9.0);
+    }
+
+    void traceroute_from_old_firmware_gets_last_hop_from_rx_snr()
+    {
+        // Older firmware left the final hop out; rx_snr fills it
+        meshtastic::RouteDiscovery rd;
+        rd.add_route_back(0xAAAA0001);
+        rd.add_snr_back(12);
+
+        meshtastic::FromRadio fr;
+        auto *p = fr.mutable_packet();
+        p->set_from(0xAAAA0003);
+        p->set_to(0x1);
+        p->set_rx_snr(9.0f);
+        p->mutable_decoded()->set_portnum(meshtastic::TRACEROUTE_APP);
+        p->mutable_decoded()->set_request_id(42);
+        p->mutable_decoded()->set_payload(rd.SerializeAsString());
+        std::string s;
+        fr.SerializeToString(&s);
+
+        MeshtasticProtocol proto;
+        QSignalSpy spy(&proto, &MeshtasticProtocol::packetReceived);
+        proto.processIncomingData(makeFrame(s));
+        auto pkt = spy[0][0].value<MeshtasticProtocol::DecodedPacket>();
+        const QVariantList snrBack = pkt.fields["snrBack"].toList();
+        QCOMPARE(snrBack.size(), 2);
+        QCOMPARE(snrBack[1].toDouble(), 9.0);
+    }
+
+    void pki_direct_message_is_not_brute_forced()
+    {
+        meshtastic::FromRadio fr;
+        auto *p = fr.mutable_packet();
+        p->set_from(0x1234);
+        p->set_to(0x1);
+        p->set_id(7);
+        p->set_channel(0);
+        p->set_pki_encrypted(true);
+        p->set_encrypted(std::string(40, '\x5a'));
+        std::string s;
+        fr.SerializeToString(&s);
+
+        MeshtasticProtocol proto;
+        QSignalSpy spy(&proto, &MeshtasticProtocol::packetReceived);
+        proto.processIncomingData(makeFrame(s));
+        auto pkt = spy[0][0].value<MeshtasticProtocol::DecodedPacket>();
+        QVERIFY(pkt.fields["pkiEncrypted"].toBool());
+        QVERIFY(!pkt.fields.contains("decrypted"));
+    }
+
+    void client_notification_is_decoded()
+    {
+        meshtastic::FromRadio fr;
+        fr.mutable_clientnotification()->set_message("Duty cycle limit reached");
+        fr.mutable_clientnotification()->set_level(meshtastic::LogRecord::WARNING);
+        std::string s;
+        fr.SerializeToString(&s);
+
+        MeshtasticProtocol proto;
+        QSignalSpy spy(&proto, &MeshtasticProtocol::packetReceived);
+        proto.processIncomingData(makeFrame(s));
+        auto pkt = spy[0][0].value<MeshtasticProtocol::DecodedPacket>();
+        QCOMPARE(pkt.type, MeshtasticProtocol::PacketType::ClientNotification);
+        QCOMPARE(pkt.fields["message"].toString(), QString("Duty cycle limit reached"));
+    }
+
+    void security_save_keeps_the_keys()
+    {
+        meshtastic::Config_SecurityConfig device;
+        device.set_public_key(std::string(32, '\x11'));
+        device.set_private_key(std::string(32, '\x22'));
+        device.add_admin_key(std::string(32, '\x33'));
+        device.set_serial_enabled(true);
+
+        QVariantMap edited;
+        edited["raw"] = QByteArray::fromStdString(device.SerializeAsString());
+        edited["serialEnabled"] = true;
+        edited["debugLogApiEnabled"] = true;  // the one change
+
+        MeshtasticProtocol proto;
+        meshtastic::AdminMessage admin;
+        const QByteArray payload = adminPayloadOf(proto.createSecurityConfigPacket(1, 1, edited));
+        QVERIFY(admin.ParseFromArray(payload.constData(), payload.size()));
+        const auto &sent = admin.set_config().security();
+        QVERIFY(sent.debug_log_api_enabled());
+        QCOMPARE(sent.private_key(), device.private_key());
+        QCOMPARE(sent.public_key(), device.public_key());
+        QCOMPARE(sent.admin_key_size(), 1);
+    }
+
+    void security_save_refuses_without_a_base()
+    {
+        MeshtasticProtocol proto;
+        QVariantMap edited;
+        edited["serialEnabled"] = false;
+        QVERIFY(proto.createSecurityConfigPacket(1, 1, edited).isEmpty());
+    }
+
+    static MeshtasticProtocol::DecodedPacket decodeTelemetryPacket(const meshtastic::Telemetry &t)
+    {
+        meshtastic::FromRadio fr;
+        auto *p = fr.mutable_packet();
+        p->set_from(0x42);
+        p->set_to(0xFFFFFFFF);
+        p->mutable_decoded()->set_portnum(meshtastic::TELEMETRY_APP);
+        p->mutable_decoded()->set_payload(t.SerializeAsString());
+        std::string s;
+        fr.SerializeToString(&s);
+
+        MeshtasticProtocol proto;
+        QSignalSpy spy(&proto, &MeshtasticProtocol::packetReceived);
+        proto.processIncomingData(makeFrame(s));
+        return spy[0][0].value<MeshtasticProtocol::DecodedPacket>();
+    }
+
+    void telemetry_keeps_real_zero_readings()
+    {
+        meshtastic::Telemetry t;
+        t.mutable_environment_metrics()->set_temperature(0.0f);       // 0 °C is a reading
+        t.mutable_environment_metrics()->set_relative_humidity(55.0f);
+        auto pkt = decodeTelemetryPacket(t);
+
+        QCOMPARE(pkt.fields["telemetryType"].toString(), QString("environment"));
+        QVERIFY(pkt.fields.contains("temperature"));
+        QCOMPARE(pkt.fields["temperature"].toFloat(), 0.0f);
+        // Unset fields stay absent rather than reading as 0
+        QVERIFY(!pkt.fields.contains("barometricPressure"));
+    }
+
+    void telemetry_decodes_newer_variants()
+    {
+        meshtastic::Telemetry aq;
+        aq.mutable_air_quality_metrics()->set_pm25_standard(12);
+        aq.mutable_air_quality_metrics()->set_co2(640);
+        auto pkt = decodeTelemetryPacket(aq);
+        QCOMPARE(pkt.fields["telemetryType"].toString(), QString("airQuality"));
+        QCOMPARE(pkt.fields["pm25Standard"].toUInt(), 12u);
+        QCOMPARE(pkt.fields["co2"].toUInt(), 640u);
+
+        meshtastic::Telemetry ls;
+        ls.mutable_local_stats()->set_num_online_nodes(37);
+        ls.mutable_local_stats()->set_noise_floor(-110);
+        pkt = decodeTelemetryPacket(ls);
+        QCOMPARE(pkt.fields["telemetryType"].toString(), QString("localStats"));
+        QCOMPARE(pkt.fields["numOnlineNodes"].toUInt(), 37u);
+        QCOMPARE(pkt.fields["noiseFloor"].toInt(), -110);
+    }
+
+    void startup_nodeinfo_carries_hops_mqtt_and_metrics()
+    {
+        meshtastic::FromRadio fr;
+        auto *ni = fr.mutable_node_info();
+        ni->set_num(0x77);
+        ni->set_hops_away(2);
+        ni->set_via_mqtt(true);
+        ni->mutable_device_metrics()->set_battery_level(0);  // flat, not unknown
+        ni->mutable_device_metrics()->set_voltage(3.3f);
+        std::string s;
+        fr.SerializeToString(&s);
+
+        MeshtasticProtocol proto;
+        QSignalSpy spy(&proto, &MeshtasticProtocol::packetReceived);
+        proto.processIncomingData(makeFrame(s));
+        auto pkt = spy[0][0].value<MeshtasticProtocol::DecodedPacket>();
+        QCOMPARE(pkt.fields["hopsAway"].toInt(), 2);
+        QVERIFY(pkt.fields["viaMqtt"].toBool());
+        const QVariantMap metrics = pkt.fields["deviceMetrics"].toMap();
+        QVERIFY(metrics.contains("batteryLevel"));
+        QCOMPARE(metrics["batteryLevel"].toInt(), 0);
+    }
+
+    // ---- Wire format against upstream meshtastic/protobufs -------------
+    // Expected bytes are hand-encoded from the upstream field numbers and
+    // wire types, not produced by our own generated code, so an edit to the
+    // vendored .proto files that changes the wire format fails here.
+
+    void heartbeat_is_an_empty_heartbeat_message()
+    {
+        // ToRadio.heartbeat = 7, a message (wire type 2): tag 0x3a, length 0
+        MeshtasticProtocol proto;
+        QCOMPARE(proto.createHeartbeatPacket().toHex(), QByteArray("94c300023a00"));
+    }
+
+    void reboot_uses_reboot_seconds_field_97()
+    {
+        // AdminMessage.reboot_seconds = 97, varint: tag (97<<3)|0 = 0x88 0x06.
+        // Field 95 is reboot_ota_seconds, which reboots into the OTA loader.
+        MeshtasticProtocol proto;
+        QCOMPARE(adminPayloadOf(proto.createRebootPacket(1, 1, 5)).toHex(), QByteArray("880605"));
+    }
+
+    void set_channel_uses_field_33_and_keeps_id_and_precision()
+    {
+        MeshtasticProtocol proto;
+        QVariantMap cfg;
+        cfg["role"] = 2;
+        cfg["name"] = "x";
+        cfg["psk"] = QByteArray(1, '\x01');
+        cfg["channelId"] = 0x12345678u;
+        cfg["positionPrecision"] = 13u;
+        const QByteArray admin = adminPayloadOf(proto.createChannelConfigPacket(1, 1, 1, cfg));
+
+        // AdminMessage.set_channel = 33, length-delimited: tag 0x8a 0x02.
+        // Field 32 is set_owner.
+        QVERIFY2(admin.startsWith(QByteArray::fromHex("8a02")), admin.toHex().constData());
+        // ChannelSettings.id = 4 is fixed32: tag 0x25 + 4 little-endian bytes
+        QVERIFY2(admin.contains(QByteArray::fromHex("2578563412")), admin.toHex().constData());
+        // ChannelSettings.module_settings = 7 { position_precision = 1: 13 }
+        QVERIFY2(admin.contains(QByteArray::fromHex("3a02080d")), admin.toHex().constData());
+    }
+
+    void decodes_channel_id_and_module_settings_from_device()
+    {
+        // FromRadio.channel = 10 { index 1, settings { psk 01, name "x",
+        //   id fixed32 0x12345678, module_settings { position_precision 13 } },
+        //   role SECONDARY }
+        const QByteArray settings = QByteArray::fromHex("120101" "1a0178" "2578563412" "3a02080d");
+        QByteArray channel = QByteArray::fromHex("0801") + QByteArray::fromHex("12")
+                             + QByteArray(1, static_cast<char>(settings.size())) + settings
+                             + QByteArray::fromHex("1802");
+        QByteArray fromRadio = QByteArray::fromHex("52") + QByteArray(1, static_cast<char>(channel.size())) + channel;
+
+        MeshtasticProtocol proto;
+        QSignalSpy spy(&proto, &MeshtasticProtocol::packetReceived);
+        proto.processIncomingData(makeFrame(fromRadio.toStdString()));
+
+        QCOMPARE(spy.count(), 1);
+        auto pkt = spy[0][0].value<MeshtasticProtocol::DecodedPacket>();
+        QCOMPARE(pkt.type, MeshtasticProtocol::PacketType::Channel);
+        QCOMPARE(pkt.fields["index"].toInt(), 1);
+        QCOMPARE(pkt.fields["role"].toInt(), 2);
+        QCOMPARE(pkt.fields["name"].toString(), QString("x"));
+        QCOMPARE(pkt.fields["channelId"].toUInt(), 0x12345678u);
+        QCOMPARE(pkt.fields["positionPrecision"].toUInt(), 13u);
     }
 
     void ignores_garbage_bytes_before_sync()

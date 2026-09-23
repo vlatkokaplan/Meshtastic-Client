@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include <QRandomGenerator>
 #include "SerialConnection.h"
 #include "TcpConnection.h"
 #include "BluetoothConnection.h"
@@ -104,6 +105,14 @@ MainWindow::MainWindow(bool experimentalMode, bool testMode,
     m_connectionHeartbeatTimer->setInterval(60000); // 60 seconds - slower than config heartbeat
     connect(m_connectionHeartbeatTimer, &QTimer::timeout, this, [this]()
             {
+        // TCP over WiFi can die without a FIN or RST, leaving a socket that
+        // accepts writes but never delivers data. Three unanswered heartbeats
+        // means that has happened: reconnect instead of sitting there.
+        if (m_tcp->isConnected() && m_lastRxTimer.isValid()
+            && m_lastRxTimer.elapsed() > 3 * m_connectionHeartbeatTimer->interval()) {
+            m_tcp->dropAndReconnect();
+            return;
+        }
         if (isDeviceConnected()) {
             qDebug() << "[MainWindow] Sending connection keep-alive heartbeat";
             QByteArray heartbeat = m_protocol->createHeartbeatPacket();
@@ -660,6 +669,14 @@ void MainWindow::onConnected()
 
     // Clear any stale partial frame from the previous session
     m_protocol->resetParser();
+    m_lastRxTimer.restart();
+
+    // Serial and TCP are byte streams: send 32 x START2 first, as the Python
+    // client does, to wake a sleeping device and let its frame parser resync
+    // if it was left mid-packet. BLE writes whole packets and needs neither.
+    const bool simulated = m_simulation && m_simulation->isActive();
+    if (!simulated && !m_bluetooth->isConnected())
+        sendToDevice(QByteArray(32, static_cast<char>(MeshtasticProtocol::SYNC_BYTE_2)));
 
     updateStatusLabel();
     statusBar()->showMessage("Connected", 3000);
@@ -699,6 +716,7 @@ void MainWindow::onDisconnected()
 
 void MainWindow::onDataReceived(const QByteArray &data)
 {
+    m_lastRxTimer.restart();
     m_protocol->processIncomingData(data);
 }
 
@@ -814,6 +832,10 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
                 qDebug() << "  Position config - gpsMode:" << packet.fields.value("gpsMode");
                 devConfig->updateFromPositionPacket(packet.fields);
             }
+            else if (configType == "security")
+            {
+                devConfig->updateFromSecurityPacket(packet.fields);
+            }
         }
         break;
 
@@ -865,12 +887,21 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
         // Update node info from received packets (skip local node if hiding)
         if (packet.from != 0 && !(isFromLocalNode && hideLocal))
         {
-            if (packet.fields.contains("rxSnr") || packet.fields.contains("rxRssi"))
+            if (packet.fields.value("viaMqtt").toBool())
             {
+                // Relayed by an MQTT gateway: its SNR, RSSI and hop count
+                // describe nothing about our radio's view of the node
+                m_nodeManager->markHeardViaMqtt(packet.from);
+            }
+            else if (packet.fields.contains("rxSnr") || packet.fields.contains("rxRssi"))
+            {
+                // hop_start is 0 on firmware older than 2.3, which makes the
+                // difference meaningless; leave hops unknown then
                 int hops = -1;
-                if (packet.fields.contains("hopStart") && packet.fields.contains("hopLimit"))
+                const int hopStart = packet.fields.value("hopStart").toInt();
+                if (hopStart > 0)
                 {
-                    hops = packet.fields["hopStart"].toInt() - packet.fields["hopLimit"].toInt();
+                    hops = hopStart - packet.fields.value("hopLimit").toInt();
                 }
                 m_nodeManager->updateNodeSignal(
                     packet.from,
@@ -1120,6 +1151,10 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
                 {
                     devConfig->updateFromPositionPacket(packet.fields);
                 }
+                else if (configType == "security")
+                {
+                    devConfig->updateFromSecurityPacket(packet.fields);
+                }
             }
             break;
 
@@ -1156,6 +1191,17 @@ void MainWindow::onPacketReceived(const MeshtasticProtocol::DecodedPacket &packe
             onConfigCompleteIdReceived(packet.fields["configId"].toUInt());
         }
         break;
+
+    case MeshtasticProtocol::PacketType::ClientNotification:
+    {
+        const QString message = packet.fields.value("message").toString();
+        if (!message.isEmpty())
+        {
+            qWarning() << "[Device]" << message;
+            statusBar()->showMessage("Device: " + message, 10000);
+        }
+        break;
+    }
 
     default:
         break;
@@ -1651,11 +1697,11 @@ void MainWindow::requestConfig()
         return;
     }
 
-    // Generate random 32-bit config ID
-    m_expectedConfigId = static_cast<uint32_t>(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF);
-    // Ensure non-zero
-    if (m_expectedConfigId == 0)
-        m_expectedConfigId = 1;
+    // Random nonce. 0 is invalid, and firmware treats 69420 / 69421 as
+    // "config only" / "nodes only" requests (SPECIAL_NONCE_* in PhoneAPI.h).
+    do {
+        m_expectedConfigId = QRandomGenerator::global()->generate();
+    } while (m_expectedConfigId == 0 || m_expectedConfigId == 69420 || m_expectedConfigId == 69421);
 
     qDebug() << "[MainWindow] Starting config request flow. ConfigID:" << m_expectedConfigId;
     statusBar()->showMessage(QString("Requesting configuration (ID: %1)...").arg(m_expectedConfigId));
@@ -1815,6 +1861,14 @@ void MainWindow::onSendMessage(const QString &text, uint32_t toNode, int channel
         return;
     }
 
+    const int textBytes = text.toUtf8().size();
+    if (textBytes > MeshtasticProtocol::MAX_TEXT_BYTES)
+    {
+        statusBar()->showMessage(QString("Message too long: %1 bytes, limit is %2")
+                                     .arg(textBytes).arg(MeshtasticProtocol::MAX_TEXT_BYTES), 5000);
+        return;
+    }
+
     uint32_t myNode = m_nodeManager->myNodeNum();
     uint32_t packetId = 0;
     QByteArray packet = m_protocol->createTextMessagePacket(text, toNode, myNode, channel, replyId, &packetId);
@@ -1862,7 +1916,7 @@ void MainWindow::onSendReaction(const QString &emoji, uint32_t toNode, int chann
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     uint32_t packetId = 0;
-    QByteArray packet = m_protocol->createTextMessagePacket(emoji, toNode, myNode, channel, replyId, &packetId);
+    QByteArray packet = m_protocol->createTextMessagePacket(emoji, toNode, myNode, channel, replyId, &packetId, true);
     sendToDevice(packet);
 
     // Add the reaction to our local display
@@ -2133,6 +2187,7 @@ void MainWindow::onSaveLoRaConfig()
     config["channelNum"] = lora.channelNum;
     config["overrideDutyCycle"] = lora.overrideDutyCycle;
     config["frequencyOffset"] = lora.frequencyOffset;
+    config["raw"] = lora.raw;
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     QByteArray packet = m_protocol->createLoRaConfigPacket(myNode, myNode, config);
@@ -2161,24 +2216,66 @@ void MainWindow::onSaveDeviceConfig()
     const auto &device = devConfig->deviceConfig();
     QVariantMap config;
     config["role"] = device.role;
-    config["serialEnabled"] = device.serialEnabled;
-    config["debugLogEnabled"] = device.debugLogEnabled;
     config["buttonGpio"] = device.buttonGpio;
     config["buzzerGpio"] = device.buzzerGpio;
     config["rebroadcastMode"] = device.rebroadcastMode;
     config["nodeInfoBroadcastSecs"] = device.nodeInfoBroadcastSecs;
     config["doubleTapAsButtonPress"] = device.doubleTapAsButtonPress;
-    config["isManaged"] = device.isManaged;
     config["disableTripleClick"] = device.disableTripleClick;
     config["tzdef"] = device.tzdef;
     config["ledHeartbeatDisabled"] = device.ledHeartbeatDisabled;
+    config["raw"] = device.raw;
 
     uint32_t myNode = m_nodeManager->myNodeNum();
-    QByteArray packet = m_protocol->createDeviceConfigPacket(myNode, myNode, config);
-    if (!sendToDevice(packet))
+    QList<QByteArray> packets{m_protocol->createDeviceConfigPacket(myNode, myNode, config)};
+
+    // Security is only sent when edited: setting it reboots the device, and
+    // it carries the node's keys, so it is never rebuilt without cause.
+    if (devConfig->securityEdited())
     {
-        statusBar()->showMessage("Failed to send device config - check the connection", 5000);
-        return;
+        const auto security = devConfig->securityConfig();
+        if (!security.serialEnabled && m_serial->isConnected())
+        {
+            const auto answer = QMessageBox::warning(
+                this, "Disable serial API",
+                "This client is connected over serial. Turning off the serial API "
+                "will disconnect it, and you will need Bluetooth or WiFi to turn it "
+                "back on.\n\nSave anyway?",
+                QMessageBox::Save | QMessageBox::Cancel, QMessageBox::Cancel);
+            if (answer != QMessageBox::Save)
+            {
+                statusBar()->showMessage("Device config not saved", 3000);
+                return;
+            }
+        }
+
+        QVariantMap sec;
+        sec["serialEnabled"] = security.serialEnabled;
+        sec["debugLogApiEnabled"] = security.debugLogApiEnabled;
+        sec["raw"] = security.raw;
+        const QByteArray secPacket = m_protocol->createSecurityConfigPacket(myNode, myNode, sec);
+        if (secPacket.isEmpty())
+        {
+            statusBar()->showMessage("Security config unavailable - not saved", 5000);
+            return;
+        }
+        packets.append(secPacket);
+    }
+
+    // Two sections: one transaction, so the device saves and reboots once
+    if (packets.size() > 1)
+    {
+        packets.prepend(m_protocol->createBeginEditSettingsPacket(myNode, myNode));
+        packets.append(m_protocol->createCommitEditSettingsPacket(myNode, myNode));
+    }
+
+    for (const QByteArray &packet : packets)
+    {
+        if (!sendToDevice(packet))
+        {
+            statusBar()->showMessage("Failed to send device config - check the connection", 5000);
+            return;
+        }
     }
 
     m_configWidget->notifyDeviceSaved();
@@ -2209,6 +2306,7 @@ void MainWindow::onSavePositionConfig()
     config["broadcastSmartMinDistance"] = pos.broadcastSmartMinDistance;
     config["broadcastSmartMinIntervalSecs"] = pos.broadcastSmartMinIntervalSecs;
     config["gpsMode"] = pos.gpsMode;
+    config["raw"] = pos.raw;
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     QByteArray packet = m_protocol->createPositionConfigPacket(myNode, myNode, config);
@@ -2250,6 +2348,9 @@ void MainWindow::onSaveChannelConfig(int channelIndex)
     config["psk"] = ch.psk;
     config["uplinkEnabled"] = ch.uplinkEnabled;
     config["downlinkEnabled"] = ch.downlinkEnabled;
+    config["channelId"] = ch.id;
+    config["positionPrecision"] = ch.positionPrecision;
+    config["isMuted"] = ch.isMuted;
 
     uint32_t myNode = m_nodeManager->myNodeNum();
     qDebug() << "Creating packet for node:" << QString::number(myNode, 16);

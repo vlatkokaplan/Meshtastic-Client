@@ -1,6 +1,7 @@
 #include "MeshtasticProtocol.h"
 #include "DeviceConfig.h"
 #include <QDateTime>
+#include <QRandomGenerator>
 #include <QDebug>
 #include <QStringDecoder>
 #include <openssl/evp.h>
@@ -12,6 +13,15 @@
 #include "meshtastic/config.pb.h"
 #include "meshtastic/channel.pb.h"
 #include "meshtastic/admin.pb.h"
+
+// The firmware still reports several fields upstream has deprecated
+// (serial_enabled, is_managed, gps_enabled, ...). They are read and written
+// back unchanged so a config save does not reset them.
+#if defined(__GNUC__)
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(disable : 4996)
+#endif
 
 // Constants
 static constexpr double SNR_SCALE_FACTOR = 4.0;  // SNR is stored as int * 4 in protocol
@@ -28,19 +38,19 @@ static QByteArray wrapInFrame(const std::string &serialized)
     return frame;
 }
 
+static void mapSetFields(const google::protobuf::Message &msg, QVariantMap &fields);
+
 // Helper functions to map config fields to QVariantMap (avoids duplication)
 static void mapDeviceConfig(const meshtastic::Config_DeviceConfig &dev, QVariantMap &fields)
 {
     fields["configType"] = "device";
+    fields["raw"] = QByteArray::fromStdString(dev.SerializeAsString());
     fields["role"] = static_cast<int>(dev.role());
-    fields["serialEnabled"] = dev.serial_enabled();
-    fields["debugLogEnabled"] = dev.debug_log_enabled();
     fields["buttonGpio"] = dev.button_gpio();
     fields["buzzerGpio"] = dev.buzzer_gpio();
     fields["rebroadcastMode"] = static_cast<int>(dev.rebroadcast_mode());
     fields["nodeInfoBroadcastSecs"] = dev.node_info_broadcast_secs();
     fields["doubleTapAsButtonPress"] = dev.double_tap_as_button_press();
-    fields["isManaged"] = dev.is_managed();
     fields["disableTripleClick"] = dev.disable_triple_click();
     fields["tzdef"] = QString::fromStdString(dev.tzdef());
     fields["ledHeartbeatDisabled"] = dev.led_heartbeat_disabled();
@@ -49,6 +59,7 @@ static void mapDeviceConfig(const meshtastic::Config_DeviceConfig &dev, QVariant
 static void mapPositionConfig(const meshtastic::Config_PositionConfig &pos, QVariantMap &fields)
 {
     fields["configType"] = "position";
+    fields["raw"] = QByteArray::fromStdString(pos.SerializeAsString());
     fields["positionBroadcastSecs"] = pos.position_broadcast_secs();
     fields["smartPositionEnabled"] = pos.position_broadcast_smart_enabled();
     fields["fixedPosition"] = pos.fixed_position();
@@ -61,9 +72,20 @@ static void mapPositionConfig(const meshtastic::Config_PositionConfig &pos, QVar
     fields["gpsMode"] = static_cast<int>(pos.gps_mode());
 }
 
+// Security holds the node's keypair and admin keys. Only the two booleans the
+// UI edits are mapped; everything else only ever travels inside `raw`.
+static void mapSecurityConfig(const meshtastic::Config_SecurityConfig &sec, QVariantMap &fields)
+{
+    fields["configType"] = "security";
+    fields["raw"] = QByteArray::fromStdString(sec.SerializeAsString());
+    fields["serialEnabled"] = sec.serial_enabled();
+    fields["debugLogApiEnabled"] = sec.debug_log_api_enabled();
+}
+
 static void mapLoraConfig(const meshtastic::Config_LoRaConfig &lora, QVariantMap &fields)
 {
     fields["configType"] = "lora";
+    fields["raw"] = QByteArray::fromStdString(lora.SerializeAsString());
     fields["usePreset"] = lora.use_preset();
     fields["modemPreset"] = static_cast<int>(lora.modem_preset());
     fields["bandwidth"] = lora.bandwidth();
@@ -208,6 +230,8 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
             result.channelIndex = result.fields["resolvedChannel"].toInt();
         result.fields["hopLimit"] = packet.hop_limit();
         result.fields["hopStart"] = packet.hop_start();
+        if (packet.via_mqtt())
+            result.fields["viaMqtt"] = true;
         if (packet.rx_time() > 0)
         {
             result.fields["rxTime"] = QDateTime::fromSecsSinceEpoch(packet.rx_time()).toString(Qt::ISODate);
@@ -263,6 +287,15 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
             }
         }
         result.fields["isFavorite"] = nodeInfo.is_favorite();
+        if (nodeInfo.has_hops_away())
+            result.fields["hopsAway"] = nodeInfo.hops_away();
+        result.fields["viaMqtt"] = nodeInfo.via_mqtt();
+        if (nodeInfo.has_device_metrics())
+        {
+            QVariantMap metrics;
+            mapSetFields(nodeInfo.device_metrics(), metrics);
+            result.fields["deviceMetrics"] = metrics;
+        }
         break;
     }
 
@@ -281,6 +314,9 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
             result.fields["psk"] = QByteArray(psk.data(), psk.size());
             result.fields["uplinkEnabled"] = settings.uplink_enabled();
             result.fields["downlinkEnabled"] = settings.downlink_enabled();
+            result.fields["channelId"] = settings.id();
+            result.fields["positionPrecision"] = settings.module_settings().position_precision();
+            result.fields["isMuted"] = settings.module_settings().is_muted();
         }
         else
         {
@@ -293,6 +329,9 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
             result.fields["psk"] = QByteArray();
             result.fields["uplinkEnabled"] = false;
             result.fields["downlinkEnabled"] = false;
+            result.fields["channelId"] = 0u;
+            result.fields["positionPrecision"] = 0u;
+            result.fields["isMuted"] = false;
         }
         break;
     }
@@ -348,6 +387,9 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
             result.fields["units"] = static_cast<int>(disp.units());
             break;
         }
+        case meshtastic::Config::kSecurity:
+            mapSecurityConfig(config.security(), result.fields);
+            break;
         case meshtastic::Config::kBluetooth:
         {
             result.fields["configType"] = "bluetooth";
@@ -405,6 +447,19 @@ MeshtasticProtocol::DecodedPacket MeshtasticProtocol::decodeFromRadio(const QByt
         result.fields["message"] = QString::fromStdString(log.message());
         result.fields["level"] = log.level();
         result.fields["source"] = QString::fromStdString(log.source());
+        break;
+    }
+
+    case meshtastic::FromRadio::kClientNotification:
+    {
+        // How the firmware tells the app about problems it can't put in a
+        // routing error: rejected settings, duty-cycle warnings, key issues.
+        result.type = PacketType::ClientNotification;
+        const auto &note = fromRadio.clientnotification();
+        result.fields["message"] = QString::fromStdString(note.message());
+        result.fields["level"] = static_cast<int>(note.level());
+        if (note.has_reply_id())
+            result.fields["replyId"] = note.reply_id();
         break;
     }
 
@@ -524,7 +579,10 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
             }
             fields["routeBack"] = routeBackList;
 
-            // SNR values back (from RouteDiscovery + packet rx_snr for last hop)
+            // SNR values back. The firmware appends the final hop's SNR (the
+            // one we received the response on) before handing the packet to
+            // us - TraceRouteModule::appendMyIDandSNR with SNRonly - so a
+            // current response has one more entry than route_back.
             // A raw value of -128 (resulting in -32.0) means "unknown/no data"
             QVariantList snrBackList;
             for (const auto &snr : routeData.snr_back())
@@ -534,9 +592,12 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
                 else
                     snrBackList.append(snr / SNR_SCALE_FACTOR);
             }
-            // packet.rx_snr() is already a float in dB (NOT scaled) — it's the
-            // SNR of the final hop of the return path back to us
-            if (packet.rx_snr() != 0)
+            // Older firmware did not add that last entry; fill it from rx_snr
+            // (a float in dB, not scaled) only when it is actually missing,
+            // otherwise the last hop is counted twice.
+            if (decoded.request_id() != 0
+                && routeData.snr_back_size() == routeData.route_back_size()
+                && packet.rx_snr() != 0)
             {
                 snrBackList.append(static_cast<double>(packet.rx_snr()));
             }
@@ -619,6 +680,9 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
                 case meshtastic::Config::kLora:
                     mapLoraConfig(config.lora(), fields);
                     break;
+                case meshtastic::Config::kSecurity:
+                    mapSecurityConfig(config.security(), fields);
+                    break;
                 default:
                     fields["configType"] = "unknown";
                     break;
@@ -636,6 +700,16 @@ QVariantMap MeshtasticProtocol::decodeMeshPacket(const meshtastic::MeshPacket &p
         {
             fields["requestId"] = decoded.request_id();
         }
+    }
+    else if (packet.has_encrypted() && packet.pki_encrypted())
+    {
+        // A direct message encrypted to the recipient's public key. No channel
+        // key can open it, so don't spend the brute force on it.
+        portNum = PortNum::Unknown;
+        fields["encrypted"] = true;
+        fields["pkiEncrypted"] = true;
+        fields["encryptedData"] = QByteArray(packet.encrypted().data(),
+                                             static_cast<int>(packet.encrypted().size())).toHex();
     }
     else if (packet.has_encrypted())
     {
@@ -799,90 +873,92 @@ QVariantMap MeshtasticProtocol::decodeUser(const QByteArray &data)
     return fields;
 }
 
+// Every scalar field the sender set, keyed by the field's camelCase name
+// (battery_level -> batteryLevel). Presence decides, not value: telemetry
+// fields are proto3 `optional`, so a real 0 °C or 0 % is kept, and an unset
+// field is left out rather than reported as 0.
+static void mapSetFields(const google::protobuf::Message &msg, QVariantMap &fields)
+{
+    using google::protobuf::FieldDescriptor;
+    const auto *refl = msg.GetReflection();
+    std::vector<const FieldDescriptor *> set;
+    refl->ListFields(msg, &set);
+
+    for (const FieldDescriptor *f : set)
+    {
+        const QString key = QString::fromStdString(std::string(f->camelcase_name()));
+        if (f->is_repeated())
+        {
+            if (f->cpp_type() != FieldDescriptor::CPPTYPE_FLOAT)
+                continue;
+            QVariantList list;
+            for (int i = 0; i < refl->FieldSize(msg, f); ++i)
+                list.append(refl->GetRepeatedFloat(msg, f, i));
+            fields[key] = list;
+            continue;
+        }
+        switch (f->cpp_type())
+        {
+        case FieldDescriptor::CPPTYPE_FLOAT:  fields[key] = refl->GetFloat(msg, f); break;
+        case FieldDescriptor::CPPTYPE_DOUBLE: fields[key] = refl->GetDouble(msg, f); break;
+        case FieldDescriptor::CPPTYPE_INT32:  fields[key] = refl->GetInt32(msg, f); break;
+        case FieldDescriptor::CPPTYPE_UINT32: fields[key] = refl->GetUInt32(msg, f); break;
+        case FieldDescriptor::CPPTYPE_INT64:  fields[key] = static_cast<qint64>(refl->GetInt64(msg, f)); break;
+        case FieldDescriptor::CPPTYPE_UINT64: fields[key] = static_cast<quint64>(refl->GetUInt64(msg, f)); break;
+        case FieldDescriptor::CPPTYPE_BOOL:   fields[key] = refl->GetBool(msg, f); break;
+        case FieldDescriptor::CPPTYPE_ENUM:   fields[key] = refl->GetEnumValue(msg, f); break;
+        case FieldDescriptor::CPPTYPE_STRING: fields[key] = QString::fromStdString(refl->GetString(msg, f)); break;
+        default: break;  // nested messages: not used by telemetry variants we display
+        }
+    }
+}
+
 QVariantMap MeshtasticProtocol::decodeTelemetry(const QByteArray &data)
 {
     QVariantMap fields;
     meshtastic::Telemetry telemetry;
 
-    if (telemetry.ParseFromArray(data.constData(), data.size()))
+    if (!telemetry.ParseFromArray(data.constData(), data.size()))
+        return fields;
+
+    fields["telemetryTime"] = telemetry.time();
+
+    // telemetryType tells consumers which variant the keys belong to: several
+    // share names (voltage in device and environment, temperature in
+    // environment and health), and they mean different things.
+    switch (telemetry.variant_case())
     {
-        fields["telemetryTime"] = telemetry.time();
-
-        switch (telemetry.variant_case())
-        {
-        case meshtastic::Telemetry::kDeviceMetrics:
-        {
-            const auto &dm = telemetry.device_metrics();
-            fields["telemetryType"] = "device";
-            if (dm.battery_level() != 0)
-            {
-                fields["batteryLevel"] = dm.battery_level();
-            }
-            if (dm.voltage() != 0)
-            {
-                fields["voltage"] = dm.voltage();
-            }
-            if (dm.channel_utilization() != 0)
-            {
-                fields["channelUtilization"] = dm.channel_utilization();
-            }
-            if (dm.air_util_tx() != 0)
-            {
-                fields["airUtilTx"] = dm.air_util_tx();
-            }
-            if (dm.uptime_seconds() != 0)
-            {
-                fields["uptimeSeconds"] = dm.uptime_seconds();
-            }
-            break;
-        }
-
-        case meshtastic::Telemetry::kEnvironmentMetrics:
-        {
-            const auto &em = telemetry.environment_metrics();
-            fields["telemetryType"] = "environment";
-            if (em.temperature() != 0)
-            {
-                fields["temperature"] = em.temperature();
-            }
-            if (em.relative_humidity() != 0)
-            {
-                fields["relativeHumidity"] = em.relative_humidity();
-            }
-            if (em.barometric_pressure() != 0)
-            {
-                fields["barometricPressure"] = em.barometric_pressure();
-            }
-            if (em.gas_resistance() != 0)
-            {
-                fields["gasResistance"] = em.gas_resistance();
-            }
-            if (em.iaq() != 0)
-            {
-                fields["iaq"] = em.iaq();
-            }
-            break;
-        }
-
-        case meshtastic::Telemetry::kPowerMetrics:
-        {
-            const auto &pm = telemetry.power_metrics();
-            fields["telemetryType"] = "power";
-            if (pm.ch1_voltage() != 0)
-            {
-                fields["ch1Voltage"] = pm.ch1_voltage();
-            }
-            if (pm.ch1_current() != 0)
-            {
-                fields["ch1Current"] = pm.ch1_current();
-            }
-            break;
-        }
-
-        default:
-            fields["telemetryType"] = "unknown";
-            break;
-        }
+    case meshtastic::Telemetry::kDeviceMetrics:
+        fields["telemetryType"] = "device";
+        mapSetFields(telemetry.device_metrics(), fields);
+        break;
+    case meshtastic::Telemetry::kEnvironmentMetrics:
+        fields["telemetryType"] = "environment";
+        mapSetFields(telemetry.environment_metrics(), fields);
+        break;
+    case meshtastic::Telemetry::kAirQualityMetrics:
+        fields["telemetryType"] = "airQuality";
+        mapSetFields(telemetry.air_quality_metrics(), fields);
+        break;
+    case meshtastic::Telemetry::kPowerMetrics:
+        fields["telemetryType"] = "power";
+        mapSetFields(telemetry.power_metrics(), fields);
+        break;
+    case meshtastic::Telemetry::kLocalStats:
+        fields["telemetryType"] = "localStats";
+        mapSetFields(telemetry.local_stats(), fields);
+        break;
+    case meshtastic::Telemetry::kHealthMetrics:
+        fields["telemetryType"] = "health";
+        mapSetFields(telemetry.health_metrics(), fields);
+        break;
+    case meshtastic::Telemetry::kHostMetrics:
+        fields["telemetryType"] = "host";
+        mapSetFields(telemetry.host_metrics(), fields);
+        break;
+    default:
+        fields["telemetryType"] = "unknown";
+        break;
     }
 
     return fields;
@@ -896,6 +972,19 @@ QByteArray MeshtasticProtocol::createWantConfigPacket(uint32_t configId)
     std::string serialized;
     toRadio.SerializeToString(&serialized);
     return wrapInFrame(serialized);
+}
+
+// Same scheme as the Python client and firmware generatePacketId: a random
+// upper part with a 10-bit counter below it. Random so ids don't repeat across
+// restarts or collide with other clients; the counter so two packets built in
+// the same millisecond still differ (the mesh drops a repeated from+id pair).
+uint32_t MeshtasticProtocol::nextPacketId()
+{
+    m_packetCounter = (m_packetCounter + 1) & 0x3FF;
+    uint32_t id = 0;
+    while (id == 0)
+        id = (QRandomGenerator::global()->bounded(0x400000u) << 10) | m_packetCounter;
+    return id;
 }
 
 QString MeshtasticProtocol::nodeIdToString(uint32_t nodeId)
@@ -1021,7 +1110,7 @@ QByteArray MeshtasticProtocol::createTraceroutePacket(uint32_t destNode, uint32_
     packet->set_to(destNode);
     packet->set_from(myNode);
     packet->set_want_ack(true);
-    packet->set_id(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF);
+    packet->set_id(nextPacketId());
 
     auto *decoded = packet->mutable_decoded();
     decoded->set_portnum(meshtastic::PortNum::TRACEROUTE_APP);
@@ -1044,7 +1133,7 @@ QByteArray MeshtasticProtocol::createPositionRequestPacket(uint32_t destNode, ui
     packet->set_to(destNode);
     packet->set_from(myNode);
     packet->set_want_ack(true);
-    packet->set_id(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF);
+    packet->set_id(nextPacketId());
 
     auto *decoded = packet->mutable_decoded();
     decoded->set_portnum(meshtastic::PortNum::POSITION_APP);
@@ -1067,7 +1156,7 @@ QByteArray MeshtasticProtocol::createTelemetryRequestPacket(uint32_t destNode, u
     packet->set_to(destNode);
     packet->set_from(myNode);
     packet->set_want_ack(true);
-    packet->set_id(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF);
+    packet->set_id(nextPacketId());
 
     auto *decoded = packet->mutable_decoded();
     decoded->set_portnum(meshtastic::PortNum::TELEMETRY_APP);
@@ -1090,7 +1179,7 @@ QByteArray MeshtasticProtocol::createNodeInfoRequestPacket(uint32_t destNode, ui
     packet->set_to(destNode);
     packet->set_from(myNode);
     packet->set_want_ack(true);
-    packet->set_id(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF);
+    packet->set_id(nextPacketId());
 
     auto *decoded = packet->mutable_decoded();
     decoded->set_portnum(meshtastic::PortNum::NODEINFO_APP);
@@ -1105,7 +1194,7 @@ QByteArray MeshtasticProtocol::createNodeInfoRequestPacket(uint32_t destNode, ui
     return wrapInFrame(serialized);
 }
 
-QByteArray MeshtasticProtocol::createTextMessagePacket(const QString &text, uint32_t destNode, uint32_t myNode, int channel, uint32_t replyId, uint32_t *outPacketId)
+QByteArray MeshtasticProtocol::createTextMessagePacket(const QString &text, uint32_t destNode, uint32_t myNode, int channel, uint32_t replyId, uint32_t *outPacketId, bool isReaction)
 {
     meshtastic::ToRadio toRadio;
     auto *packet = toRadio.mutable_packet();
@@ -1114,7 +1203,7 @@ QByteArray MeshtasticProtocol::createTextMessagePacket(const QString &text, uint
     packet->set_from(myNode);
     packet->set_channel(channel);
     packet->set_want_ack(true);
-    uint32_t packetId = QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF;
+    const uint32_t packetId = nextPacketId();
     packet->set_id(packetId);
 
     if (outPacketId)
@@ -1134,6 +1223,10 @@ QByteArray MeshtasticProtocol::createTextMessagePacket(const QString &text, uint
     {
         decoded->set_reply_id(replyId);
     }
+    if (isReaction)
+    {
+        decoded->set_emoji(1);
+    }
 
     std::string serialized;
     toRadio.SerializeToString(&serialized);
@@ -1141,14 +1234,14 @@ QByteArray MeshtasticProtocol::createTextMessagePacket(const QString &text, uint
 }
 
 // Helper to create admin message frame for LOCAL device (connected via serial)
-static QByteArray createAdminFrame(uint32_t destNode, uint32_t myNode, const std::string &adminPayload, const QByteArray &sessionKey = QByteArray())
+static QByteArray createAdminFrame(uint32_t packetId, uint32_t destNode, uint32_t myNode, const std::string &adminPayload, const QByteArray &sessionKey = QByteArray())
 {
     meshtastic::ToRadio toRadio;
     auto *packet = toRadio.mutable_packet();
 
     // For LOCAL admin: don't set 'to' or 'from' (both default to 0)
     // This tells the device this is a local admin command, not to be routed
-    packet->set_id(QDateTime::currentMSecsSinceEpoch() & 0xFFFFFFFF);
+    packet->set_id(packetId);
 
     auto *decoded = packet->mutable_decoded();
     decoded->set_portnum(meshtastic::PortNum::ADMIN_APP);
@@ -1182,21 +1275,21 @@ static QByteArray createAdminFrame(uint32_t destNode, uint32_t myNode, const std
 QByteArray MeshtasticProtocol::createGetConfigRequestPacket(uint32_t destNode, uint32_t myNode, int configType)
 {
     meshtastic::AdminMessage admin;
-    // configType: 1=Device, 2=Position, 3=Power, 4=Network, 5=Display, 6=LoRa, 7=Bluetooth, 8=SessionKey
-    admin.set_get_config_request(configType);
+    // configType is an AdminMessage::ConfigType: 0=Device, 1=Position, 2=Power,
+    // 3=Network, 4=Display, 5=LoRa, 6=Bluetooth, 7=Security, 8=SessionKey
+    admin.set_get_config_request(static_cast<meshtastic::AdminMessage_ConfigType>(configType));
 
-    return createAdminFrame(destNode, myNode, admin.SerializeAsString());
+    return createAdminFrame(nextPacketId(), destNode, myNode, admin.SerializeAsString());
 }
 
 QByteArray MeshtasticProtocol::createSessionKeyRequestPacket()
 {
-    // Request session key (config type 8 = SESSIONKEY_CONFIG)
     meshtastic::AdminMessage admin;
-    admin.set_get_config_request(8);  // SESSIONKEY_CONFIG
+    admin.set_get_config_request(meshtastic::AdminMessage::SESSIONKEY_CONFIG);
 
     qDebug() << "Requesting session key from device";
 
-    return createAdminFrame(0, 0, admin.SerializeAsString());
+    return createAdminFrame(nextPacketId(), 0, 0, admin.SerializeAsString());
 }
 
 QByteArray MeshtasticProtocol::createLoRaConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config)
@@ -1204,10 +1297,16 @@ QByteArray MeshtasticProtocol::createLoRaConfigPacket(uint32_t destNode, uint32_
     meshtastic::AdminMessage admin;
     auto *setConfig = admin.mutable_set_config();
     auto *lora = setConfig->mutable_lora();
+    // set_config replaces the whole section: start from what the device sent
+    // so fields we don't edit (ignore_mqtt, config_ok_to_mqtt, rx boosted gain,
+    // override_frequency, ignore_incoming, custom BW/SF/CR, ...) are kept.
+    const QByteArray base = config.value("raw").toByteArray();
+    if (!base.isEmpty() && !lora->ParseFromArray(base.constData(), base.size()))
+        qWarning() << "[Protocol] Stored LoRa config did not parse; unedited fields will reset";
 
     lora->set_use_preset(config.value("usePreset", true).toBool());
-    lora->set_modem_preset(config.value("modemPreset", 0).toUInt());
-    lora->set_region(config.value("region", 0).toUInt());
+    lora->set_modem_preset(static_cast<meshtastic::Config_LoRaConfig_ModemPreset>(config.value("modemPreset", 0).toInt()));
+    lora->set_region(static_cast<meshtastic::Config_LoRaConfig_RegionCode>(config.value("region", 0).toInt()));
     lora->set_hop_limit(config.value("hopLimit", 3).toUInt());
     lora->set_tx_enabled(config.value("txEnabled", true).toBool());
     lora->set_tx_power(config.value("txPower", 0).toInt());
@@ -1215,7 +1314,7 @@ QByteArray MeshtasticProtocol::createLoRaConfigPacket(uint32_t destNode, uint32_
     lora->set_override_duty_cycle(config.value("overrideDutyCycle", false).toBool());
     lora->set_frequency_offset(config.value("frequencyOffset", 0.0).toFloat());
 
-    return createAdminFrame(destNode, myNode, admin.SerializeAsString());
+    return createAdminFrame(nextPacketId(), destNode, myNode, admin.SerializeAsString());
 }
 
 QByteArray MeshtasticProtocol::createDeviceConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config)
@@ -1223,21 +1322,22 @@ QByteArray MeshtasticProtocol::createDeviceConfigPacket(uint32_t destNode, uint3
     meshtastic::AdminMessage admin;
     auto *setConfig = admin.mutable_set_config();
     auto *device = setConfig->mutable_device();
+    // Start from the device's config; see createLoRaConfigPacket
+    const QByteArray base = config.value("raw").toByteArray();
+    if (!base.isEmpty() && !device->ParseFromArray(base.constData(), base.size()))
+        qWarning() << "[Protocol] Stored device config did not parse; unedited fields will reset";
 
-    device->set_role(config.value("role", 0).toUInt());
-    device->set_serial_enabled(config.value("serialEnabled", true).toBool());
-    device->set_debug_log_enabled(config.value("debugLogEnabled", false).toBool());
+    device->set_role(static_cast<meshtastic::Config_DeviceConfig_Role>(config.value("role", 0).toInt()));
     device->set_button_gpio(config.value("buttonGpio", 0).toUInt());
     device->set_buzzer_gpio(config.value("buzzerGpio", 0).toUInt());
-    device->set_rebroadcast_mode(config.value("rebroadcastMode", 0).toUInt());
+    device->set_rebroadcast_mode(static_cast<meshtastic::Config_DeviceConfig_RebroadcastMode>(config.value("rebroadcastMode", 0).toInt()));
     device->set_node_info_broadcast_secs(config.value("nodeInfoBroadcastSecs", 900).toUInt());
     device->set_double_tap_as_button_press(config.value("doubleTapAsButtonPress", false).toBool());
-    device->set_is_managed(config.value("isManaged", false).toBool());
     device->set_disable_triple_click(config.value("disableTripleClick", false).toBool());
     device->set_tzdef(config.value("tzdef").toString().toStdString());
     device->set_led_heartbeat_disabled(config.value("ledHeartbeatDisabled", false).toBool());
 
-    return createAdminFrame(destNode, myNode, admin.SerializeAsString());
+    return createAdminFrame(nextPacketId(), destNode, myNode, admin.SerializeAsString());
 }
 
 QByteArray MeshtasticProtocol::createPositionConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config)
@@ -1245,6 +1345,11 @@ QByteArray MeshtasticProtocol::createPositionConfigPacket(uint32_t destNode, uin
     meshtastic::AdminMessage admin;
     auto *setConfig = admin.mutable_set_config();
     auto *position = setConfig->mutable_position();
+    // Start from the device's config; see createLoRaConfigPacket. Keeps the
+    // GPS pins and anything else this client doesn't edit.
+    const QByteArray base = config.value("raw").toByteArray();
+    if (!base.isEmpty() && !position->ParseFromArray(base.constData(), base.size()))
+        qWarning() << "[Protocol] Stored position config did not parse; unedited fields will reset";
 
     position->set_position_broadcast_secs(config.value("positionBroadcastSecs", 900).toUInt());
     position->set_position_broadcast_smart_enabled(config.value("smartPositionEnabled", true).toBool());
@@ -1255,9 +1360,41 @@ QByteArray MeshtasticProtocol::createPositionConfigPacket(uint32_t destNode, uin
     position->set_position_flags(config.value("positionFlags", 0).toUInt());
     position->set_broadcast_smart_minimum_distance(config.value("broadcastSmartMinDistance", 100).toUInt());
     position->set_broadcast_smart_minimum_interval_secs(config.value("broadcastSmartMinIntervalSecs", 30).toUInt());
-    position->set_gps_mode(config.value("gpsMode", 0).toUInt());
+    position->set_gps_mode(static_cast<meshtastic::Config_PositionConfig_GpsMode>(config.value("gpsMode", 0).toInt()));
 
-    return createAdminFrame(destNode, myNode, admin.SerializeAsString());
+    return createAdminFrame(nextPacketId(), destNode, myNode, admin.SerializeAsString());
+}
+
+QByteArray MeshtasticProtocol::createSecurityConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config)
+{
+    // Never build a security config from scratch: it carries the private key
+    // and admin keys, and a partial one would rotate or drop them.
+    const QByteArray base = config.value("raw").toByteArray();
+    meshtastic::AdminMessage admin;
+    auto *security = admin.mutable_set_config()->mutable_security();
+    if (base.isEmpty() || !security->ParseFromArray(base.constData(), base.size()))
+    {
+        qWarning() << "[Protocol] No security config from the device to edit; not sending";
+        return QByteArray();
+    }
+    security->set_serial_enabled(config.value("serialEnabled", security->serial_enabled()).toBool());
+    security->set_debug_log_api_enabled(config.value("debugLogApiEnabled", security->debug_log_api_enabled()).toBool());
+
+    return createAdminFrame(nextPacketId(), destNode, myNode, admin.SerializeAsString());
+}
+
+QByteArray MeshtasticProtocol::createBeginEditSettingsPacket(uint32_t destNode, uint32_t myNode)
+{
+    meshtastic::AdminMessage admin;
+    admin.set_begin_edit_settings(true);
+    return createAdminFrame(nextPacketId(), destNode, myNode, admin.SerializeAsString());
+}
+
+QByteArray MeshtasticProtocol::createCommitEditSettingsPacket(uint32_t destNode, uint32_t myNode)
+{
+    meshtastic::AdminMessage admin;
+    admin.set_commit_edit_settings(true);
+    return createAdminFrame(nextPacketId(), destNode, myNode, admin.SerializeAsString());
 }
 
 QByteArray MeshtasticProtocol::createChannelConfigPacket(uint32_t destNode, uint32_t myNode, int channelIndex, const QVariantMap &config)
@@ -1280,14 +1417,17 @@ QByteArray MeshtasticProtocol::createChannelConfigPacket(uint32_t destNode, uint
         settings->set_psk(psk.constData(), psk.size());
     }
 
-    // Generate channel ID from PSK (as per Meshtastic spec: xor all PSK bytes + 0x41, mod 26)
-    // But actually, id is a fixed32 random number, not the letter suffix
-    // Generate a random ID for this channel
-    uint32_t channelId = static_cast<uint32_t>(QDateTime::currentMSecsSinceEpoch()) ^ (channelIndex * 0x12345678);
+    // set_channel replaces the whole channel on the device, so send back the
+    // id and module settings it reported rather than letting them reset.
+    const uint32_t channelId = config.value("channelId", 0u).toUInt();
     settings->set_id(channelId);
 
     settings->set_uplink_enabled(config.value("uplinkEnabled", false).toBool());
     settings->set_downlink_enabled(config.value("downlinkEnabled", false).toBool());
+
+    auto *moduleSettings = settings->mutable_module_settings();
+    moduleSettings->set_position_precision(config.value("positionPrecision", 0u).toUInt());
+    moduleSettings->set_is_muted(config.value("isMuted", false).toBool());
 
     std::string adminSerialized = admin.SerializeAsString();
 
@@ -1299,7 +1439,7 @@ QByteArray MeshtasticProtocol::createChannelConfigPacket(uint32_t destNode, uint
              << "hasSessionKey:" << hasSessionKey()
              << "admin payload hex:" << QByteArray(adminSerialized.data(), adminSerialized.size()).toHex();
 
-    return createAdminFrame(destNode, myNode, adminSerialized, m_sessionKey);
+    return createAdminFrame(nextPacketId(), destNode, myNode, adminSerialized, m_sessionKey);
 }
 
 QByteArray MeshtasticProtocol::createRebootPacket(uint32_t destNode, uint32_t myNode, int delaySeconds)
@@ -1307,13 +1447,13 @@ QByteArray MeshtasticProtocol::createRebootPacket(uint32_t destNode, uint32_t my
     meshtastic::AdminMessage admin;
     admin.set_reboot_seconds(delaySeconds);
 
-    return createAdminFrame(destNode, myNode, admin.SerializeAsString());
+    return createAdminFrame(nextPacketId(), destNode, myNode, admin.SerializeAsString());
 }
 
 QByteArray MeshtasticProtocol::createHeartbeatPacket()
 {
     meshtastic::ToRadio toRadio;
-    toRadio.set_heartbeat(true);
+    toRadio.mutable_heartbeat();  // empty Heartbeat message; firmware replies with QueueStatus
 
     std::string serialized;
     toRadio.SerializeToString(&serialized);
@@ -1443,19 +1583,32 @@ uint8_t MeshtasticProtocol::xorHash(const QByteArray &data)
 }
 
 // Firmware channel names used when a channel has no explicit name. These feed the
-// hash, so they must match Channels::getName in the firmware exactly.
-static QString modemPresetChannelName(int modemPreset)
+// hash, so they must match DisplayFormatters::getModemPresetDisplayName
+// (long names) in the firmware exactly, including "Custom" when use_preset is
+// off and "Invalid" for values it has no case for (e.g. VERY_LONG_SLOW).
+static QString modemPresetChannelName(int modemPreset, bool usePreset)
 {
+    if (!usePreset)
+        return QStringLiteral("Custom");
+
     switch (modemPreset) {
-    case 1: return QStringLiteral("LongSlow");
-    case 3: return QStringLiteral("MediumSlow");
-    case 4: return QStringLiteral("MediumFast");
-    case 5: return QStringLiteral("ShortSlow");
-    case 6: return QStringLiteral("ShortFast");
-    case 7: return QStringLiteral("LongMod");
-    case 8: return QStringLiteral("ShortTurbo");
-    case 0:  // LONG_FAST
-    default: return QStringLiteral("LongFast");
+    case 0:  return QStringLiteral("LongFast");
+    case 1:  return QStringLiteral("LongSlow");
+    case 3:  return QStringLiteral("MediumSlow");
+    case 4:  return QStringLiteral("MediumFast");
+    case 5:  return QStringLiteral("ShortSlow");
+    case 6:  return QStringLiteral("ShortFast");
+    case 7:  return QStringLiteral("LongMod");
+    case 8:  return QStringLiteral("ShortTurbo");
+    case 9:  return QStringLiteral("LongTurbo");
+    case 10: return QStringLiteral("LiteFast");
+    case 11: return QStringLiteral("LiteSlow");
+    case 12: return QStringLiteral("NarrowFast");
+    case 13: return QStringLiteral("NarrowSlow");
+    case 14: return QStringLiteral("TinyFast");
+    case 15: return QStringLiteral("TinySlow");
+    case 16: return QStringLiteral("MediumTurbo");
+    default: return QStringLiteral("Invalid");
     }
 }
 
@@ -1477,10 +1630,12 @@ int MeshtasticProtocol::channelHashFor(int channelIndex) const
     if (key.isEmpty())
         return -1;
 
-    // An unnamed primary channel takes its name from the modem preset
+    // Any unnamed channel takes its name from the modem preset (Channels::getName)
     QString name = ch.name;
-    if (name.isEmpty() && channelIndex == 0)
-        name = modemPresetChannelName(m_deviceConfig->loraConfig().modemPreset);
+    if (name.isEmpty()) {
+        const auto lora = m_deviceConfig->loraConfig();
+        name = modemPresetChannelName(lora.modemPreset, lora.usePreset);
+    }
 
     return xorHash(name.toUtf8()) ^ xorHash(key);
 }

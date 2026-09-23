@@ -2,6 +2,7 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QElapsedTimer>
 #include <QTabWidget>
 #include <QComboBox>
 #include <QLabel>
@@ -97,6 +98,9 @@ private:
     uint32_t m_expectedConfigId = 0;
     uint32_t m_openNodeNum = 0;   // node num the DB is currently open for
     QTimer *m_configHeartbeatTimer = nullptr;
+    // Time since the device last sent anything. The firmware answers every
+    // heartbeat with a QueueStatus, so a long silence means a dead link.
+    QElapsedTimer m_lastRxTimer;
     QTimer *m_connectionHeartbeatTimer = nullptr;  // Persistent heartbeat for long sessions
 
     // Traceroute cooldown state

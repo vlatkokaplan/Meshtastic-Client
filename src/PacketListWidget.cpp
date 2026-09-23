@@ -248,19 +248,71 @@ QString PacketTableModel::formatContent(const MeshtasticProtocol::DecodedPacket 
             if (f.contains("telemetryType"))
             {
                 QString type = f["telemetryType"].toString();
+                // Only fields the sender set are present; list those
+                QStringList parts;
+                auto add = [&](const char *key, const QString &fmt, int decimals = 1) {
+                    if (f.contains(key))
+                        parts << fmt.arg(f.value(key).toDouble(), 0, 'f', decimals);
+                };
                 if (type == "device")
                 {
-                    return QString("Battery: %1%, Voltage: %2V, ChUtil: %3%")
-                        .arg(f.value("batteryLevel", 0).toInt())
-                        .arg(f.value("voltage", 0).toFloat(), 0, 'f', 2)
-                        .arg(f.value("channelUtilization", 0).toFloat(), 0, 'f', 1);
+                    const int battery = f.value("batteryLevel", -1).toInt();
+                    if (battery > 100)
+                        parts << "Powered";
+                    else if (battery >= 0)
+                        parts << QString("Battery: %1%").arg(battery);
+                    add("voltage", "Voltage: %1V", 2);
+                    add("channelUtilization", "ChUtil: %1%");
+                    add("airUtilTx", "AirTx: %1%");
                 }
                 else if (type == "environment")
                 {
-                    return QString("Temp: %1°C, Humidity: %2%")
-                        .arg(f.value("temperature", 0).toFloat(), 0, 'f', 1)
-                        .arg(f.value("relativeHumidity", 0).toFloat(), 0, 'f', 1);
+                    add("temperature", "Temp: %1°C");
+                    add("relativeHumidity", "Humidity: %1%");
+                    add("barometricPressure", "Pressure: %1 hPa");
+                    add("iaq", "IAQ: %1", 0);
+                    add("lux", "Light: %1 lx", 0);
+                    add("windSpeed", "Wind: %1 m/s");
                 }
+                else if (type == "airQuality")
+                {
+                    add("pm25Standard", "PM2.5: %1 µg/m³", 0);
+                    add("pm100Standard", "PM10: %1 µg/m³", 0);
+                    add("co2", "CO₂: %1 ppm", 0);
+                }
+                else if (type == "power")
+                {
+                    for (int ch = 1; ch <= 8; ++ch)
+                    {
+                        const QString v = QString("ch%1Voltage").arg(ch);
+                        const QString c = QString("ch%1Current").arg(ch);
+                        if (f.contains(v) || f.contains(c))
+                            parts << QString("Ch%1: %2V %3mA").arg(ch)
+                                         .arg(f.value(v).toDouble(), 0, 'f', 2)
+                                         .arg(f.value(c).toDouble(), 0, 'f', 0);
+                    }
+                }
+                else if (type == "localStats")
+                {
+                    add("numOnlineNodes", "Online: %1", 0);
+                    add("numPacketsTx", "Tx: %1", 0);
+                    add("numPacketsRx", "Rx: %1", 0);
+                    add("numPacketsRxBad", "Bad: %1", 0);
+                    add("noiseFloor", "Noise: %1 dBm", 0);
+                }
+                else if (type == "health")
+                {
+                    add("heartBpm", "Heart: %1 bpm", 0);
+                    add("spO2", "SpO₂: %1%", 0);
+                    add("temperature", "Body: %1°C");
+                }
+                else if (type == "host")
+                {
+                    add("load1", "Load: %1", 0);
+                    add("freememBytes", "Free: %1 B", 0);
+                }
+                if (!parts.isEmpty())
+                    return QString("[%1] %2").arg(type, parts.join(", "));
             }
             break;
 
@@ -323,6 +375,10 @@ QString PacketTableModel::formatContent(const MeshtasticProtocol::DecodedPacket 
             if (f.contains("decryptFailed"))
             {
                 return "[Decrypt Failed - wrong key?]";
+            }
+            if (f.contains("pkiEncrypted"))
+            {
+                return "[Encrypted DM - public key]";
             }
             if (f.contains("encrypted"))
             {

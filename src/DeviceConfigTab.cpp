@@ -1,6 +1,7 @@
 #include "DeviceConfigTab.h"
 #include "Theme.h"
 #include "DeviceConfig.h"
+#include "EnumCombo.h"
 
 #include <QTimer>
 #include <QVBoxLayout>
@@ -17,6 +18,8 @@ DeviceConfigTab::DeviceConfigTab(DeviceConfig *config, QWidget *parent)
 
     connect(m_config, &DeviceConfig::deviceConfigChanged,
             this, &DeviceConfigTab::onConfigReceived);
+    connect(m_config, &DeviceConfig::securityConfigChanged,
+            this, &DeviceConfigTab::updateUIFromConfig);
 
     if (m_config->hasDeviceConfig()) {
         updateUIFromConfig();
@@ -40,7 +43,7 @@ void DeviceConfigTab::setupUI()
     QFormLayout *roleLayout = new QFormLayout(roleGroup);
 
     m_roleCombo = new QComboBox;
-    m_roleCombo->addItems(DeviceConfig::deviceRoleNames());
+    populateEnumCombo(m_roleCombo, DeviceConfig::deviceRoleOptions());
     m_roleCombo->setToolTip(
         "Client: Normal node that can send/receive messages\n"
         "Client Mute: Receives but doesn't rebroadcast\n"
@@ -65,13 +68,18 @@ void DeviceConfigTab::setupUI()
     QGroupBox *serialGroup = new QGroupBox("Serial & Debug");
     QVBoxLayout *serialLayout = new QVBoxLayout(serialGroup);
 
-    m_serialEnabledCheck = new QCheckBox("Enable Serial Output");
-    m_serialEnabledCheck->setToolTip("Enable serial port output for debugging/API");
+    // Both live in SecurityConfig on current firmware (the DeviceConfig
+    // fields of the same name are deprecated and ignored). Disabled until the
+    // device has sent its security config, since saving needs it as a base.
+    m_serialEnabledCheck = new QCheckBox("Enable Serial API");
+    m_serialEnabledCheck->setToolTip("Allow clients to connect over the USB/serial port");
+    m_serialEnabledCheck->setEnabled(false);
     serialLayout->addWidget(m_serialEnabledCheck);
 
-    m_debugLogCheck = new QCheckBox("Enable Debug Logging");
-    m_debugLogCheck->setToolTip("Enable verbose debug logging to serial");
-    serialLayout->addWidget(m_debugLogCheck);
+    m_debugLogApiCheck = new QCheckBox("Send Debug Logs to Clients");
+    m_debugLogApiCheck->setToolTip("Stream the device's debug log to connected apps");
+    m_debugLogApiCheck->setEnabled(false);
+    serialLayout->addWidget(m_debugLogApiCheck);
 
     m_ledHeartbeatCheck = new QCheckBox("Disable LED Heartbeat");
     m_ledHeartbeatCheck->setToolTip("Disable the LED heartbeat blink");
@@ -158,10 +166,13 @@ void DeviceConfigTab::updateUIFromConfig()
 {
     const auto &device = m_config->deviceConfig();
 
-    m_roleCombo->setCurrentIndex(device.role);
+    selectEnumValue(m_roleCombo, DeviceConfig::deviceRoleOptions(), device.role);
     m_nodeInfoIntervalSpin->setValue(device.nodeInfoBroadcastSecs);
-    m_serialEnabledCheck->setChecked(device.serialEnabled);
-    m_debugLogCheck->setChecked(device.debugLogEnabled);
+    const auto security = m_config->securityConfig();
+    m_serialEnabledCheck->setEnabled(m_config->hasSecurityConfig());
+    m_debugLogApiCheck->setEnabled(m_config->hasSecurityConfig());
+    m_serialEnabledCheck->setChecked(security.serialEnabled);
+    m_debugLogApiCheck->setChecked(security.debugLogApiEnabled);
     m_ledHeartbeatCheck->setChecked(device.ledHeartbeatDisabled);
     m_doubleTapCheck->setChecked(device.doubleTapAsButtonPress);
     m_disableTripleClickCheck->setChecked(device.disableTripleClick);
@@ -170,17 +181,24 @@ void DeviceConfigTab::updateUIFromConfig()
 
 void DeviceConfigTab::onSaveClicked()
 {
-    DeviceConfig::DeviceSettings device;
-    device.role = m_roleCombo->currentIndex();
+    // Start from the device's config so fields this tab doesn't show survive
+    DeviceConfig::DeviceSettings device = m_config->deviceConfig();
+    device.role = enumComboValue(m_roleCombo);
     device.nodeInfoBroadcastSecs = m_nodeInfoIntervalSpin->value();
-    device.serialEnabled = m_serialEnabledCheck->isChecked();
-    device.debugLogEnabled = m_debugLogCheck->isChecked();
     device.ledHeartbeatDisabled = m_ledHeartbeatCheck->isChecked();
     device.doubleTapAsButtonPress = m_doubleTapCheck->isChecked();
     device.disableTripleClick = m_disableTripleClickCheck->isChecked();
     device.tzdef = m_timezoneEdit->text();
 
+    // Read every widget before storing anything: each set* emits a change
+    // signal that refreshes this tab from the stored config.
+    DeviceConfig::SecuritySettings security = m_config->securityConfig();
+    security.serialEnabled = m_serialEnabledCheck->isChecked();
+    security.debugLogApiEnabled = m_debugLogApiCheck->isChecked();
+
     m_config->setDeviceConfig(device);
+    if (m_config->hasSecurityConfig())
+        m_config->setSecurityConfig(security);
 
     m_statusLabel->setText("Saving...");
     m_statusLabel->setStyleSheet("color: orange;");

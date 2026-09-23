@@ -48,17 +48,25 @@ set(PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/proto)
 
 # Core proto files (order matters for dependencies)
 set(PROTO_FILES
+    ${PROTO_PATH}/meshtastic/field_metadata.proto
     ${PROTO_PATH}/meshtastic/portnums.proto
     ${PROTO_PATH}/meshtastic/telemetry.proto
     ${PROTO_PATH}/meshtastic/channel.proto
+    ${PROTO_PATH}/meshtastic/device_ui.proto
     ${PROTO_PATH}/meshtastic/config.proto
     ${PROTO_PATH}/meshtastic/module_config.proto
+    ${PROTO_PATH}/meshtastic/atak.proto
+    ${PROTO_PATH}/meshtastic/xmodem.proto
     ${PROTO_PATH}/meshtastic/mesh.proto
+    ${PROTO_PATH}/meshtastic/connection_status.proto
     ${PROTO_PATH}/meshtastic/admin.proto
     ${PROTO_PATH}/meshtastic/apponly.proto
 )
 
-# Generate protobuf sources with proper import path
+# Generate protobuf sources with proper import path. They go in their own
+# directory so it can be a SYSTEM include: upstream marks enum values
+# [[deprecated]] and the generated headers would otherwise warn in every file.
+set(PROTO_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/proto_gen)
 set(PROTO_SRCS)
 set(PROTO_HDRS)
 
@@ -67,18 +75,19 @@ foreach(PROTO_FILE ${PROTO_FILES})
     get_filename_component(PROTO_DIR ${PROTO_FILE} DIRECTORY)
     file(RELATIVE_PATH PROTO_REL_DIR ${PROTO_PATH} ${PROTO_DIR})
 
-    set(PROTO_SRC "${CMAKE_CURRENT_BINARY_DIR}/${PROTO_REL_DIR}/${PROTO_NAME}.pb.cc")
-    set(PROTO_HDR "${CMAKE_CURRENT_BINARY_DIR}/${PROTO_REL_DIR}/${PROTO_NAME}.pb.h")
+    set(PROTO_SRC "${PROTO_GEN_DIR}/${PROTO_REL_DIR}/${PROTO_NAME}.pb.cc")
+    set(PROTO_HDR "${PROTO_GEN_DIR}/${PROTO_REL_DIR}/${PROTO_NAME}.pb.h")
 
     list(APPEND PROTO_SRCS ${PROTO_SRC})
     list(APPEND PROTO_HDRS ${PROTO_HDR})
 
     add_custom_command(
         OUTPUT ${PROTO_SRC} ${PROTO_HDR}
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/${PROTO_REL_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${PROTO_GEN_DIR}/${PROTO_REL_DIR}"
         COMMAND ${Protobuf_PROTOC_EXECUTABLE}
             --proto_path=${PROTO_PATH}
-            --cpp_out=${CMAKE_CURRENT_BINARY_DIR}
+            --proto_path=${Protobuf_INCLUDE_DIRS}
+            --cpp_out=${PROTO_GEN_DIR}
             ${PROTO_FILE}
         DEPENDS ${PROTO_FILE}
         COMMENT "Generating protobuf sources for ${PROTO_NAME}"
@@ -93,8 +102,8 @@ set_source_files_properties(${PROTO_SRCS} ${PROTO_HDRS} PROPERTIES GENERATED TRU
 # tests/ can link against it without needing to list PROTO_SRCS as sources
 # (which would break AUTOMOC's timestamp_deps in the subdirectory scope).
 add_library(meshtastic_proto STATIC EXCLUDE_FROM_ALL ${PROTO_SRCS})
-target_include_directories(meshtastic_proto PUBLIC
-    ${CMAKE_CURRENT_BINARY_DIR}
+target_include_directories(meshtastic_proto SYSTEM PUBLIC
+    ${PROTO_GEN_DIR}
     ${Protobuf_INCLUDE_DIRS}
 )
 target_link_libraries(meshtastic_proto PUBLIC protobuf::libprotobuf)
@@ -152,6 +161,7 @@ set(HEADERS
     src/ConfigWidget.h
     src/AppSettingsTab.h
     src/DeviceConfig.h
+    src/EnumCombo.h
     src/DashboardStatsWidget.h
     src/RadioConfigTab.h
     src/DeviceConfigTab.h
@@ -180,10 +190,10 @@ add_executable(${PROJECT_NAME}
 # Include directories
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_BINARY_DIR}
     ${Protobuf_INCLUDE_DIRS}
     ${QRENCODE_INCLUDE_DIRS}
 )
+target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${PROTO_GEN_DIR})
 
 # Link libraries
 target_link_libraries(${PROJECT_NAME} PRIVATE

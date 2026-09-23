@@ -124,6 +124,58 @@ private slots:
         QVERIFY(qAbs(n.voltage - 3.85f) < 0.01f);
     }
 
+    void environment_voltage_does_not_overwrite_battery_voltage()
+    {
+        NodeManager nm;
+        QVariantMap device;
+        device["telemetryType"] = "device";
+        device["voltage"] = 3.9;
+        nm.updateNodeTelemetry(0xEEEEu, device);
+
+        QVariantMap env;
+        env["telemetryType"] = "environment";
+        env["voltage"] = 12.4;       // an INA sensor on a solar panel
+        env["temperature"] = 0.0;    // and a real 0 °C
+        nm.updateNodeTelemetry(0xEEEEu, env);
+
+        NodeInfo n = nm.getNode(0xEEEEu);
+        QVERIFY(qAbs(n.voltage - 3.9f) < 0.01f);
+        QVERIFY(n.hasEnvironmentTelemetry);
+        QCOMPARE(n.temperature, 0.0f);
+    }
+
+    void health_temperature_is_not_air_temperature()
+    {
+        NodeManager nm;
+        QVariantMap health;
+        health["telemetryType"] = "health";
+        health["temperature"] = 36.6;
+        nm.updateNodeTelemetry(0xABCDu, health);
+        QVERIFY(!nm.getNode(0xABCDu).hasEnvironmentTelemetry);
+    }
+
+    void nodeinfo_snapshot_sets_hops_mqtt_and_battery()
+    {
+        NodeManager nm;
+        QVariantMap metrics;
+        metrics["batteryLevel"] = 101;  // external power
+        QVariantMap info;
+        info["nodeNum"] = 0x1111u;
+        info["hopsAway"] = 3;
+        info["viaMqtt"] = true;
+        info["deviceMetrics"] = metrics;
+        nm.updateNodeFromPacket(info);
+
+        NodeInfo n = nm.getNode(0x1111u);
+        QCOMPARE(n.hopsAway, 3);
+        QVERIFY(n.viaMqtt);
+        QVERIFY(n.isExternalPower);
+
+        // Heard over the air afterwards: no longer an MQTT-only node
+        nm.updateNodeSignal(0x1111u, 5.0f, -90, 1);
+        QVERIFY(!nm.getNode(0x1111u).viaMqtt);
+    }
+
     void external_power_battery_over_100()
     {
         NodeManager nm;

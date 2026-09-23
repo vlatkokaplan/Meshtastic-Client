@@ -304,7 +304,9 @@ void ChannelsConfigTab::onSaveClicked()
     // Save channel index before setChannel() which may trigger list update and reset m_currentChannel
     int channelToSave = m_currentChannel;
 
-    DeviceConfig::ChannelConfig ch;
+    // Start from what the device reported so fields this tab doesn't edit
+    // (channel id, position precision, mute) survive the save.
+    DeviceConfig::ChannelConfig ch = m_config->channel(channelToSave);
     ch.index = channelToSave;
     ch.role = m_roleCombo->currentIndex();
     ch.name = m_nameEdit->text();
@@ -342,6 +344,25 @@ void ChannelsConfigTab::onSaveClicked()
         }
     }
     qDebug() << "PSK size:" << ch.psk.size();
+
+    // An empty key, or the one-byte key 0x00, means no encryption at all.
+    // Easy to do by accident by clearing the field, so ask first.
+    const bool unencrypted = ch.psk.isEmpty()
+                             || (ch.psk.size() == 1 && ch.psk.at(0) == '\0');
+    if (unencrypted && ch.role != 0) {
+        const auto answer = QMessageBox::warning(
+            this, "No encryption",
+            QString("Channel \"%1\" has no pre-shared key, so it will be saved "
+                    "unencrypted: anyone in range can read its messages.\n\n"
+                    "Save without encryption?")
+                .arg(ch.name.isEmpty() ? QString("#%1").arg(channelToSave) : ch.name),
+            QMessageBox::Save | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (answer != QMessageBox::Save) {
+            m_statusLabel->setText("Not saved");
+            m_statusLabel->setStyleSheet(QString("color: %1;").arg(Theme::palette().textMuted.name()));
+            return;
+        }
+    }
 
     ch.uplinkEnabled = m_uplinkCheck->isChecked();
     ch.downlinkEnabled = m_downlinkCheck->isChecked();
@@ -387,7 +408,6 @@ QString ChannelsConfigTab::buildChannelUrl() const
             continue; // skip disabled
 
         auto *settings = channelSet.add_settings();
-        settings->set_channel_num(i);
         if (!ch.psk.isEmpty()) {
             settings->set_psk(ch.psk.constData(), ch.psk.size());
         }
@@ -403,8 +423,8 @@ QString ChannelsConfigTab::buildChannelUrl() const
         auto lora = m_config->loraConfig();
         auto *loraProto = channelSet.mutable_lora_config();
         loraProto->set_use_preset(lora.usePreset);
-        loraProto->set_modem_preset(lora.modemPreset);
-        loraProto->set_region(lora.region);
+        loraProto->set_modem_preset(static_cast<meshtastic::Config_LoRaConfig_ModemPreset>(lora.modemPreset));
+        loraProto->set_region(static_cast<meshtastic::Config_LoRaConfig_RegionCode>(lora.region));
         loraProto->set_hop_limit(lora.hopLimit);
         loraProto->set_tx_enabled(lora.txEnabled);
         loraProto->set_tx_power(lora.txPower);

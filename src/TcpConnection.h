@@ -21,6 +21,13 @@ public:
     bool sendData(const QByteArray &data);
     bool isReconnecting() const { return m_reconnectTimer->isActive(); }
 
+    // Drop a connection that looks alive to TCP but has stopped delivering
+    // data (WiFi gone without a FIN/RST), and start reconnecting.
+    void dropAndReconnect();
+
+    // Delay before reconnect attempt `attempt` (0-based): 3 s doubling to 30 s
+    static int reconnectDelayMs(int attempt);
+
 signals:
     void connected();
     void disconnected();
@@ -40,8 +47,12 @@ private:
     QString m_lastHost;
     quint16 m_lastPort = 4403;
     bool m_intentionalDisconnect = false;
+    int m_reconnectAttempts = 0;
 
-    static const int RECONNECT_INTERVAL_MS = 3000;
+    void startReconnecting();
+
+    static constexpr int RECONNECT_INTERVAL_MS = 3000;
+    static constexpr int MAX_RECONNECT_INTERVAL_MS = 30000;
 };
 
 #endif // TCPCONNECTION_H

@@ -1,6 +1,7 @@
 #include "PositionConfigTab.h"
 #include "Theme.h"
 #include "DeviceConfig.h"
+#include "EnumCombo.h"
 
 #include <QTimer>
 #include <QVBoxLayout>
@@ -39,7 +40,7 @@ void PositionConfigTab::setupUI()
     QFormLayout *gpsLayout = new QFormLayout(gpsGroup);
 
     m_gpsModeCombo = new QComboBox;
-    m_gpsModeCombo->addItems(DeviceConfig::gpsModeNames());
+    populateEnumCombo(m_gpsModeCombo, DeviceConfig::gpsModeOptions());
     m_gpsModeCombo->setToolTip("GPS mode: Disabled, Enabled, or Not Present");
     gpsLayout->addRow("GPS Mode:", m_gpsModeCombo);
 
@@ -142,7 +143,7 @@ void PositionConfigTab::updateUIFromConfig()
 {
     const auto &pos = m_config->positionConfig();
 
-    m_gpsModeCombo->setCurrentIndex(pos.gpsMode);
+    selectEnumValue(m_gpsModeCombo, DeviceConfig::gpsModeOptions(), pos.gpsMode);
     m_gpsUpdateIntervalSpin->setValue(pos.gpsUpdateInterval);
     m_gpsAttemptTimeSpin->setValue(pos.gpsAttemptTime);
     m_fixedPositionCheck->setChecked(pos.fixedPosition);
@@ -162,8 +163,10 @@ void PositionConfigTab::onSmartPositionToggled(bool checked)
 
 void PositionConfigTab::onSaveClicked()
 {
-    DeviceConfig::PositionSettings pos;
-    pos.gpsMode = m_gpsModeCombo->currentIndex();
+    // Start from the device's config so fields this tab doesn't show survive
+    // (position_flags, GPS pins, ...)
+    DeviceConfig::PositionSettings pos = m_config->positionConfig();
+    pos.gpsMode = enumComboValue(m_gpsModeCombo);
     pos.gpsUpdateInterval = m_gpsUpdateIntervalSpin->value();
     pos.gpsAttemptTime = m_gpsAttemptTimeSpin->value();
     pos.fixedPosition = m_fixedPositionCheck->isChecked();
@@ -171,7 +174,7 @@ void PositionConfigTab::onSaveClicked()
     pos.smartPositionEnabled = m_smartPositionCheck->isChecked();
     pos.broadcastSmartMinDistance = m_smartMinDistanceSpin->value();
     pos.broadcastSmartMinIntervalSecs = m_smartMinIntervalSpin->value();
-    pos.gpsEnabled = (pos.gpsMode == 1);  // Mode 1 = Enabled
+    pos.gpsEnabled = (pos.gpsMode == 1);  // GpsMode ENABLED = 1
 
     m_config->setPositionConfig(pos);
 

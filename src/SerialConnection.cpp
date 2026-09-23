@@ -1,7 +1,12 @@
 #include "SerialConnection.h"
 #include <QDebug>
 
-// Known Meshtastic device identifiers
+// USB IDs of Meshtastic-capable boards, following the official Python
+// client's supported_device.py plus a few common chips it does not list.
+// Only used to sort and label ports in the connect dialog, so a false match
+// costs little. ANY_PID matches every product of that vendor.
+static constexpr quint16 ANY_PID = 0xFFFF;
+
 struct DeviceId
 {
     quint16 vid;
@@ -10,16 +15,29 @@ struct DeviceId
 };
 
 static const DeviceId KNOWN_DEVICES[] = {
-    {0x1A86, 0x55D4, "CH9102"},   // CH9102 (common on Heltec/LILYGO)
-    {0x1A86, 0x7523, "CH340"},    // CH340
-    {0x10C4, 0xEA60, "CP2102"},   // CP210x (common on many boards)
-    {0x10C4, 0xEA70, "CP2105"},   // CP2105
-    {0x0403, 0x6001, "FT232"},    // FTDI FT232
-    {0x0403, 0x6015, "FT231X"},   // FTDI FT231X
-    {0x303A, 0x1001, "ESP32-S3"}, // ESP32-S3 native USB
-    {0x303A, 0x4001, "ESP32-S2"}, // ESP32-S2 native USB
-    {0x239A, 0x8029, "nRF52840"}, // Adafruit nRF52840
+    {0x1A86, 0x55D4, "CH9102"},        // T-Beam, T-Lora, Nano G1
+    {0x1A86, 0x55D3, "CH343"},         // newer LILYGO / Heltec boards
+    {0x1A86, 0x7523, "CH340"},         // RAK11200
+    {0x10C4, 0xEA60, "CP2102"},        // Heltec, T-Lora, DIY
+    {0x10C4, 0xEA70, "CP2105"},
+    {0x0403, 0x6001, "FT232"},
+    {0x0403, 0x6015, "FT231X"},
+    {0x303A, 0x1001, "ESP32 native USB"}, // ESP32-S3/C3/C6, T-Deck
+    {0x303A, 0x4001, "ESP32-S2"},
+    {0x239A, ANY_PID, "nRF52840"},     // Adafruit bootloader: RAK4631, T-Echo, T114
+    {0x2886, ANY_PID, "Seeed nRF52840"}, // XIAO, Wio Tracker, SenseCAP T1000-E
+    {0x2E8A, ANY_PID, "RP2040"},       // RAK11310, Pico
     {0, 0, nullptr}};
+
+static const DeviceId *matchDevice(quint16 vid, quint16 pid)
+{
+    for (const DeviceId *dev = KNOWN_DEVICES; dev->vid != 0; ++dev)
+    {
+        if (vid == dev->vid && (dev->pid == ANY_PID || pid == dev->pid))
+            return dev;
+    }
+    return nullptr;
+}
 
 SerialConnection::SerialConnection(QObject *parent)
     : QObject(parent), m_serialPort(new QSerialPort(this)), m_reconnectTimer(new QTimer(this)), m_intentionalDisconnect(false)
@@ -42,18 +60,13 @@ QList<QSerialPortInfo> SerialConnection::detectMeshtasticDevices()
 
     for (const QSerialPortInfo &portInfo : QSerialPortInfo::availablePorts())
     {
-        quint16 vid = portInfo.vendorIdentifier();
-        quint16 pid = portInfo.productIdentifier();
-
-        for (const DeviceId *dev = KNOWN_DEVICES; dev->vid != 0; ++dev)
+        if (!portInfo.hasVendorIdentifier())
+            continue;
+        if (const DeviceId *dev = matchDevice(portInfo.vendorIdentifier(), portInfo.productIdentifier()))
         {
-            if (vid == dev->vid && pid == dev->pid)
-            {
-                meshtasticPorts.append(portInfo);
-                qDebug() << "Found Meshtastic device:" << dev->name
-                         << "on" << portInfo.portName();
-                break;
-            }
+            meshtasticPorts.append(portInfo);
+            qDebug() << "Found Meshtastic device:" << dev->name
+                     << "on" << portInfo.portName();
         }
     }
 
@@ -67,15 +80,10 @@ QList<QSerialPortInfo> SerialConnection::availablePorts()
 
 QString SerialConnection::deviceDescription(const QSerialPortInfo &info)
 {
-    quint16 vid = info.vendorIdentifier();
-    quint16 pid = info.productIdentifier();
-
-    for (const DeviceId *dev = KNOWN_DEVICES; dev->vid != 0; ++dev)
+    if (info.hasVendorIdentifier())
     {
-        if (vid == dev->vid && pid == dev->pid)
-        {
+        if (const DeviceId *dev = matchDevice(info.vendorIdentifier(), info.productIdentifier()))
             return QString(dev->name);
-        }
     }
 
     return info.description();

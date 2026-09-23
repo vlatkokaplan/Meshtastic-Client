@@ -2,6 +2,7 @@
 #include "Theme.h"
 #include "NodeManager.h"
 #include "Database.h"
+#include "MeshtasticProtocol.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -559,7 +560,20 @@ void MessagesWidget::setupUI()
     m_sendButton->setEnabled(false);
     connect(m_sendButton, &QPushButton::clicked, this, &MessagesWidget::onSendClicked);
 
+    // The limit is in UTF-8 bytes, not characters: an emoji costs four
+    m_lengthLabel = new QLabel;
+    m_lengthLabel->setVisible(false);
+    connect(m_inputEdit, &QLineEdit::textChanged, this, [this](const QString &text) {
+        const int bytes = text.trimmed().toUtf8().size();
+        const int limit = MeshtasticProtocol::MAX_TEXT_BYTES;
+        m_lengthLabel->setVisible(bytes > limit * 3 / 4);
+        m_lengthLabel->setText(QString("%1/%2").arg(bytes).arg(limit));
+        m_lengthLabel->setStyleSheet(QString("color: %1;").arg(
+            (bytes > limit ? Theme::palette().danger : Theme::palette().textMuted).name()));
+    });
+
     inputLayout->addWidget(m_inputEdit, 1);
+    inputLayout->addWidget(m_lengthLabel);
     inputLayout->addWidget(m_sendButton);
     rightLayout->addLayout(inputLayout);
 
@@ -729,8 +743,27 @@ void MessagesWidget::updateMessageStatus(uint32_t packetId, int errorReason)
     case 5: // MAX_RETRANSMIT
         msg.status = MessageStatus::MaxRetransmit;
         break;
+    case 6: // NO_CHANNEL
+        msg.status = MessageStatus::NoChannel;
+        break;
+    case 7: // TOO_LARGE
+        msg.status = MessageStatus::TooLarge;
+        break;
     case 8: // NO_RESPONSE
         msg.status = MessageStatus::NoResponse;
+        break;
+    case 9: // DUTY_CYCLE_LIMIT
+        msg.status = MessageStatus::DutyCycleLimit;
+        break;
+    case 34: // PKI_FAILED
+    case 39: // PKI_SEND_FAIL_PUBLIC_KEY
+        msg.status = MessageStatus::PkiNoKey;
+        break;
+    case 35: // PKI_UNKNOWN_PUBKEY
+        msg.status = MessageStatus::PkiUnknownPubkey;
+        break;
+    case 38: // RATE_LIMIT_EXCEEDED
+        msg.status = MessageStatus::RateLimited;
         break;
     default:
         msg.status = MessageStatus::Failed;
@@ -1019,6 +1052,16 @@ void MessagesWidget::onSendClicked()
     if (text.isEmpty())
         return;
 
+    // Keep the text in the box so it can be shortened rather than lost
+    const int bytes = text.toUtf8().size();
+    if (bytes > MeshtasticProtocol::MAX_TEXT_BYTES) {
+        QToolTip::showText(m_inputEdit->mapToGlobal(QPoint(0, m_inputEdit->height())),
+                           QString("Too long to send: %1 bytes, the limit is %2.")
+                               .arg(bytes).arg(MeshtasticProtocol::MAX_TEXT_BYTES),
+                           m_inputEdit);
+        return;
+    }
+
     const uint32_t replyId = m_replyToPacketId;
 
     if (m_currentType == ConversationType::Channel)
@@ -1166,6 +1209,12 @@ void MessagesWidget::updateMessageDisplay()
             case MessageStatus::MaxRetransmit:
             case MessageStatus::NoResponse:
             case MessageStatus::Failed:
+            case MessageStatus::DutyCycleLimit:
+            case MessageStatus::TooLarge:
+            case MessageStatus::NoChannel:
+            case MessageStatus::PkiNoKey:
+            case MessageStatus::PkiUnknownPubkey:
+            case MessageStatus::RateLimited:
                 statusStr = "!";  // Error indicator
                 break;
             }
@@ -1264,6 +1313,28 @@ void MessagesWidget::updateMessageDisplay()
                 break;
             case MessageStatus::Failed:
                 tooltip = "Status: Failed\nDelivery error occurred";
+                break;
+            case MessageStatus::DutyCycleLimit:
+                tooltip = "Status: Not sent\nThe region's duty-cycle limit is used up. "
+                          "Wait a few minutes and send again.";
+                break;
+            case MessageStatus::TooLarge:
+                tooltip = "Status: Not sent\nMessage too large for the radio";
+                break;
+            case MessageStatus::NoChannel:
+                tooltip = "Status: Not sent\nThis channel is not configured on the device";
+                break;
+            case MessageStatus::PkiNoKey:
+                tooltip = "Status: Not sent\nNo public key for the recipient yet. "
+                          "It arrives with their node info; try again once they have been heard.";
+                break;
+            case MessageStatus::PkiUnknownPubkey:
+                tooltip = "Status: Failed\nThe recipient does not have your public key yet, "
+                          "so it could not decrypt the message.";
+                break;
+            case MessageStatus::RateLimited:
+                tooltip = "Status: Not sent\nRate limited by the device to share airtime fairly. "
+                          "Try again shortly.";
                 break;
             }
         }

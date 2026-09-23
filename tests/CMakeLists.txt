@@ -5,8 +5,8 @@ find_package(OpenSSL REQUIRED)
 
 enable_testing()
 
-# CMAKE_BINARY_DIR is always the root build directory (e.g. build/).
-# Generated protobuf headers live in build/meshtastic/*.pb.h
+# Generated protobuf headers live in build/proto_gen/meshtastic/*.pb.h and
+# reach the tests through meshtastic_proto's PUBLIC include directories.
 # meshtastic_proto is a static library defined in the root CMakeLists.txt
 # that compiles PROTO_SRCS where add_custom_command lives.  Linking against
 # it is cleaner than listing ${PROTO_SRCS} as sources here, which would break
@@ -21,7 +21,6 @@ add_executable(test_protocol
 
 target_include_directories(test_protocol PRIVATE
     ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_BINARY_DIR}
 )
 
 target_link_libraries(test_protocol PRIVATE
@@ -45,7 +44,6 @@ add_executable(test_nodemanager
 
 target_include_directories(test_nodemanager PRIVATE
     ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_BINARY_DIR}
 )
 
 target_link_libraries(test_nodemanager PRIVATE
@@ -71,7 +69,6 @@ add_executable(test_analytics
 
 target_include_directories(test_analytics PRIVATE
     ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_BINARY_DIR}
 )
 
 target_link_libraries(test_analytics PRIVATE
@@ -97,7 +94,6 @@ add_executable(test_database
 
 target_include_directories(test_database PRIVATE
     ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_BINARY_DIR}
 )
 
 target_link_libraries(test_database PRIVATE
@@ -111,3 +107,21 @@ target_link_libraries(test_database PRIVATE
 )
 
 add_test(NAME DatabaseSql COMMAND test_database)
+
+# ---- test_tcp ----
+add_executable(test_tcp
+    test_tcp.cpp
+    ${CMAKE_SOURCE_DIR}/src/TcpConnection.cpp
+)
+
+target_include_directories(test_tcp PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+)
+
+target_link_libraries(test_tcp PRIVATE
+    Qt6::Core
+    Qt6::Network
+    Qt6::Test
+)
+
+add_test(NAME Tcp COMMAND test_tcp)

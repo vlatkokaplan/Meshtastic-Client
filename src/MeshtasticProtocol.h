@@ -107,7 +107,14 @@ public:
     QByteArray createPositionRequestPacket(uint32_t destNode, uint32_t myNode);
     QByteArray createTelemetryRequestPacket(uint32_t destNode, uint32_t myNode);
     QByteArray createNodeInfoRequestPacket(uint32_t destNode, uint32_t myNode);
-    QByteArray createTextMessagePacket(const QString &text, uint32_t destNode, uint32_t myNode, int channel = 0, uint32_t replyId = 0, uint32_t *outPacketId = nullptr);
+    // isReaction sets Data.emoji so other clients show a tapback on replyId
+    // rather than a reply containing an emoji.
+    QByteArray createTextMessagePacket(const QString &text, uint32_t destNode, uint32_t myNode, int channel = 0, uint32_t replyId = 0, uint32_t *outPacketId = nullptr, bool isReaction = false);
+
+    // Longest text we send, in UTF-8 bytes. The firmware's Data payload holds
+    // 233 bytes and drops anything larger without telling us; the official
+    // apps cap text at 200 to leave room, and so do we.
+    static constexpr int MAX_TEXT_BYTES = 200;
 
     // Create admin packets for config requests
     QByteArray createGetConfigRequestPacket(uint32_t destNode, uint32_t myNode, int configType);
@@ -133,12 +140,22 @@ public:
     QByteArray createDeviceConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config);
     QByteArray createPositionConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config);
     QByteArray createChannelConfigPacket(uint32_t destNode, uint32_t myNode, int channelIndex, const QVariantMap &config);
+    // Edits serial_enabled / debug_log_api_enabled on top of config["raw"].
+    // Returns an empty array when there is no raw config to start from.
+    QByteArray createSecurityConfigPacket(uint32_t destNode, uint32_t myNode, const QVariantMap &config);
+
+    // Group several set_* messages so the device saves (and reboots) once
+    QByteArray createBeginEditSettingsPacket(uint32_t destNode, uint32_t myNode);
+    QByteArray createCommitEditSettingsPacket(uint32_t destNode, uint32_t myNode);
 
     // Create admin packets for device actions
     QByteArray createRebootPacket(uint32_t destNode, uint32_t myNode, int delaySeconds = 5);
 
     // Create heartbeat packet to keep connection alive
     QByteArray createHeartbeatPacket();
+
+    // Unique id for an outgoing MeshPacket
+    uint32_t nextPacketId();
 
     // Decode helpers
     static QString nodeIdToString(uint32_t nodeId);
@@ -178,6 +195,9 @@ private:
     QVariantMap decodeUser(const QByteArray &data);
     QVariantMap decodeTelemetry(const QByteArray &data);
     QVariantMap decodeTextMessage(const QByteArray &data);
+
+    // Low 10 bits of outgoing packet ids; see nextPacketId()
+    uint32_t m_packetCounter = 0;
 
     // Session key for admin operations
     QByteArray m_sessionKey;

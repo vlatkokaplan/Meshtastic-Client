@@ -401,7 +401,16 @@ void NodeTableWidget::refresh()
         // Col 6: Hops - sorts on its own scale, 0 (direct) first, unknown last
         SortableTableItem *hopsItem = new SortableTableItem;
         hopsItem->setTextAlignment(Qt::AlignCenter);
-        if (node.hopsAway >= 0)
+        if (node.viaMqtt)
+        {
+            // Sorts after every RF distance: it wasn't heard over the air
+            hopsItem->setData(SortableTableItem::SortRole, 1000);
+            hopsItem->setText(QStringLiteral("MQTT"));
+            hopsItem->setToolTip(QStringLiteral("Last heard through an MQTT gateway, not over the air"));
+            hopsItem->setForeground(QBrush(Theme::palette().textMuted));
+            anyHops = true;
+        }
+        else if (node.hopsAway >= 0)
         {
             hopsItem->setData(SortableTableItem::SortRole, node.hopsAway);
             hopsItem->setText(node.hopsAway == 0 ? QStringLiteral("direct")

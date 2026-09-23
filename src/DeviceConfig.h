@@ -26,22 +26,24 @@ public:
         int bandwidth = 0;
         int spreadFactor = 0;
         int codingRate = 0;
+        // Serialized Config.LoRaConfig as last received from the device. A
+        // set_config replaces the whole section, so saves start from this and
+        // only overwrite the fields the UI edits.
+        QByteArray raw;
     };
 
     // Device config
     struct DeviceSettings {
         int role = 0;  // 0=Client, 1=ClientMute, 2=Router, 3=RouterClient, etc.
-        bool serialEnabled = true;
-        bool debugLogEnabled = false;
         int buttonGpio = 0;
         int buzzerGpio = 0;
         int rebroadcastMode = 0;
         int nodeInfoBroadcastSecs = 900;
         bool doubleTapAsButtonPress = false;
-        bool isManaged = false;
         bool disableTripleClick = false;
         QString tzdef;
         bool ledHeartbeatDisabled = false;
+        QByteArray raw;  // serialized Config.DeviceConfig, see LoRaConfig::raw
     };
 
     // Position config
@@ -56,6 +58,15 @@ public:
         int broadcastSmartMinDistance = 100;
         int broadcastSmartMinIntervalSecs = 30;
         int gpsMode = 0;  // 0=Disabled, 1=Enabled, 2=NotPresent
+        QByteArray raw;  // serialized Config.PositionConfig, see LoRaConfig::raw
+    };
+
+    // Security config. Also holds the node's keys, which the UI never
+    // touches: they only travel inside `raw`, so saves must start from it.
+    struct SecuritySettings {
+        bool serialEnabled = true;       // Stream API over serial
+        bool debugLogApiEnabled = false; // debug log lines to API clients
+        QByteArray raw;
     };
 
     // Channel config (up to 8 channels)
@@ -66,6 +77,12 @@ public:
         QByteArray psk;
         bool uplinkEnabled = false;
         bool downlinkEnabled = false;
+        // Not edited in the UI, but a set_channel replaces the whole channel,
+        // so these must be sent back as received. positionPrecision 0 turns
+        // position sharing off on the channel.
+        uint32_t id = 0;
+        uint32_t positionPrecision = 0;
+        bool isMuted = false;
     };
 
     explicit DeviceConfig(QObject *parent = nullptr);
@@ -74,6 +91,9 @@ public:
     LoRaConfig loraConfig() const { return m_lora; }
     DeviceSettings deviceConfig() const { return m_device; }
     PositionSettings positionConfig() const { return m_position; }
+    SecuritySettings securityConfig() const { return m_security; }
+    // True when the UI changed security settings since the device sent them
+    bool securityEdited() const;
     QList<ChannelConfig> channels() const { return m_channels; }
     ChannelConfig channel(int index) const;
 
@@ -81,40 +101,59 @@ public:
     void setLoRaConfig(const LoRaConfig &config);
     void setDeviceConfig(const DeviceSettings &config);
     void setPositionConfig(const PositionSettings &config);
+    void setSecurityConfig(const SecuritySettings &config);
     void setChannel(int index, const ChannelConfig &config);
 
     // Update from received packet fields
     void updateFromLoRaPacket(const QVariantMap &fields);
     void updateFromDevicePacket(const QVariantMap &fields);
     void updateFromPositionPacket(const QVariantMap &fields);
+    void updateFromSecurityPacket(const QVariantMap &fields);
     void updateFromChannelPacket(const QVariantMap &fields);
 
     // Check if config has been received
     bool hasLoRaConfig() const { return m_hasLora; }
     bool hasDeviceConfig() const { return m_hasDevice; }
     bool hasPositionConfig() const { return m_hasPosition; }
+    bool hasSecurityConfig() const { return m_hasSecurity; }
 
-    // Region names
-    static QStringList regionNames();
-    static QStringList modemPresetNames();
-    static QStringList deviceRoleNames();
-    static QStringList gpsModeNames();
+    // Enum choices, read from the protobuf descriptors so they always match
+    // the vendored upstream protos. `value` is the protobuf enum number, which
+    // is not the same as a list position once values are skipped.
+    struct EnumOption {
+        int value = 0;
+        QString name;       // enum identifier, e.g. "EU_868"
+        QString label;      // upstream display label, or the name if none
+        bool deprecated = false;
+    };
+    static QList<EnumOption> regionOptions();
+    static QList<EnumOption> modemPresetOptions();
+    static QList<EnumOption> deviceRoleOptions();
+    static QList<EnumOption> gpsModeOptions();
+
+    static QString regionName(int value);       // "EU_868"
+    static QString modemPresetName(int value);  // "Long Range - Fast"
+    static QString deviceRoleName(int value);   // "Client"
 
 signals:
     void loraConfigChanged();
     void deviceConfigChanged();
     void positionConfigChanged();
+    void securityConfigChanged();
     void channelConfigChanged(int index);
 
 private:
     LoRaConfig m_lora;
     DeviceSettings m_device;
     PositionSettings m_position;
+    SecuritySettings m_security;
+    SecuritySettings m_securityFromDevice;  // as last received, for securityEdited()
     QList<ChannelConfig> m_channels;
 
     bool m_hasLora = false;
     bool m_hasDevice = false;
     bool m_hasPosition = false;
+    bool m_hasSecurity = false;
 };
 
 #endif // DEVICECONFIG_H

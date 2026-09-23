@@ -38,7 +38,7 @@ Priority-ordered backlog. Last reviewed 2026-09-21.
 
 12. **Config tab: remote node config** — All config writes currently go to `myNode → myNode` (own device). Extend the UI to select a remote node and send `AdminMessage` addressed to it (requires session key exchange for encrypted meshes).
 
-13. **Waypoints** — Meshtastic supports waypoint packets (portnum 70 = `WAYPOINT_APP`). Add parsing in `MeshtasticProtocol` and display on the map with a distinct marker.
+13. **Waypoints** — Meshtastic supports waypoint packets (portnum 8 = `WAYPOINT_APP`). Add parsing in `MeshtasticProtocol` and display on the map with a distinct marker.
 
 14. **Export: add GPX format** — Node export currently supports CSV and JSON. GPX (with timestamps and elevation) would make it easy to import tracks into mapping tools.
 
@@ -97,6 +97,105 @@ minutes, to give a sense of scale.
 23. ~~**Replay / time travel**~~ — **DONE**: replay bar beneath the map, 60x-1800x, scrubbable. Originally: **Replay / time travel** — `packets` is timestamped, so mesh activity over a
     chosen window can be replayed on the map and topology view. Useful for
     explaining an outage after the fact.
+
+---
+
+## Code audit — 2026-09-23
+
+Checked against firmware `develop`, meshtastic/protobufs master (2026-09-21),
+the Python client and the client API docs. Build was clean and tests passed,
+but the vendored `proto/` was a hand-trimmed copy that disagreed with upstream.
+
+### Critical
+
+24. ~~**`set_channel` used the wrong field number**~~ — **FIXED 2026-09-23** (upstream protos). Channel `id` and `module_settings` (position precision, mute) now round-trip so a save no longer resets them. Was: — local `admin.proto` had
+    `set_channel = 32`; upstream 32 is `set_owner`, `set_channel` is 33. The
+    firmware decodes our Channel as a User, hits a wire-type mismatch and drops
+    it. Channel saves never took effect; the tab showed "Saved" regardless.
+
+25. ~~**Reboot button sent `reboot_ota_seconds`**~~ — **FIXED 2026-09-23** (upstream protos). Was: — local `reboot_seconds = 95`;
+    upstream 95 is `reboot_ota_seconds` (ESP32 reboots into the OTA loader on
+    firmware < 2.7.17, no-op on current). Real `reboot_seconds` is 97; local
+    96-98 were all shifted.
+
+26. ~~**BLE writes framed bytes to ToRadio**~~ — **FIXED 2026-09-23**: `sendData` strips and validates the stream header; notify path framed via `frameFromRadio()`. Untested on hardware. Was: — `BluetoothConnection::sendData`
+    wrote `94 C3 len` + protobuf; BLE ToRadio takes the bare protobuf, so every
+    write is malformed. The FromRadio notify path also emitted unframed bytes.
+
+27. ~~**Heartbeat malformed**~~ — **FIXED 2026-09-23** (empty `Heartbeat` message). Was: — local `int64 heartbeat = 7`; upstream it is a
+    `Heartbeat` message. Firmware logs "Ignore malformed toradio" every minute
+    and never sends the QueueStatus reply.
+
+28. ~~**Other proto wire mismatches**~~ — **FIXED 2026-09-23**: `proto/` is now a verbatim upstream copy (`scripts/update-protos.sh` to refresh), generated into `build/proto_gen`; 4 wire-format tests with hand-encoded bytes fail on the old protos. Was: — `ChannelSettings.id` / `module_settings`,
+    ModuleConfig 11/12 swapped, TelemetryConfig 6/7 swapped,
+    `NeighborInfo.last_sent_by_id`, `EnvironmentMetrics.wind_direction`,
+    `MyNodeInfo` field 12. Missing: `MeshPacket.pki_encrypted/public_key/
+    relay_node`, `User.public_key`, `Config.security`,
+    `FromRadio.clientNotification`, ~40 AdminMessage variants. Fix: use upstream
+    protobufs, plus a test decoding bytes captured from a real device.
+
+### High
+
+29. ~~**`set_config` wipes fields the UI does not send**~~ — **FIXED 2026-09-23**: each section's raw protobuf is kept from the device and saves are built on it. Tabs now start from the stored config instead of a fresh struct (Position was resetting `position_flags`, Radio was forcing `use_preset=true` and zeroing BW/SF/CR). Region/preset/role/GPS combos are built from the proto descriptors and store enum values, so presets 9-16, newer regions and roles show correctly and an unknown value is kept rather than replaced. Not done: `begin_edit_settings`/`commit_edit_settings` (each save is one section). Was: — a set replaces the
+    whole section. LoRa resets `ignore_mqtt`, `config_ok_to_mqtt`,
+    `sx126x_rx_boosted_gain`, `override_frequency`, `ignore_incoming`; Position
+    resets GPS pins; Channel resets `position_precision` to 0 (position sharing
+    off) and invents a new `id` each save. Keep the last-received protobuf and
+    change only edited fields; wrap multi-section saves in
+    `begin_edit_settings` / `commit_edit_settings`.
+
+30. ~~**Outgoing reactions have no `emoji` flag**~~ — **FIXED 2026-09-23**. Was: — `createTextMessagePacket`
+    never sets `decoded.emoji = 1`, so other apps show tapbacks as replies.
+
+31. ~~**No message length limit**~~ — **FIXED 2026-09-23**: 200-byte cap (`MeshtasticProtocol::MAX_TEXT_BYTES`), byte counter by the input, text kept in the box when too long. Was: — payloads over 233 bytes fail to decode on the
+    device and sit pending forever. Official apps cap at 200 UTF-8 bytes.
+
+32. ~~**Preset channel names incomplete**~~ — **FIXED 2026-09-23**: full firmware table, "Custom" when `use_preset` is off, and every unnamed channel (not only index 0) takes the preset name, as in `Channels::getName`. Was: — `modemPresetChannelName` misses
+    VeryLongSlow (2) and presets 9-16, and ignores `use_preset=false`
+    ("Custom"). Wrong hash → brute force or wrong channel.
+
+### Medium
+
+33. ~~**Traceroute last-hop SNR appended twice**~~ — **FIXED 2026-09-23**: `rx_snr` is only appended when an old-firmware response is missing that entry; the simulator now appends it like firmware. Was: — firmware already appends it to
+    `snr_back` (`TraceRouteModule::appendMyIDandSNR`, SNRonly); we append
+    `rx_snr` again.
+
+34. ~~**Packet IDs from the millisecond clock**~~ — **FIXED 2026-09-23**: `nextPacketId()` = random 22 bits + 10-bit counter (Python client scheme); config nonce is random and avoids 0 / 69420 / 69421. Was: — predictable, and two sends in
+    one ms collide and get deduplicated. Use random + counter like the Python
+    client. Same for `want_config_id`.
+
+35. ~~**Brute-force decrypt on UI thread, including PKI DMs**~~ — **FIXED 2026-09-23**: PKI DMs skipped and labelled in the packet list. Threading not done: measured ~0.6 ms per undecryptable packet, well under 1% of a thread at real mesh rates. Was: — skip
+    `pki_encrypted`; use the channel hash to narrow keys and infer the name.
+
+36. ~~**Routing errors collapse to "Failed"**~~ — **FIXED 2026-09-23**: DutyCycleLimit, TooLarge, NoChannel, PkiNoKey, PkiUnknownPubkey, RateLimited statuses (appended to the enum, DB ints unchanged) with tooltips. Also decodes `ClientNotification` and shows it in the status bar. Was: — surface DUTY_CYCLE_LIMIT,
+    TOO_LARGE, PKI_UNKNOWN_PUBKEY, RATE_LIMIT_EXCEEDED.
+
+37. ~~**No serial wake-up bytes**~~ — **FIXED 2026-09-23**: 32 × `0xC3` on serial/TCP connect. Was: — the Python client sends 32 × `0xC3` before the
+    first packet to wake the device and resync its parser.
+
+### Low
+
+38. ~~**FIXED 2026-09-23**~~: telemetry decoded by reflection over set fields (presence, not value); all variants incl. AirQuality / LocalStats / Health / Host; `NodeManager` takes each key only from its own variant (environment voltage no longer overwrites battery voltage). Was: Telemetry `!= 0` checks drop real zeros (0 °C, 0 %); use `has_*()`.
+    LocalStats / Health / Host / AirQuality telemetry not decoded.
+39. ~~**FIXED 2026-09-23**~~: hops, via-MQTT (shown as "MQTT" in the Hops column; MQTT packets no longer update SNR/RSSI/hops) and DeviceMetrics snapshot applied at connect; hops left unknown when `hop_start` is 0. `viaMqtt` is not persisted to the DB. Was: Startup NodeInfo `hops_away`, `via_mqtt`, `device_metrics`, `channel` ignored.
+40. ~~**FIXED 2026-09-23**~~: table follows the Python client's supported_device.py, plus CH343 and vendor wildcards for Adafruit/Seeed nRF52 and RP2040. Was: `KNOWN_DEVICES` missing CH343 (1A86:55D3), RP2040 (2E8A:*), RAK/Seeed nRF52.
+41. ~~**FIXED 2026-09-23**~~: backoff 3→6→12→24→30 s; OS keepalive; watchdog drops a TCP link silent for 3 heartbeats; reconnect state is set before `disconnected()` is emitted, so a drop with no socket error no longer clears nodes. New `test_tcp` against a local server. Was: TCP: no reconnect backoff; no dead-link detection (use QueueStatus reply to
+    heartbeat once 27 is fixed).
+42. ~~**FIXED 2026-09-23**~~ (item 13 corrected). Was: Item 13 above says waypoint is portnum 70 — it is 8 (70 is TRACEROUTE).
+43. ~~**Empty PSK means no encryption**~~ — **FIXED 2026-09-23**: confirmation (default Cancel) before saving an empty or 0x00 key. Was: — now that channel saves reach the
+    device (24), leaving the PSK field blank saves an unencrypted channel.
+    Confirm with the user before saving an empty key.
+44. ~~**Deprecated DeviceConfig fields in the UI**~~ — **FIXED 2026-09-23**: "Enable Serial API" and "Send Debug Logs to Clients" edit `SecurityConfig` on top of the device's raw config (keys untouched); sent only when changed, inside `begin_edit_settings`/`commit_edit_settings`, with a warning before disabling serial while connected over serial. Deprecated `device.serial_enabled` / `is_managed` now only round-trip. Was: — "Enable Serial Output"
+    writes `device.serial_enabled` and `is_managed`, both moved to
+    `SecurityConfig` upstream; firmware ignores them. Removed the equally dead
+    "Enable Debug Logging" checkbox (field 3 is reserved upstream). Move these
+    to a Security tab - but a SecurityConfig set must round-trip the keys.
+45. **Factory Reset button does nothing** — `DeviceConfigTab::factoryResetRequested`
+    is emitted but never connected. Either wire it to `factory_reset_config`
+    (99) / `factory_reset_device` (94) or remove the button.
+46. **No UI for custom modem settings** — with `use_preset` off the Radio tab
+    now greys out the preset and keeps the device's BW/SF/CR, but there is no
+    way to view or edit them, or to switch between preset and custom.
 
 ---
 

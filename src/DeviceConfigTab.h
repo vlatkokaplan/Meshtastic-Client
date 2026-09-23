@@ -39,8 +39,8 @@ private:
     // UI elements
     QComboBox *m_roleCombo;
     QSpinBox *m_nodeInfoIntervalSpin;
-    QCheckBox *m_serialEnabledCheck;
-    QCheckBox *m_debugLogCheck;
+    QCheckBox *m_serialEnabledCheck;    // SecurityConfig.serial_enabled
+    QCheckBox *m_debugLogApiCheck;      // SecurityConfig.debug_log_api_enabled
     QCheckBox *m_ledHeartbeatCheck;
     QCheckBox *m_doubleTapCheck;
     QCheckBox *m_disableTripleClickCheck;

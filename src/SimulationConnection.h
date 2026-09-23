@@ -54,6 +54,7 @@ private:
     QByteArray buildLoRaConfig();
     QByteArray buildDeviceConfig();
     QByteArray buildPositionConfig();
+    QByteArray buildSecurityConfig();
     QByteArray buildPrimaryChannel();
     QByteArray buildConfigCompleteId(uint32_t configId);
     QByteArray buildNeighborInfo(uint32_t fromNode,

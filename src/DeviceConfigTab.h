@@ -25,7 +25,8 @@ signals:
     void configChanged();
     void saveRequested();
     void rebootRequested();
-    void factoryResetRequested();
+    // full: also clear Bluetooth pairings (factory_reset_device, not _config)
+    void factoryResetRequested(bool full);
 
 private slots:
     void onConfigReceived();

@@ -131,6 +131,21 @@ public:
     static QList<EnumOption> deviceRoleOptions();
     static QList<EnumOption> gpsModeOptions();
 
+    // Bandwidth as stored in LoRaConfig.bandwidth: kHz rounded, except the
+    // firmware's codes for fractional widths (8 = 7.8 kHz, 31 = 31.25, ...).
+    // Matches bwCodeToKHz in the firmware's RadioInterface.
+    struct BandwidthOption {
+        int code;
+        QString label;
+        bool wideLoraOnly;  // 2.4 GHz (LORA_24) only
+    };
+    static QList<BandwidthOption> bandwidthOptions();
+
+    // The bandwidth code, spreading factor and coding rate (4/cr) a preset
+    // uses, as modemPresetToParams in the firmware. wideLora for LORA_24.
+    static void presetModemParams(int preset, bool wideLora, int &bwCode, int &sf, int &cr);
+    static constexpr int REGION_LORA_24 = 13;
+
     static QString regionName(int value);       // "EU_868"
     static QString modemPresetName(int value);  // "Long Range - Fast"
     static QString deviceRoleName(int value);   // "Client"

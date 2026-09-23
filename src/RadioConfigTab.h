@@ -35,6 +35,11 @@ private:
     // UI elements
     QComboBox *m_regionCombo;
     QComboBox *m_presetCombo;
+    QCheckBox *m_usePresetCheck;
+    QComboBox *m_bandwidthCombo;   // data: firmware bandwidth code
+    QSpinBox *m_spreadFactorSpin;
+    QComboBox *m_codingRateCombo;  // data: 5-8, i.e. 4/5 - 4/8
+    QLabel *m_customWarning;
     QSpinBox *m_hopLimitSpin;
     QSpinBox *m_txPowerSpin;
     QCheckBox *m_txEnabledCheck;
@@ -46,6 +51,9 @@ private:
 
     void setupUI();
     void updateUIFromConfig();
+    void onUsePresetToggled(bool usePreset);
+    void fillCustomFromPreset();
+    void selectBandwidth(int code);
 };
 
 #endif // RADIOCONFIGTAB_H

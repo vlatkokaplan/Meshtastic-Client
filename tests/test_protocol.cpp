@@ -691,6 +691,45 @@ private slots:
         QCOMPARE(metrics["batteryLevel"].toInt(), 0);
     }
 
+    void factory_reset_uses_fields_99_and_94()
+    {
+        // factory_reset_config = 99, varint: tag 0x98 0x06
+        // factory_reset_device = 94, varint: tag 0xf0 0x05
+        MeshtasticProtocol proto;
+        QCOMPARE(adminPayloadOf(proto.createFactoryResetPacket(1, 1, false)).toHex(), QByteArray("980601"));
+        QCOMPARE(adminPayloadOf(proto.createFactoryResetPacket(1, 1, true)).toHex(), QByteArray("f00501"));
+    }
+
+    void custom_modem_settings_are_sent()
+    {
+        QVariantMap edited;
+        edited["usePreset"] = false;
+        edited["bandwidth"] = 62;     // 62.5 kHz
+        edited["spreadFactor"] = 8;
+        edited["codingRate"] = 6;
+
+        MeshtasticProtocol proto;
+        meshtastic::AdminMessage admin;
+        const QByteArray payload = adminPayloadOf(proto.createLoRaConfigPacket(1, 1, edited));
+        QVERIFY(admin.ParseFromArray(payload.constData(), payload.size()));
+        const auto &lora = admin.set_config().lora();
+        QVERIFY(!lora.use_preset());
+        QCOMPARE(lora.bandwidth(), 62u);
+        QCOMPARE(lora.spread_factor(), 8u);
+        QCOMPARE(lora.coding_rate(), 6u);
+    }
+
+    void preset_params_match_firmware()
+    {
+        int bw = 0, sf = 0, cr = 0;
+        DeviceConfig::presetModemParams(0, false, bw, sf, cr);   // LONG_FAST
+        QCOMPARE(bw, 250); QCOMPARE(sf, 11); QCOMPARE(cr, 5);
+        DeviceConfig::presetModemParams(0, true, bw, sf, cr);    // LONG_FAST on 2.4 GHz
+        QCOMPARE(bw, 800);
+        DeviceConfig::presetModemParams(12, false, bw, sf, cr);  // NARROW_FAST
+        QCOMPARE(bw, 62); QCOMPARE(sf, 7); QCOMPARE(cr, 6);
+    }
+
     // ---- Wire format against upstream meshtastic/protobufs -------------
     // Expected bytes are hand-encoded from the upstream field numbers and
     // wire types, not produced by our own generated code, so an edit to the

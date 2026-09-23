@@ -150,6 +150,9 @@ public:
 
     // Create admin packets for device actions
     QByteArray createRebootPacket(uint32_t destNode, uint32_t myNode, int delaySeconds = 5);
+    // full = factory_reset_device (also clears BLE bonds); otherwise
+    // factory_reset_config. Both erase settings, node DB and keys.
+    QByteArray createFactoryResetPacket(uint32_t destNode, uint32_t myNode, bool full);
 
     // Create heartbeat packet to keep connection alive
     QByteArray createHeartbeatPacket();

@@ -1313,6 +1313,13 @@ QByteArray MeshtasticProtocol::createLoRaConfigPacket(uint32_t destNode, uint32_
     lora->set_channel_num(config.value("channelNum", 0).toUInt());
     lora->set_override_duty_cycle(config.value("overrideDutyCycle", false).toBool());
     lora->set_frequency_offset(config.value("frequencyOffset", 0.0).toFloat());
+    // Custom modem settings; the firmware ignores them while use_preset is on
+    if (config.contains("bandwidth"))
+        lora->set_bandwidth(config.value("bandwidth").toUInt());
+    if (config.contains("spreadFactor"))
+        lora->set_spread_factor(config.value("spreadFactor").toUInt());
+    if (config.contains("codingRate"))
+        lora->set_coding_rate(config.value("codingRate").toUInt());
 
     return createAdminFrame(nextPacketId(), destNode, myNode, admin.SerializeAsString());
 }
@@ -1446,6 +1453,17 @@ QByteArray MeshtasticProtocol::createRebootPacket(uint32_t destNode, uint32_t my
 {
     meshtastic::AdminMessage admin;
     admin.set_reboot_seconds(delaySeconds);
+
+    return createAdminFrame(nextPacketId(), destNode, myNode, admin.SerializeAsString());
+}
+
+QByteArray MeshtasticProtocol::createFactoryResetPacket(uint32_t destNode, uint32_t myNode, bool full)
+{
+    meshtastic::AdminMessage admin;
+    if (full)
+        admin.set_factory_reset_device(1);
+    else
+        admin.set_factory_reset_config(1);
 
     return createAdminFrame(nextPacketId(), destNode, myNode, admin.SerializeAsString());
 }

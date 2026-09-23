@@ -51,7 +51,9 @@ public:
 
 private slots:
     void disconnect();
-    void rebootDevice();
+    void rebootDevice();                // toolbar: asks, then sendReboot()
+    void sendReboot();                  // Device tab: already confirmed there
+    void factoryResetDevice(bool full);
     void onConnected();
     void onDisconnected();
     void onDataReceived(const QByteArray &data);

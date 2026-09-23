@@ -31,6 +31,8 @@ signals:
     void saveDeviceConfig();
     void savePositionConfig();
     void saveChannelConfig(int channelIndex);
+    void rebootRequested();            // already confirmed by the tab
+    void factoryResetRequested(bool full);
 
 private:
     QTabWidget *m_tabWidget;

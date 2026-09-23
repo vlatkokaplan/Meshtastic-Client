@@ -223,18 +223,25 @@ void DeviceConfigTab::onRebootClicked()
 
 void DeviceConfigTab::onFactoryResetClicked()
 {
-    QMessageBox::StandardButton reply = QMessageBox::warning(
-        this, "Factory Reset",
-        "WARNING: This will erase ALL settings!\n\n"
-        "The device will be reset to factory defaults.\n"
-        "This action cannot be undone.\n\n"
-        "Are you sure you want to continue?",
-        QMessageBox::Yes | QMessageBox::No,
-        QMessageBox::No);
+    QMessageBox box(QMessageBox::Warning, "Factory Reset",
+                    "Reset the device to factory defaults?", QMessageBox::NoButton, this);
+    box.setInformativeText(
+        "All settings, channels and the node list are erased, and the device "
+        "reboots. Its encryption keys are regenerated too, so other nodes will "
+        "see it as a new node and earlier direct messages cannot be decrypted.\n\n"
+        "This cannot be undone.");
+    QPushButton *settings = box.addButton("Reset Settings", QMessageBox::DestructiveRole);
+    settings->setToolTip("Keep Bluetooth pairings with phones");
+    QPushButton *everything = box.addButton("Reset Everything", QMessageBox::DestructiveRole);
+    everything->setToolTip("Also forget Bluetooth pairings");
+    QPushButton *cancel = box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(cancel);
+    box.exec();
 
-    if (reply == QMessageBox::Yes) {
-        m_statusLabel->setText("Factory reset in progress...");
-        m_statusLabel->setStyleSheet("color: red;");
-        emit factoryResetRequested();
-    }
+    if (box.clickedButton() != settings && box.clickedButton() != everything)
+        return;
+
+    m_statusLabel->setText("Factory reset sent...");
+    m_statusLabel->setStyleSheet(QString("color: %1;").arg(Theme::palette().danger.name()));
+    emit factoryResetRequested(box.clickedButton() == everything);
 }

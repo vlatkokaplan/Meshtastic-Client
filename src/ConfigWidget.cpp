@@ -66,6 +66,10 @@ void ConfigWidget::setupUI()
             this, &ConfigWidget::savePositionConfig);
     connect(m_channelsConfigTab, &ChannelsConfigTab::saveRequested,
             this, &ConfigWidget::saveChannelConfig);
+    connect(m_deviceConfigTab, &DeviceConfigTab::rebootRequested,
+            this, &ConfigWidget::rebootRequested);
+    connect(m_deviceConfigTab, &DeviceConfigTab::factoryResetRequested,
+            this, &ConfigWidget::factoryResetRequested);
 
     layout->addWidget(m_tabWidget);
 }

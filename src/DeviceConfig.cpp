@@ -212,3 +212,46 @@ QList<DeviceConfig::EnumOption> DeviceConfig::gpsModeOptions()
 QString DeviceConfig::regionName(int value) { return labelFor(regionOptions(), value, true); }
 QString DeviceConfig::modemPresetName(int value) { return labelFor(modemPresetOptions(), value, false); }
 QString DeviceConfig::deviceRoleName(int value) { return labelFor(deviceRoleOptions(), value, false); }
+
+QList<DeviceConfig::BandwidthOption> DeviceConfig::bandwidthOptions()
+{
+    return {
+        {8, "7.8 kHz", false},
+        {10, "10.4 kHz", false},
+        {16, "15.6 kHz", false},
+        {21, "20.8 kHz", false},
+        {31, "31.25 kHz", false},
+        {42, "41.7 kHz", false},
+        {62, "62.5 kHz", false},
+        {125, "125 kHz", false},
+        {250, "250 kHz", false},
+        {500, "500 kHz", false},
+        {200, "203.125 kHz (2.4 GHz)", true},
+        {400, "406.25 kHz (2.4 GHz)", true},
+        {800, "812.5 kHz (2.4 GHz)", true},
+        {1600, "1625 kHz (2.4 GHz)", true},
+    };
+}
+
+void DeviceConfig::presetModemParams(int preset, bool wideLora, int &bwCode, int &sf, int &cr)
+{
+    // Firmware RadioInterface::modemPresetToParams, as bandwidth codes
+    switch (preset) {
+    case 8:  bwCode = wideLora ? 1600 : 500; sf = 7;  cr = 5; break;  // SHORT_TURBO
+    case 6:  bwCode = wideLora ? 800 : 250;  sf = 7;  cr = 5; break;  // SHORT_FAST
+    case 5:  bwCode = wideLora ? 800 : 250;  sf = 8;  cr = 5; break;  // SHORT_SLOW
+    case 4:  bwCode = wideLora ? 800 : 250;  sf = 9;  cr = 5; break;  // MEDIUM_FAST
+    case 3:  bwCode = wideLora ? 800 : 250;  sf = 10; cr = 5; break;  // MEDIUM_SLOW
+    case 16: bwCode = wideLora ? 1600 : 500; sf = 9;  cr = 5; break;  // MEDIUM_TURBO
+    case 9:  bwCode = wideLora ? 1600 : 500; sf = 11; cr = 8; break;  // LONG_TURBO
+    case 7:  bwCode = wideLora ? 400 : 125;  sf = 11; cr = 8; break;  // LONG_MODERATE
+    case 1:  bwCode = wideLora ? 400 : 125;  sf = 12; cr = 8; break;  // LONG_SLOW
+    case 10: bwCode = 125; sf = 9;  cr = 5; break;                    // LITE_FAST
+    case 11: bwCode = 125; sf = 10; cr = 5; break;                    // LITE_SLOW
+    case 12: bwCode = 62;  sf = 7;  cr = 6; break;                    // NARROW_FAST
+    case 13: bwCode = 62;  sf = 8;  cr = 6; break;                    // NARROW_SLOW
+    case 14: bwCode = 16;  sf = 7;  cr = 5; break;                    // TINY_FAST
+    case 15: bwCode = 16;  sf = 8;  cr = 6; break;                    // TINY_SLOW
+    default: bwCode = wideLora ? 800 : 250;  sf = 11; cr = 5; break;  // LONG_FAST
+    }
+}

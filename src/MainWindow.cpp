@@ -522,6 +522,10 @@ void MainWindow::setupConfigTab()
             this, &MainWindow::onSaveDeviceConfig);
     connect(m_configWidget, &ConfigWidget::savePositionConfig,
             this, &MainWindow::onSavePositionConfig);
+    connect(m_configWidget, &ConfigWidget::rebootRequested,
+            this, &MainWindow::sendReboot);
+    connect(m_configWidget, &ConfigWidget::factoryResetRequested,
+            this, &MainWindow::factoryResetDevice);
     connect(m_configWidget, &ConfigWidget::saveChannelConfig,
             this, &MainWindow::onSaveChannelConfig);
 
@@ -625,11 +629,47 @@ void MainWindow::rebootDevice()
     if (reply != QMessageBox::Yes)
         return;
 
-    // Send reboot command (5 second delay)
-    QByteArray packet = m_protocol->createRebootPacket(myNode, myNode, 5);
-    sendToDevice(packet);
+    sendReboot();
+}
 
+void MainWindow::sendReboot()
+{
+    const uint32_t myNode = m_nodeManager->myNodeNum();
+    if (!isDeviceConnected() || myNode == 0)
+    {
+        statusBar()->showMessage("Not connected", 3000);
+        return;
+    }
+
+    // Send reboot command (5 second delay)
+    if (!sendToDevice(m_protocol->createRebootPacket(myNode, myNode, 5)))
+    {
+        statusBar()->showMessage("Failed to send reboot - check the connection", 5000);
+        return;
+    }
     statusBar()->showMessage("Reboot command sent. Device will restart in 5 seconds...", 5000);
+}
+
+void MainWindow::factoryResetDevice(bool full)
+{
+    const uint32_t myNode = m_nodeManager->myNodeNum();
+    if (!isDeviceConnected() || myNode == 0)
+    {
+        statusBar()->showMessage("Not connected", 3000);
+        return;
+    }
+
+    if (!sendToDevice(m_protocol->createFactoryResetPacket(myNode, myNode, full)))
+    {
+        statusBar()->showMessage("Failed to send factory reset - check the connection", 5000);
+        return;
+    }
+    // The device reboots with a new identity (fresh keys, possibly a new node
+    // number), so its next MyInfo opens a different database; nothing here
+    // needs clearing by hand.
+    statusBar()->showMessage(full
+        ? "Full factory reset sent. The device will reboot with default settings."
+        : "Factory reset sent. The device will reboot with default settings.", 10000);
 }
 
 void MainWindow::onConnected()
@@ -2187,6 +2227,9 @@ void MainWindow::onSaveLoRaConfig()
     config["channelNum"] = lora.channelNum;
     config["overrideDutyCycle"] = lora.overrideDutyCycle;
     config["frequencyOffset"] = lora.frequencyOffset;
+    config["bandwidth"] = lora.bandwidth;
+    config["spreadFactor"] = lora.spreadFactor;
+    config["codingRate"] = lora.codingRate;
     config["raw"] = lora.raw;
 
     uint32_t myNode = m_nodeManager->myNodeNum();

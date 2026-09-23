@@ -190,10 +190,10 @@ but the vendored `proto/` was a hand-trimmed copy that disagreed with upstream.
     `SecurityConfig` upstream; firmware ignores them. Removed the equally dead
     "Enable Debug Logging" checkbox (field 3 is reserved upstream). Move these
     to a Security tab - but a SecurityConfig set must round-trip the keys.
-45. **Factory Reset button does nothing** — `DeviceConfigTab::factoryResetRequested`
+45. ~~**Factory Reset button does nothing**~~ — **FIXED 2026-09-23**: wired to `factory_reset_config` (99, keeps BLE pairings) or `factory_reset_device` (94, clears them), chosen in the confirmation, which also warns that the keys are regenerated. The Device tab's Reboot button was dead the same way and is wired too. Was: — `DeviceConfigTab::factoryResetRequested`
     is emitted but never connected. Either wire it to `factory_reset_config`
     (99) / `factory_reset_device` (94) or remove the button.
-46. **No UI for custom modem settings** — with `use_preset` off the Radio tab
+46. ~~**No UI for custom modem settings**~~ — **FIXED 2026-09-23**: "Use modem preset" toggle with bandwidth (firmware bandwidth codes), spreading factor 5-12 and coding rate 4/5-4/8; while on a preset they show that preset's values (firmware `modemPresetToParams`), and a warning explains custom settings only reach identically configured nodes. Was: — with `use_preset` off the Radio tab
     now greys out the preset and keeps the device's BW/SF/CR, but there is no
     way to view or edit them, or to switch between preset and custom.
 

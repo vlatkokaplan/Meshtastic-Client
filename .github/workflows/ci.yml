@@ -21,7 +21,8 @@ jobs:
             qt6-base-dev qt6-serialport-dev qt6-webengine-dev \
             qt6-connectivity-dev \
             libprotobuf-dev protobuf-compiler \
-            libssl-dev libqrencode-dev
+            libssl-dev libqrencode-dev \
+            libqt6sql6-sqlite
 
       - name: Configure
         run: |
@@ -81,7 +82,8 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="C:\qrencode-install" `
             -DBUILD_SHARED_LIBS=OFF `
             -DWITH_TOOLS=OFF `
-            -DWITH_TESTS=OFF
+            -DWITH_TESTS=OFF `
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build C:\qrencode-build --config Release
           cmake --install C:\qrencode-build --config Release
 

@@ -125,3 +125,8 @@ target_link_libraries(test_tcp PRIVATE
 )
 
 add_test(NAME Tcp COMMAND test_tcp)
+
+# QTEST_MAIN builds a QApplication when a test links Qt Widgets
+# (test_database does), which aborts without a display - as on CI runners.
+set_tests_properties(Protocol NodeManager Analytics DatabaseSql Tcp
+    PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

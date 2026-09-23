@@ -64,10 +64,12 @@ jobs:
       - name: Install Qt6
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.5.3'
+          # 6.8 LTS: 6.5's headers use stdext::make_checked_array_iterator
+          # unconditionally, which the VS 2026 toolset on the runner removed.
+          version: '6.8.3'
           host: 'windows'
           target: 'desktop'
-          arch: 'win64_msvc2019_64'
+          arch: 'win64_msvc2022_64'
           modules: 'qtserialport qtwebchannel qtwebengine qtpositioning qtconnectivity'
 
       - name: Install vcpkg dependencies
